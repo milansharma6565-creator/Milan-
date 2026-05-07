@@ -54,8 +54,15 @@ export default function App() {
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login failed:', error);
+      if (error.code === 'auth/unauthorized-domain') {
+        alert('This domain is not authorized in Firebase Console. Please add it to "Authentication > Settings > Authorized Domains".');
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        // Just ignore
+      } else {
+        alert(`Login failed: ${error.message}`);
+      }
     }
   };
 
