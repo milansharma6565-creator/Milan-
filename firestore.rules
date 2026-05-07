@@ -1,0 +1,165 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ---------------------------------------------------------
+    // GLOBAL HELPERS
+    // ---------------------------------------------------------
+    function isSignedIn() { 
+      return request.auth != null && request.auth.token.email_verified == true; 
+    }
+    function isAdmin() { 
+      return isSignedIn() && (
+        request.auth.token.email == 'rajhanssikar@gmail.com' || 
+        request.auth.token.email == 'milan.sharma6565@gmail.com'
+      ); 
+    }
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // ---------------------------------------------------------
+    // DEFAULT DENY
+    // ---------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // VALIDATION HELPERS
+    // ---------------------------------------------------------
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['name', 'mobile']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.mobile is string && data.mobile.size() >= 10 && data.mobile.size() <= 15 &&
+             (data.get('pendingAmount', 0) is number) &&
+             (data.get('lastRate', 0) is number) &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
+    function isValidBill(data) {
+      return data.keys().hasAll(['billNumber', 'customerId', 'grandTotal', 'status']) &&
+             data.billNumber is string &&
+             data.customerId is string && isValidId(data.customerId) &&
+             data.grandTotal is number &&
+             data.status in ['Delivered', 'Pending', 'Cancelled', 'Printed'] &&
+             (data.get('paymentMode', 'Pending') in ['Cash', 'UPI', 'Bank Transfer', 'Pending', 'Split']) &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
+    function isValidDriver(data) {
+      return data.keys().hasAll(['name', 'mobile']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.mobile is string && data.mobile.size() >= 10 && data.mobile.size() <= 15;
+    }
+
+    function isValidTractor(data) {
+      return data.keys().hasAll(['name', 'vehicleNumber']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.vehicleNumber is string && data.vehicleNumber.size() > 0;
+    }
+
+    function isValidLog(data) {
+      return data.keys().hasAll(['tractorId', 'amount', 'date']) &&
+             data.tractorId is string && isValidId(data.tractorId) &&
+             data.amount is number && data.amount >= 0 &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
+    function isValidLedger(data) {
+      return data.keys().hasAll(['amount', 'type', 'category', 'date']) &&
+             data.amount is number && data.amount >= 0 &&
+             data.type in ['Income', 'Expense'] &&
+             (data.get('paymentMode', 'Cash') in ['Cash', 'UPI', 'Bank Transfer']) &&
+             data.date is string &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
+    function isValidDriverLocation(data) {
+      return data.keys().hasAll(['driverId', 'driverName', 'latitude', 'longitude', 'isActive']) &&
+             data.driverId is string && isValidId(data.driverId) &&
+             data.driverName is string &&
+             data.latitude is number && data.longitude is number &&
+             data.isActive is bool &&
+             (data.get('lastUpdated', request.time) == request.time);
+    }
+
+    // ---------------------------------------------------------
+    // COLLECTIONS
+    // ---------------------------------------------------------
+
+    match /driverLocations/{driverId} {
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create, update: if isValidId(driverId) && isValidDriverLocation(incoming()) &&
+                            exists(/databases/$(database)/documents/drivers/$(driverId));
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow get: if isSignedIn() && isValidId(customerId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(customerId) && isValidCustomer(incoming());
+      allow update: if isAdmin() && isValidId(customerId) && (
+        (incoming().diff(existing()).affectedKeys().hasOnly(['pendingAmount', 'lastRate', 'secondaryMobiles', 'address', 'updatedAt']) && 
+         incoming().get('updatedAt', request.time) == request.time) ||
+        (incoming().diff(existing()).affectedKeys().hasAny(['name', 'mobile', 'address', 'alternateMobile', 'vehicleNumber', 'notes', 'updatedAt']) &&
+         incoming().get('updatedAt', request.time) == request.time)
+      );
+      allow delete: if isAdmin() && isValidId(customerId);
+    }
+
+    match /bills/{billId} {
+      allow get: if isSignedIn() && isValidId(billId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(billId) && isValidBill(incoming()) && 
+                    exists(/databases/$(database)/documents/customers/$(incoming().customerId));
+      allow update: if isAdmin() && isValidId(billId) && (
+        (incoming().diff(existing()).affectedKeys().hasAny(['status', 'driverName', 'driverMobile', 'tractorId', 'paymentMode', 'isSettled', 'updatedAt']) &&
+         incoming().get('updatedAt', request.time) == request.time &&
+         incoming().billNumber == existing().billNumber && 
+         incoming().customerId == existing().customerId)
+      );
+      allow delete: if isAdmin() && isValidId(billId);
+    }
+
+    match /drivers/{driverId} {
+      allow get: if isValidId(driverId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(driverId) && isValidDriver(incoming());
+      allow update: if isAdmin() && isValidId(driverId) && isValidDriver(incoming());
+      allow delete: if isAdmin() && isValidId(driverId);
+    }
+
+    match /tractors/{tractorId} {
+      allow get: if isSignedIn() && isValidId(tractorId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(tractorId) && isValidTractor(incoming());
+      allow update: if isAdmin() && isValidId(tractorId) && isValidTractor(incoming());
+      allow delete: if isAdmin() && isValidId(tractorId);
+    }
+
+    match /dieselLogs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(logId) && isValidLog(incoming());
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+
+    match /maintenanceLogs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(logId) && isValidLog(incoming());
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+
+    match /ledger/{entryId} {
+      allow get: if isSignedIn() && isValidId(entryId);
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidId(entryId) && isValidLedger(incoming());
+      allow update: if false; 
+      allow delete: if isAdmin() && isValidId(entryId);
+    }
+  }
+}

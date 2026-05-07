@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import React, { useState, useEffect } from 'react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc } from 'firebase/firestore';
+import { Tractor, DieselLog, MaintenanceLog, Bill } from '../types';
 import { 
   Plus, 
   Truck, 
@@ -13,13 +14,16 @@ import {
   Wrench,
   AlertCircle,
   Download,
-  FileText
+  FileText,
+  Trash2,
+  Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { ConfirmationModal } from './ConfirmationModal';
 
 export function TractorDiesel() {
   const [activeView, setActiveView] = useState<'diesel' | 'maintenance'>('diesel');
@@ -27,24 +31,56 @@ export function TractorDiesel() {
   const [isAddingMaintenance, setIsAddingMaintenance] = useState(false);
   const [showTractorModal, setShowTractorModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'tractor' | 'diesel' | 'maint', id: string, name?: string } | null>(null);
   
+  const [tractors, setTractors] = useState<Tractor[]>([]);
+  const [dieselLogs, setDieselLogs] = useState<DieselLog[]>([]);
+  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
+  const [bills, setBills] = useState<Bill[]>([]);
+
+  useEffect(() => {
+    const unsubTractors = onSnapshot(collection(db, 'tractors'), 
+      (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tractor))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'tractors')
+    );
+    const unsubDiesel = onSnapshot(query(collection(db, 'dieselLogs'), orderBy('date', 'desc')), 
+      (snapshot) => setDieselLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DieselLog))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'dieselLogs')
+    );
+    const unsubMaint = onSnapshot(query(collection(db, 'maintenanceLogs'), orderBy('date', 'desc')), 
+      (snapshot) => setMaintenanceLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MaintenanceLog))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'maintenanceLogs')
+    );
+    const unsubBills = onSnapshot(collection(db, 'bills'), 
+      (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'bills')
+    );
+
+    return () => {
+      unsubTractors();
+      unsubDiesel();
+      unsubMaint();
+      unsubBills();
+    };
+  }, []);
+
   const [reportConfig, setReportConfig] = useState({
     period: 'monthly' as 'daily' | 'weekly' | 'monthly',
     includeMaintenance: true,
-    tractorId: 'all' as number | 'all'
+    tractorId: 'all' as string | 'all'
   });
 
   const [newDiesel, setNewDiesel] = useState({
-    date: new Date(),
-    tractorId: 0,
+    date: new Date().toISOString().split('T')[0],
+    tractorId: '',
     liters: 0,
     amount: 0,
     description: ''
   });
 
   const [newMaintenance, setNewMaintenance] = useState({
-    date: new Date(),
-    tractorId: 0,
+    date: new Date().toISOString().split('T')[0],
+    tractorId: '',
     amount: 0,
     description: ''
   });
@@ -53,11 +89,6 @@ export function TractorDiesel() {
     name: '',
     vehicleNumber: ''
   });
-
-  const tractors = useLiveQuery(() => db.tractors.toArray());
-  const dieselLogs = useLiveQuery(() => db.dieselLogs.orderBy('date').reverse().toArray());
-  const maintenanceLogs = useLiveQuery(() => db.maintenanceLogs.orderBy('date').reverse().toArray());
-  const bills = useLiveQuery(() => db.bills.toArray());
 
   const tractorStats = React.useMemo(() => {
     if (!tractors || !bills || !dieselLogs || !maintenanceLogs) return {};
@@ -70,43 +101,46 @@ export function TractorDiesel() {
       
       acc[tractor.id!] = { trips, fuelTotal, fuelLiters, maintTotal };
       return acc;
-    }, {} as Record<number, { trips: number, fuelTotal: number, fuelLiters: number, maintTotal: number }>);
+    }, {} as Record<string, { trips: number, fuelTotal: number, fuelLiters: number, maintTotal: number }>);
   }, [tractors, bills, dieselLogs, maintenanceLogs]);
 
   const handleAddDiesel = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDiesel.tractorId || !newDiesel.amount) return;
 
-    const tractor = tractors?.find(t => t.id === Number(newDiesel.tractorId));
+    const tractor = tractors?.find(t => t.id === newDiesel.tractorId);
     if (!tractor) return;
 
     try {
-      await db.transaction('rw', [db.ledger, db.dieselLogs], async () => {
-        await db.dieselLogs.add({
+      await runTransaction(db, async (transaction) => {
+        const dieselRef = collection(db, 'dieselLogs');
+        const ledgerRef = collection(db, 'ledger');
+
+        transaction.set(doc(dieselRef), {
           tractorId: tractor.id!,
           tractorName: tractor.name,
-          date: new Date(newDiesel.date),
+          date: newDiesel.date,
           liters: Number(newDiesel.liters),
           amount: Number(newDiesel.amount),
           description: newDiesel.description,
-          createdAt: new Date()
+          createdAt: serverTimestamp()
         });
 
-        await db.ledger.add({
-          date: new Date(newDiesel.date),
+        transaction.set(doc(ledgerRef), {
+          date: newDiesel.date,
           type: 'Expense',
           category: 'Fuel',
           description: `Diesel for ${tractor.name}: ${newDiesel.description || 'Fuel tank'}`,
           amount: Number(newDiesel.amount),
           paymentMode: 'Cash',
-          createdAt: new Date()
+          createdAt: serverTimestamp()
         });
       });
 
       setIsAddingDiesel(false);
-      setNewDiesel({ date: new Date(), tractorId: 0, liters: 0, amount: 0, description: '' });
-    } catch (err) {
-      alert('Error adding diesel log');
+      setNewDiesel({ date: new Date().toISOString().split('T')[0], tractorId: '', liters: 0, amount: 0, description: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'transaction');
     }
   };
 
@@ -114,35 +148,38 @@ export function TractorDiesel() {
     e.preventDefault();
     if (!newMaintenance.tractorId || !newMaintenance.amount) return;
 
-    const tractor = tractors?.find(t => t.id === Number(newMaintenance.tractorId));
+    const tractor = tractors?.find(t => t.id === newMaintenance.tractorId);
     if (!tractor) return;
 
     try {
-      await db.transaction('rw', [db.ledger, db.maintenanceLogs], async () => {
-        await db.maintenanceLogs.add({
+      await runTransaction(db, async (transaction) => {
+        const maintRef = collection(db, 'maintenanceLogs');
+        const ledgerRef = collection(db, 'ledger');
+
+        transaction.set(doc(maintRef), {
           tractorId: tractor.id!,
           tractorName: tractor.name,
-          date: new Date(newMaintenance.date),
+          date: newMaintenance.date,
           amount: Number(newMaintenance.amount),
           description: newMaintenance.description,
-          createdAt: new Date()
+          createdAt: serverTimestamp()
         });
 
-        await db.ledger.add({
-          date: new Date(newMaintenance.date),
+        transaction.set(doc(ledgerRef), {
+          date: newMaintenance.date,
           type: 'Expense',
           category: 'Maintenance',
           description: `Maintenance for ${tractor.name}: ${newMaintenance.description}`,
           amount: Number(newMaintenance.amount),
           paymentMode: 'Cash',
-          createdAt: new Date()
+          createdAt: serverTimestamp()
         });
       });
 
       setIsAddingMaintenance(false);
-      setNewMaintenance({ date: new Date(), tractorId: 0, amount: 0, description: '' });
-    } catch (err) {
-      alert('Error adding maintenance log');
+      setNewMaintenance({ date: new Date().toISOString().split('T')[0], tractorId: '', amount: 0, description: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'transaction');
     }
   };
 
@@ -177,7 +214,7 @@ export function TractorDiesel() {
       : tractors.filter(t => t.id === reportConfig.tractorId);
 
     doc.setFontSize(22);
-    doc.text('Rajhans Transport - Tractor Report', 14, 20);
+    doc.text('Rajhans steel and Water - Tractor Report', 14, 20);
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.text(`Period: ${periodLabel} (${start.toLocaleDateString()} - ${end.toLocaleDateString()})`, 14, 28);
@@ -195,17 +232,17 @@ export function TractorDiesel() {
 
       const tractorDiesel = dieselLogs?.filter(l => 
         l.tractorId === tractor.id && 
-        isWithinInterval(l.date, { start, end })
+        isWithinInterval(new Date(l.date), { start, end })
       ) || [];
 
       const tractorMaintenance = maintenanceLogs?.filter(l => 
         l.tractorId === tractor.id && 
-        isWithinInterval(l.date, { start, end })
+        isWithinInterval(new Date(l.date), { start, end })
       ) || [];
 
       const tractorTrips = bills?.filter(b => 
         b.tractorId === tractor.id && 
-        isWithinInterval(b.date, { start, end })
+        isWithinInterval(new Date(b.date), { start, end })
       ) || [];
 
       const totalDiesel = tractorDiesel.reduce((sum, l) => sum + l.amount, 0);
@@ -237,12 +274,20 @@ export function TractorDiesel() {
           startY: yPos,
           head: [['Date', 'Liters', 'Amount', 'Note']],
           body: tractorDiesel.map(l => [
-            l.date.toLocaleDateString(),
+            new Date(l.date).toLocaleDateString(),
             l.liters.toFixed(1),
             `Rs. ${l.amount.toLocaleString()}`,
             l.description || '-'
           ]),
-          styles: { fontSize: 8 }
+          theme: 'grid',
+          headStyles: { fillColor: [71, 85, 105] },
+          styles: { fontSize: 8, overflow: 'linebreak' },
+          columnStyles: {
+            0: { cellWidth: 25 },
+            1: { cellWidth: 20, halign: 'right' },
+            2: { cellWidth: 30, halign: 'right' },
+            3: { cellWidth: 'auto' }
+          }
         });
         yPos = (doc as any).lastAutoTable.finalY + 10;
       }
@@ -256,12 +301,17 @@ export function TractorDiesel() {
           startY: yPos,
           head: [['Date', 'Amount', 'Description']],
           body: tractorMaintenance.map(l => [
-            l.date.toLocaleDateString(),
+            new Date(l.date).toLocaleDateString(),
             `Rs. ${l.amount.toLocaleString()}`,
             l.description
           ]),
-          styles: { fontSize: 8 },
-          headStyles: { fillColor: [234, 88, 12] }
+          styles: { fontSize: 8, overflow: 'linebreak' },
+          headStyles: { fillColor: [234, 88, 12] },
+          columnStyles: {
+            0: { cellWidth: 25 },
+            1: { cellWidth: 30, halign: 'right' },
+            2: { cellWidth: 'auto' }
+          }
         });
         yPos = (doc as any).lastAutoTable.finalY + 15;
       } else {
@@ -278,14 +328,30 @@ export function TractorDiesel() {
     if (!newTractor.name || !newTractor.vehicleNumber) return;
 
     try {
-      await db.tractors.add({
+      await addDoc(collection(db, 'tractors'), {
         ...newTractor,
-        createdAt: new Date()
+        createdAt: serverTimestamp()
       });
       setShowTractorModal(false);
       setNewTractor({ name: '', vehicleNumber: '' });
-    } catch (err) {
-      alert('Error adding tractor');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'tractors');
+    }
+  };
+
+  const handleDeleteTractor = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'tractors', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `tractors/${id}`);
+    }
+  };
+
+  const handleDeleteLog = async (type: 'diesel' | 'maint', id: string) => {
+    try {
+      await deleteDoc(doc(db, type === 'diesel' ? 'dieselLogs' : 'maintenanceLogs', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${type === 'diesel' ? 'dieselLogs' : 'maintenanceLogs'}/${id}`);
     }
   };
 
@@ -354,9 +420,17 @@ export function TractorDiesel() {
                 </div>
                 <div>
                   <h4 className="text-lg font-black text-slate-900">{tractor.name}</h4>
-                  <p className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-md inline-block uppercase tracking-wider">
-                    {tractor.vehicleNumber}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-md inline-block uppercase tracking-wider">
+                      {tractor.vehicleNumber}
+                    </p>
+                    <button 
+                      onClick={() => tractor.id && setDeleteConfirm({ type: 'tractor', id: tractor.id, name: tractor.name })}
+                      className="p-1 text-slate-300 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -424,12 +498,18 @@ export function TractorDiesel() {
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
                     <span>{log.liters}L</span>
                     <span>•</span>
-                    <span>{log.date.toLocaleDateString()}</span>
+                    <span>{new Date(log.date).toLocaleDateString()}</span>
                   </div>
                 </div>
               </div>
-              <div className="text-right">
+              <div className="text-right flex items-center gap-3">
                 <div className="text-lg font-black text-red-600">{formatCurrency(log.amount)}</div>
+                <button 
+                  onClick={() => log.id && setDeleteConfirm({ type: 'diesel', id: log.id })}
+                  className="p-2 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
             </motion.div>
           ))
@@ -450,12 +530,18 @@ export function TractorDiesel() {
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
                     <span className="truncate max-w-[150px]">{log.description}</span>
                     <span>•</span>
-                    <span>{log.date.toLocaleDateString()}</span>
+                    <span>{new Date(log.date).toLocaleDateString()}</span>
                   </div>
                 </div>
               </div>
-              <div className="text-right">
+              <div className="text-right flex items-center gap-3">
                 <div className="text-lg font-black text-orange-600">{formatCurrency(log.amount)}</div>
+                <button 
+                  onClick={() => log.id && setDeleteConfirm({ type: 'maint', id: log.id })}
+                  className="p-2 text-slate-200 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
             </motion.div>
           ))
@@ -495,7 +581,7 @@ export function TractorDiesel() {
                     required
                     className="material-input h-14 bg-slate-50 appearance-none"
                     value={newDiesel.tractorId}
-                    onChange={e => setNewDiesel({...newDiesel, tractorId: parseInt(e.target.value)})}
+                    onChange={e => setNewDiesel({...newDiesel, tractorId: e.target.value})}
                   >
                     <option value="">Select Tractor</option>
                     {tractors?.map(t => (
@@ -510,8 +596,8 @@ export function TractorDiesel() {
                     <input
                       type="date"
                       className="material-input h-14 bg-slate-50"
-                      value={newDiesel.date.toISOString().split('T')[0]}
-                      onChange={e => setNewDiesel({...newDiesel, date: new Date(e.target.value)})}
+                      value={newDiesel.date}
+                      onChange={e => setNewDiesel({...newDiesel, date: e.target.value})}
                     />
                   </div>
                   <div>
@@ -584,7 +670,7 @@ export function TractorDiesel() {
                     required
                     className="material-input h-14 bg-slate-50 appearance-none"
                     value={newMaintenance.tractorId}
-                    onChange={e => setNewMaintenance({...newMaintenance, tractorId: parseInt(e.target.value)})}
+                    onChange={e => setNewMaintenance({...newMaintenance, tractorId: e.target.value})}
                   >
                     <option value="">Select Tractor</option>
                     {tractors?.map(t => (
@@ -598,8 +684,8 @@ export function TractorDiesel() {
                   <input
                     type="date"
                     className="material-input h-14 bg-slate-50"
-                    value={newMaintenance.date.toISOString().split('T')[0]}
-                    onChange={e => setNewMaintenance({...newMaintenance, date: new Date(e.target.value)})}
+                    value={newMaintenance.date}
+                    onChange={e => setNewMaintenance({...newMaintenance, date: e.target.value})}
                   />
                 </div>
 
@@ -695,7 +781,7 @@ export function TractorDiesel() {
                   <select
                     className="material-input h-14 bg-slate-50 appearance-none"
                     value={reportConfig.tractorId}
-                    onChange={e => setReportConfig({...reportConfig, tractorId: e.target.value === 'all' ? 'all' : parseInt(e.target.value)})}
+                    onChange={e => setReportConfig({...reportConfig, tractorId: e.target.value})}
                   >
                     <option value="all">FLeet Summary (All)</option>
                     {tractors?.map(t => (
@@ -761,6 +847,22 @@ export function TractorDiesel() {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmationModal 
+        isOpen={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={() => {
+          if (!deleteConfirm) return;
+          if (deleteConfirm.type === 'tractor') handleDeleteTractor(deleteConfirm.id);
+          else handleDeleteLog(deleteConfirm.type, deleteConfirm.id);
+        }}
+        title={`Delete ${deleteConfirm?.type === 'tractor' ? 'Tractor' : deleteConfirm?.type === 'diesel' ? 'Diesel Log' : 'Maintenance Log'}?`}
+        message={
+          deleteConfirm?.type === 'tractor' 
+            ? `Delete tractor "${deleteConfirm.name}"? Diesel and maintenance logs for this tractor will remain in history.`
+            : `Are you sure you want to delete this ${deleteConfirm?.type === 'diesel' ? 'diesel' : 'maintenance'} log? Ledger entries created with this log will not be deleted.`
+        }
+      />
     </div>
   );
 }

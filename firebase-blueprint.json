@@ -1,0 +1,143 @@
+{
+  "entities": {
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer information and balance tracking",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "mobile": { "type": "string" },
+        "secondaryMobiles": { "type": "array", "items": { "type": "string" } },
+        "address": { "type": "string" },
+        "alternateMobile": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "notes": { "type": "string" },
+        "pendingAmount": { "type": "number" },
+        "lastRate": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "mobile"]
+    },
+    "Bill": {
+      "title": "Bill",
+      "description": "Water tanker delivery bill",
+      "type": "object",
+      "properties": {
+        "billNumber": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerMobile": { "type": "string" },
+        "customerAddress": { "type": "string" },
+        "tankerSize": { "type": "string" },
+        "quantity": { "type": "number" },
+        "rate": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "extraCharges": { "type": "number" },
+        "discount": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "paymentMode": { "type": "string", "enum": ["Cash", "UPI", "Bank Transfer", "Pending", "Split"] },
+        "splitPayments": {
+          "type": "object",
+          "properties": {
+            "cash": { "type": "number" },
+            "upi": { "type": "number" },
+            "bank": { "type": "number" },
+            "pending": { "type": "number" }
+          }
+        },
+        "driverName": { "type": "string" },
+        "driverMobile": { "type": "string" },
+        "tractorId": { "type": "string" },
+        "status": { "type": "string", "enum": ["Delivered", "Pending", "Cancelled", "Printed"] },
+        "isSettled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Driver": {
+      "title": "Driver",
+      "description": "Driver details",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "mobile": { "type": "string" }
+      }
+    },
+    "Tractor": {
+      "title": "Tractor",
+      "description": "Tractor details",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "DieselLog": {
+      "title": "Diesel Log",
+      "description": "Tractor diesel fuel logs",
+      "type": "object",
+      "properties": {
+        "tractorId": { "type": "string" },
+        "tractorName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "liters": { "type": "number" },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MaintenanceLog": {
+      "title": "Maintenance Log",
+      "description": "Tractor maintenance and repair logs",
+      "type": "object",
+      "properties": {
+        "tractorId": { "type": "string" },
+        "tractorName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "LedgerEntry": {
+      "title": "Ledger Entry",
+      "description": "Income and expense tracking",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["Income", "Expense"] },
+        "category": { "type": "string" },
+        "partyName": { "type": "string" },
+        "partyId": { "type": "string" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMode": { "type": "string", "enum": ["Cash", "UPI", "Bank Transfer"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "DriverLocation": {
+      "title": "Driver Location",
+      "description": "Live GPS location of a driver",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "lastUpdated": { "type": "string", "format": "date-time" },
+        "isActive": { "type": "boolean" }
+      }
+    }
+  },
+  "firestore": {
+    "customers": { "schema": "Customer", "description": "Collection of customers" },
+    "bills": { "schema": "Bill", "description": "Collection of delivery bills" },
+    "drivers": { "schema": "Driver", "description": "Collection of drivers" },
+    "tractors": { "schema": "Tractor", "description": "Collection of tractors" },
+    "dieselLogs": { "schema": "DieselLog", "description": "Collection of diesel logs" },
+    "maintenanceLogs": { "schema": "MaintenanceLog", "description": "Collection of maintenance logs" },
+    "ledger": { "schema": "LedgerEntry", "description": "Collection of ledger entries" },
+    "driverLocations": { "schema": "DriverLocation", "description": "Collection of live driver locations" }
+  }
+}

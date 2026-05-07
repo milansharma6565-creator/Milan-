@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, Customer, Bill } from '../db';
-import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, where, orderBy, runTransaction, getDocs, deleteDoc } from 'firebase/firestore';
+import { Customer, Bill, LedgerEntry } from '../types';
+import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { useReactToPrint } from 'react-to-print';
 import { ThermalInvoice } from './ThermalInvoice';
-import { useRef } from 'react';
+import { ConfirmationModal } from './ConfirmationModal';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { startOfMonth, endOfMonth, format } from 'date-fns';
 
 export function CustomerManagement() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,34 +26,119 @@ export function CustomerManagement() {
     notes: ''
   });
 
-  const customers = useLiveQuery(
-    () => {
-      if (!searchTerm) return db.customers.toArray();
-      const term = searchTerm.toLowerCase();
-      return db.customers
-        .filter(c => 
-          c.name.toLowerCase().includes(term) || 
-          c.mobile.includes(term) ||
-          (c.secondaryMobiles?.some(m => m.includes(term)) || false)
-        )
-        .toArray();
-    },
-    [searchTerm]
-  );
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
+  const [shareLedgerCustomer, setShareLedgerCustomer] = useState<Customer | null>(null);
+  
+  const [validationError, setValidationError] = useState<{ name?: string; mobile?: string }>({});
+
+  // Real-time duplicate checking for New Customer
+  useEffect(() => {
+    if (!isAdding || !newCustomer.name) {
+      setValidationError(prev => ({ ...prev, name: undefined }));
+      return;
+    }
+    
+    const checkName = async () => {
+      const q = query(collection(db, 'customers'), where('name', '==', newCustomer.name.trim()));
+      const snap = await getDocs(q);
+      
+      const nameExists = !snap.empty;
+      const mobileExists = snap.docs.some(doc => doc.data().mobile === newCustomer.mobile);
+
+      if (nameExists && !mobileExists && newCustomer.mobile) {
+        setValidationError(prev => ({ ...prev, name: 'name already exist try different name' }));
+      } else if (nameExists && mobileExists) {
+        setValidationError(prev => ({ ...prev, name: 'customer already exist' }));
+      } else {
+        setValidationError(prev => ({ ...prev, name: undefined }));
+      }
+    };
+
+    const timer = setTimeout(checkName, 500);
+    return () => clearTimeout(timer);
+  }, [newCustomer.name, newCustomer.mobile, isAdding]);
+
+  // Real-time duplicate checking for Editing Customer
+  useEffect(() => {
+    if (!editingCustomer || !editingCustomer.name) {
+      setValidationError(prev => ({ ...prev, name: undefined }));
+      return;
+    }
+    
+    const checkName = async () => {
+      const q = query(collection(db, 'customers'), where('name', '==', editingCustomer.name.trim()));
+      const snap = await getDocs(q);
+      
+      const otherSameName = snap.docs.filter(doc => doc.id !== editingCustomer.id);
+      const nameExists = otherSameName.length > 0;
+      const mobileExists = otherSameName.some(doc => doc.data().mobile === editingCustomer.mobile);
+
+      if (nameExists && !mobileExists && editingCustomer.mobile) {
+        setValidationError(prev => ({ ...prev, name: 'name already exist try different name' }));
+      } else if (nameExists && mobileExists) {
+        setValidationError(prev => ({ ...prev, name: 'customer already exist' }));
+      } else {
+        setValidationError(prev => ({ ...prev, name: undefined }));
+      }
+    };
+
+    const timer = setTimeout(checkName, 500);
+    return () => clearTimeout(timer);
+  }, [editingCustomer?.name, editingCustomer?.mobile]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'customers'), orderBy('name'));
+    return onSnapshot(q, 
+      (snapshot) => {
+        const all = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
+        if (!searchTerm) {
+          setCustomers(all);
+        } else {
+          const term = searchTerm.toLowerCase();
+          const filtered = all.filter(c => 
+            c.name.toLowerCase().includes(term) || 
+            c.mobile.includes(term) ||
+            (c.secondaryMobiles?.some(m => m.includes(term)) || false)
+          );
+          setCustomers(filtered);
+        }
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'customers')
+    );
+  }, [searchTerm]);
 
   const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustomer.name || !newCustomer.mobile) return;
     
     try {
-      await db.customers.add({
+      // Check for duplicate mobile or name
+      const qMobile = query(collection(db, 'customers'), where('mobile', '==', newCustomer.mobile));
+      const qName = query(collection(db, 'customers'), where('name', '==', newCustomer.name.trim()));
+      
+      const [mobileSnap, nameSnap] = await Promise.all([getDocs(qMobile), getDocs(qName)]);
+      
+      if (!mobileSnap.empty) {
+        alert('A customer with this mobile number already exists!');
+        return;
+      }
+
+      if (!nameSnap.empty) {
+        alert('A customer with this name already exists!');
+        return;
+      }
+
+      await addDoc(collection(db, 'customers'), {
         ...newCustomer,
-        pendingAmount: 0
+        name: newCustomer.name.trim(),
+        pendingAmount: 0,
+        createdAt: serverTimestamp()
       });
       setIsAdding(false);
       setNewCustomer({ name: '', mobile: '', address: '', alternateMobile: '', vehicleNumber: '', notes: '' });
-    } catch (err) {
-      alert('Error adding customer. Mobile number might already exist.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'customers');
     }
   };
 
@@ -60,11 +147,41 @@ export function CustomerManagement() {
     if (!editingCustomer || !editingCustomer.name || !editingCustomer.mobile) return;
     
     try {
+      // Check for duplicate mobile or name (excluding self)
+      const qMobile = query(collection(db, 'customers'), where('mobile', '==', editingCustomer.mobile));
+      const qName = query(collection(db, 'customers'), where('name', '==', editingCustomer.name.trim()));
+      
+      const [mobileSnap, nameSnap] = await Promise.all([getDocs(qMobile), getDocs(qName)]);
+      
+      const mobileDuplicate = mobileSnap.docs.find(doc => doc.id !== editingCustomer.id);
+      const nameDuplicate = nameSnap.docs.find(doc => doc.id !== editingCustomer.id);
+      
+      if (mobileDuplicate) {
+        alert('Another customer with this mobile number already exists!');
+        return;
+      }
+
+      if (nameDuplicate) {
+        alert('Another customer with this name already exists!');
+        return;
+      }
+
       const { id, ...updateData } = editingCustomer;
-      await db.customers.update(id!, updateData);
+      await updateDoc(doc(db, 'customers', id!), {
+        ...updateData,
+        name: editingCustomer.name.trim()
+      } as any);
       setEditingCustomer(null);
-    } catch (err) {
-      alert('Error updating customer.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `customers/${editingCustomer.id}`);
+    }
+  };
+
+  const handleDeleteCustomer = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'customers', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `customers/${id}`);
     }
   };
 
@@ -72,13 +189,15 @@ export function CustomerManagement() {
     if (!customers || customers.length === 0) return;
     
     const doc = new jsPDF();
-    doc.text('Rajhans Water Tanker - Customer List', 14, 15);
+    doc.text('Rajhans steel and Water - Customer List', 14, 15);
+    
+    const pdfFormatCurrency = (val: number) => `Rs. ${val.toLocaleString('en-IN')}`;
     
     const tableData = customers.map(c => [
       c.name,
       `+91 ${c.mobile}`,
-      c.address,
-      formatCurrency(c.pendingAmount)
+      c.address || '-',
+      pdfFormatCurrency(c.pendingAmount)
     ]);
 
     autoTable(doc, {
@@ -86,10 +205,14 @@ export function CustomerManagement() {
       body: tableData,
       startY: 25,
       theme: 'grid',
-      headStyles: { fillColor: [37, 99, 235] }
+      headStyles: { fillColor: [37, 99, 235] },
+      columnStyles: {
+        3: { halign: 'right' }
+      },
+      styles: { fontSize: 9 }
     });
 
-    doc.save('Rajhans_Customer_List.pdf');
+    doc.save('Rajhans_Steel_Water_Customer_List.pdf');
   };
 
   return (
@@ -154,12 +277,32 @@ export function CustomerManagement() {
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
+                          setShareLedgerCustomer(customer);
+                        }}
+                        className="p-1 px-2.5 bg-green-600 text-white hover:bg-green-700 rounded-lg transition-all"
+                        title="Share Hisab on WhatsApp"
+                      >
+                        <MessageSquare size={14} />
+                      </button>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setEditingCustomer(customer);
                         }}
                         className="p-1 px-2.5 bg-slate-100 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
                         title="Edit Customer"
                       >
                         <Edit2 size={14} />
+                      </button>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (customer.id) setDeleteConfirm({ id: customer.id, name: customer.name });
+                        }}
+                        className="p-1 px-2.5 bg-slate-100 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        title="Delete Customer"
+                      >
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </div>
@@ -226,7 +369,8 @@ export function CustomerManagement() {
         {selectedHistoryCustomer && (
           <CustomerHistoryModal 
             customer={selectedHistoryCustomer} 
-            onClose={() => setSelectedHistoryCustomer(null)} 
+            onClose={() => setSelectedHistoryCustomer(null)}
+            onShareLedger={setShareLedgerCustomer}
           />
         )}
       </AnimatePresence>
@@ -268,6 +412,9 @@ export function CustomerManagement() {
                     onChange={e => setNewCustomer({...newCustomer, name: e.target.value})}
                     placeholder="e.g. Rahul Sharma"
                   />
+                  {validationError.name && (
+                    <p className="text-red-500 text-[10px] font-bold mt-1 ml-1">{validationError.name}</p>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Mobile Number *</label>
@@ -361,6 +508,9 @@ export function CustomerManagement() {
                     onChange={e => setEditingCustomer({...editingCustomer, name: e.target.value})}
                     placeholder="e.g. Rahul Sharma"
                   />
+                  {validationError.name && (
+                    <p className="text-red-500 text-[10px] font-bold mt-1 ml-1">{validationError.name}</p>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Mobile Number *</label>
@@ -415,22 +565,255 @@ export function CustomerManagement() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ConfirmationModal 
+        isOpen={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={() => deleteConfirm && handleDeleteCustomer(deleteConfirm.id)}
+        title="Delete Customer?"
+        message={`Are you sure you want to delete "${deleteConfirm?.name}"? Their trip tokens and previous ledger entries will remain in history.`}
+      />
+
+      <AnimatePresence>
+        {shareLedgerCustomer && (
+          <WhatsAppLedgerModal 
+            customer={shareLedgerCustomer}
+            onClose={() => setShareLedgerCustomer(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function CustomerHistoryModal({ customer, onClose }: { customer: Customer, onClose: () => void }) {
+function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClose: () => void }) {
+  const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleGenerateShare = async () => {
+    setIsGenerating(true);
+    try {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      // 1. Fetch Bills
+      const billsQ = query(
+        collection(db, 'bills'),
+        where('customerId', '==', customer.id),
+        where('date', '>=', startDate),
+        where('date', '<=', endDate)
+      );
+      const billsSnap = await getDocs(billsQ);
+      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+
+      // 2. Fetch Ledger Entries
+      const ledgerQ = query(
+        collection(db, 'ledger'),
+        where('partyId', '==', customer.id),
+        where('date', '>=', start.toISOString()),
+        where('date', '<=', end.toISOString())
+      );
+      const ledgerSnap = await getDocs(ledgerQ);
+      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+
+      // Combined and sorted list
+      const allEntries = [...bills, ...payments].sort((a: any, b: any) => a.sortDate.getTime() - b.sortDate.getTime());
+
+      if (allEntries.length === 0) {
+        alert('No transactions found in this date range.');
+        setIsGenerating(false);
+        return;
+      }
+
+      // Generate PDF
+      const doc = new jsPDF();
+      
+      // Header
+      doc.setFontSize(20);
+      doc.setTextColor(30, 41, 59); // Slate 800
+      doc.text('Rajhans steel and Water - Customer Ledger', 14, 20);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139); // Slate 500
+      doc.text(`Period: ${format(start, 'dd MMM yyyy')} to ${format(end, 'dd MMM yyyy')}`, 14, 28);
+      
+      doc.setFontSize(12);
+      doc.setTextColor(30, 41, 59);
+      doc.text(`Customer: ${customer.name}`, 14, 40);
+      doc.text(`Mobile: +91 ${customer.mobile}`, 14, 46);
+      if (customer.address) doc.text(`Address: ${customer.address}`, 14, 52);
+
+      let runningBalance = 0;
+      const pdfFormatCurrency = (val: number) => `Rs. ${val.toLocaleString('en-IN')}`;
+
+      const tableRows = allEntries.map((entry: any) => {
+        const isBill = !!entry.billNumber;
+        const date = format(entry.sortDate, 'dd/MM/yyyy');
+        const desc = isBill ? `Trip Token #${entry.billNumber} (${entry.tankerSize})` : entry.description || 'Manual Payment';
+        const debit = isBill ? (entry.grandTotal || 0) : 0;
+        const credit = isBill ? 0 : (entry.amount || 0);
+        runningBalance += debit - credit;
+
+        return [
+          date,
+          desc,
+          debit > 0 ? pdfFormatCurrency(debit) : '-',
+          credit > 0 ? pdfFormatCurrency(credit) : '-',
+          pdfFormatCurrency(runningBalance)
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 60,
+        head: [['Date', 'Description', 'Token Amount', 'Payment Recvd', 'Balance']],
+        body: tableRows,
+        theme: 'grid',
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+        columnStyles: {
+          0: { cellWidth: 25 }, // Date
+          1: { cellWidth: 'auto' }, // Description
+          2: { halign: 'right', cellWidth: 35 }, // Token Amount
+          3: { halign: 'right', cellWidth: 35 }, // Payment Recvd
+          4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } // Balance
+        },
+        styles: { fontSize: 8, overflow: 'linebreak' }, // Smaller font for better fit
+        margin: { left: 14, right: 14 }
+      });
+
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Total Outstanding: ${pdfFormatCurrency(runningBalance)}`, 196, finalY, { align: 'right' });
+
+      // Save and Share
+      const pdfBlob = doc.output('blob');
+      const fileName = `Hisab_${customer.name}_${format(new Date(), 'dd_MMM')}.pdf`;
+      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Hisab - ${customer.name}`,
+          text: `Dear ${customer.name}, please find attached your ledger (hisab) from Rajhans steel and Water. Total Outstanding: ₹${runningBalance}.`
+        });
+      } else {
+        // Fallback: Download and WhatsApp text
+        doc.save(fileName);
+        const phone = customer.mobile.startsWith('91') ? customer.mobile : `91${customer.mobile}`;
+        const message = `*Hisab - Rajhans steel and Water* 🚛\n\n` +
+          `Dear ${customer.name},\n` +
+          `Your ledger PDF has been downloaded. Please check and share it here.\n\n` +
+          `*Period:* ${format(start, 'dd MMM')} to ${format(end, 'dd MMM')}\n` +
+          `*Total Outstanding:* ₹${runningBalance}\n\n` +
+          `Thank you!`;
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+      }
+      
+      onClose();
+    } catch (error) {
+      console.error('Error generating ledger:', error);
+      alert('Failed to generate ledger. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6"
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative"
+      >
+        <button 
+          onClick={onClose}
+          className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          <XCircle size={24} />
+        </button>
+
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <MessageSquare size={32} />
+          </div>
+          <h3 className="text-2xl font-display font-bold text-slate-900">Share Hisab</h3>
+          <p className="text-slate-500 text-sm">Select dates for {customer.name}'s ledger</p>
+        </div>
+
+        <div className="space-y-4 mb-8">
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Start Date</label>
+            <input 
+              type="date"
+              className="material-input h-14 bg-slate-50"
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">End Date</label>
+            <input 
+              type="date"
+              className="material-input h-14 bg-slate-50"
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={handleGenerateShare}
+          disabled={isGenerating}
+          className="w-full h-16 bg-green-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-green-200 hover:bg-green-700 active:scale-95 transition-all disabled:opacity-50"
+        >
+          {isGenerating ? (
+            <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : (
+            <><MessageSquare size={20} /> Share on WhatsApp</>
+          )}
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function CustomerHistoryModal({ 
+  customer, 
+  onClose, 
+  onShareLedger 
+}: { 
+  customer: Customer, 
+  onClose: () => void, 
+  onShareLedger: (c: Customer) => void 
+}) {
   const [selectedBillForPrint, setSelectedBillForPrint] = useState<Bill | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+  const [bills, setBills] = useState<Bill[]>([]);
 
-  const bills = useLiveQuery(
-    () => db.bills.where('customerId').equals(customer.id!).reverse().toArray(),
-    [customer.id]
-  );
+  useEffect(() => {
+    const q = query(
+      collection(db, 'bills'), 
+      where('customerId', '==', customer.id),
+      orderBy('createdAt', 'desc')
+    );
+    return onSnapshot(q, 
+      (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `bills?customerId=${customer.id}`)
+    );
+  }, [customer.id]);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    documentTitle: `Bill_${selectedBillForPrint?.billNumber || 'Order'}`,
+    documentTitle: `Token_${selectedBillForPrint?.billNumber || 'Order'}`,
     onAfterPrint: () => setSelectedBillForPrint(null)
   });
 
@@ -444,28 +827,36 @@ function CustomerHistoryModal({ customer, onClose }: { customer: Customer, onClo
     
     setIsProcessingPayment(true);
     try {
-      // 1. Update customer balance
-      await db.customers.update(customer.id!, {
-        pendingAmount: Math.max(0, (customer.pendingAmount || 0) - amount)
-      });
+      await runTransaction(db, async (transaction) => {
+        const customerRef = doc(db, 'customers', customer.id!);
+        const ledgerRef = collection(db, 'ledger');
 
-      // 2. Add to Ledger
-      await db.ledger.add({
-        date: new Date(),
-        type: 'Income',
-        category: 'Customer Collection',
-        partyName: customer.name,
-        partyId: customer.id,
-        description: `Manual Payment received from customer`,
-        amount: amount,
-        paymentMode: paymentMode,
-        createdAt: new Date()
+        const custDoc = await transaction.get(customerRef);
+        if (custDoc.exists()) {
+          const currentPending = custDoc.data().pendingAmount || 0;
+          transaction.update(customerRef, {
+            pendingAmount: Math.max(0, currentPending - amount)
+          });
+        }
+
+        const newLedgerDoc = {
+          date: new Date().toISOString(),
+          type: 'Income',
+          category: 'Customer Collection',
+          partyName: customer.name,
+          partyId: customer.id,
+          description: `Manual Payment received from customer`,
+          amount: amount,
+          paymentMode: paymentMode,
+          createdAt: serverTimestamp()
+        };
+        transaction.set(doc(ledgerRef), newLedgerDoc);
       });
 
       setPayingAmount('');
       alert('Payment recorded successfully');
-    } catch (err) {
-      alert('Error recording payment');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'transaction');
     } finally {
       setIsProcessingPayment(false);
     }
@@ -496,7 +887,15 @@ function CustomerHistoryModal({ customer, onClose }: { customer: Customer, onClo
                   <ArrowLeft size={16} /> Back to list
                 </button>
                 <h2 className="text-2xl font-display font-bold text-slate-900">{customer.name}</h2>
-                <p className="text-sm text-slate-500 font-mono">+91 {customer.mobile}</p>
+                <div className="flex items-center gap-3 mt-1">
+                  <p className="text-sm text-slate-500 font-mono tracking-tighter opacity-80">+91 {customer.mobile}</p>
+                  <button 
+                    onClick={() => onShareLedger(customer)}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-600 rounded-lg text-[10px] font-bold hover:bg-green-100 transition-all"
+                  >
+                    <MessageSquare size={12} /> Share Hisab
+                  </button>
+                </div>
               </div>
               <div className="text-right">
                 <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-1">Total Pending</div>
@@ -549,7 +948,7 @@ function CustomerHistoryModal({ customer, onClose }: { customer: Customer, onClo
           {/* List */}
           <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-2">Billing History</h3>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-2">Token History</h3>
               {bills?.map((bill) => (
                 <div 
                   key={bill.id} 
@@ -640,7 +1039,7 @@ function CustomerHistoryModal({ customer, onClose }: { customer: Customer, onClo
               className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl"
             >
               <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
-                <span className="font-bold">Re-print Bill</span>
+                <span className="font-bold">Re-print Token</span>
                 <button onClick={() => setSelectedBillForPrint(null)} className="bg-white p-2 rounded-full shadow-sm">
                   <XCircle size={20}/>
                 </button>

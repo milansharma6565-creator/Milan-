@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, LedgerEntry } from '../db';
+import React, { useState, useEffect } from 'react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, orderBy, deleteDoc, doc } from 'firebase/firestore';
+import { LedgerEntry } from '../types';
 import { 
   Plus, 
   Search, 
@@ -16,10 +17,12 @@ import {
   Truck,
   Lightbulb,
   Wrench,
-  UserCircle
+  UserCircle,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
+import { ConfirmationModal } from './ConfirmationModal';
 
 const CATEGORIES = {
   Expense: [
@@ -40,9 +43,12 @@ export function Ledger() {
   const [activeTab, setActiveTab] = useState<'transactions' | 'balancesheet'>('transactions');
   const [isAdding, setIsAdding] = useState(false);
   const [filterType, setFilterType] = useState<'All' | 'Income' | 'Expense'>('All');
+  const [transactions, setTransactions] = useState<LedgerEntry[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   
   const [newEntry, setNewEntry] = useState<Partial<LedgerEntry>>({
-    date: new Date(),
+    date: new Date().toISOString().split('T')[0],
     type: 'Expense',
     category: 'Other',
     description: '',
@@ -50,55 +56,66 @@ export function Ledger() {
     paymentMode: 'Cash'
   });
 
-  const transactions = useLiveQuery(
-    () => db.ledger.orderBy('date').reverse().toArray()
-  );
+  useEffect(() => {
+    const q = query(collection(db, 'ledger'), orderBy('createdAt', 'desc'));
+    return onSnapshot(q, 
+      (snapshot) => {
+        const all = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LedgerEntry));
+        setTransactions(all);
 
-  const stats = useLiveQuery(async () => {
-    const all = await db.ledger.toArray();
-    const income = all.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0);
-    const expense = all.filter(t => t.type === 'Expense').reduce((s, t) => s + t.amount, 0);
-    
-    // Grouping by category
-    const categorySummary = all.reduce((acc, t) => {
-      acc[t.category] = (acc[t.category] || 0) + t.amount;
-      return acc;
-    }, {} as Record<string, number>);
+        const income = all.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0);
+        const expense = all.filter(t => t.type === 'Expense').reduce((s, t) => s + t.amount, 0);
+        
+        const categorySummary = all.reduce((acc, t) => {
+          acc[t.category] = (acc[t.category] || 0) + t.amount;
+          return acc;
+        }, {} as Record<string, number>);
 
-    return { income, expense, balance: income - expense, categorySummary };
-  });
+        setStats({ income, expense, balance: income - expense, categorySummary });
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'ledger')
+    );
+  }, []);
 
   const handleAddEntry = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEntry.amount || newEntry.amount <= 0) return;
 
     try {
-      await db.ledger.add({
-        date: new Date(newEntry.date!),
+      await addDoc(collection(db, 'ledger'), {
+        date: newEntry.date,
         type: newEntry.type as 'Income' | 'Expense',
         category: newEntry.category!,
         description: newEntry.description || '',
         amount: Number(newEntry.amount),
         paymentMode: newEntry.paymentMode as any,
-        createdAt: new Date()
+        createdAt: serverTimestamp()
       });
       setIsAdding(false);
       setNewEntry({
-        date: new Date(),
+        date: new Date().toISOString().split('T')[0],
         type: 'Expense',
         category: 'Other',
         description: '',
         amount: 0,
         paymentMode: 'Cash'
       });
-    } catch (err) {
-      alert('Error adding entry');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'ledger');
     }
   };
 
   const filteredTransactions = transactions?.filter(t => 
     filterType === 'All' || t.type === filterType
   );
+
+  const handleDeleteEntry = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'ledger', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `ledger/${id}`);
+    }
+  };
 
   return (
     <div className="p-4 pb-24 max-w-4xl mx-auto">
@@ -186,16 +203,22 @@ export function Ledger() {
                     <div>
                       <h4 className="font-bold text-slate-900">{t.description || t.category}</h4>
                       <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
-                        <span>{t.date.toLocaleDateString()}</span>
+                        <span>{new Date(t.date).toLocaleDateString()}</span>
                         <span>•</span>
                         <span>{t.paymentMode}</span>
                       </div>
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex items-center gap-4">
                     <div className={`text-lg font-display font-black ${t.type === 'Income' ? 'text-green-600' : 'text-slate-900'}`}>
                       {t.type === 'Income' ? '+' : '-'}{formatCurrency(t.amount)}
                     </div>
+                    <button 
+                      onClick={() => t.id && setDeleteConfirmId(t.id)}
+                      className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </motion.div>
               );
@@ -217,7 +240,7 @@ export function Ledger() {
             <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-6">Expense Breakdown</h3>
                <div className="space-y-4">
-                 {Object.entries(stats?.categorySummary || {}).filter(([cat]) => CATEGORIES.Expense.some(c => c.id === cat)).map(([cat, amount]) => (
+                 {Object.entries((stats?.categorySummary || {}) as Record<string, number>).filter(([cat]) => CATEGORIES.Expense.some(c => c.id === cat)).map(([cat, amount]) => (
                    <div key={cat} className="space-y-2">
                      <div className="flex justify-between text-sm font-bold">
                        <span className="text-slate-600">{cat}</span>
@@ -226,7 +249,7 @@ export function Ledger() {
                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                        <div 
                          className="h-full bg-slate-900 rounded-full" 
-                         style={{ width: `${(amount / (stats?.expense || 1)) * 100}%` }}
+                         style={{ width: `${(amount / ((stats?.expense as number) || 1)) * 100}%` }}
                        />
                      </div>
                    </div>
@@ -237,11 +260,11 @@ export function Ledger() {
             <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 text-center">Profit / Loss</h3>
                <div className="text-center">
-                 <div className={`text-4xl font-display font-black mb-2 ${stats!.balance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                   {formatCurrency(Math.abs(stats!.balance))}
+                 <div className={`text-4xl font-display font-black mb-2 ${(stats?.balance as number) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                   {formatCurrency(Math.abs((stats?.balance as number) || 0))}
                  </div>
                  <p className="text-slate-400 font-bold text-sm">
-                   {stats!.balance >= 0 ? 'Net Profit' : 'Net Loss'} for this period
+                   {(stats?.balance as number) >= 0 ? 'Net Profit' : 'Net Loss'} for this period
                  </p>
                </div>
             </div>
@@ -298,8 +321,8 @@ export function Ledger() {
                     <input
                       type="date"
                       className="material-input h-14 bg-slate-50"
-                      value={newEntry.date instanceof Date ? newEntry.date.toISOString().split('T')[0] : ''}
-                      onChange={e => setNewEntry({...newEntry, date: new Date(e.target.value)})}
+                      value={typeof newEntry.date === 'string' ? newEntry.date : ''}
+                      onChange={e => setNewEntry({...newEntry, date: e.target.value})}
                     />
                   </div>
                   <div>
@@ -362,6 +385,14 @@ export function Ledger() {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmationModal 
+        isOpen={!!deleteConfirmId}
+        onClose={() => setDeleteConfirmId(null)}
+        onConfirm={() => deleteConfirmId && handleDeleteEntry(deleteConfirmId)}
+        title="Delete Transaction?"
+        message="Are you sure you want to delete this ledger entry? This will affect your balance sheet but won't reverse related trip tokens."
+      />
     </div>
   );
 }

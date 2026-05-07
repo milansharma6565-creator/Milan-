@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, Bill } from '../db';
+import React, { useState, useEffect } from 'react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, onSnapshot, updateDoc, doc, where, getDoc, runTransaction, orderBy } from 'firebase/firestore';
+import { Customer, Bill } from '../types';
 import { Download, Calendar, CheckSquare, ListFilter, AlertCircle, Printer, XCircle } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { formatCurrency } from '../constants';
@@ -19,63 +20,98 @@ export function ReportView() {
     end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
   });
 
-  const reportData = useLiveQuery(async () => {
-    const bills = await db.bills
-      .where('date')
-      .between(startOfDay(new Date(dateRange.start)), endOfDay(new Date(dateRange.end)))
-      .toArray();
+  const [reportData, setReportData] = useState<any>(null);
+  const [unsettledBills, setUnsettledBills] = useState<Bill[]>([]);
 
-    const totalSales = bills.reduce((sum, b) => b.status !== 'Cancelled' ? sum + b.grandTotal : sum, 0);
-    const collected = bills.reduce((sum, b) => {
-      if (b.status === 'Cancelled') return sum;
-      if (b.paymentMode === 'Split' && b.splitPayments) {
-        return sum + (b.splitPayments.cash || 0) + (b.splitPayments.upi || 0) + (b.splitPayments.bank || 0);
-      }
-      return b.paymentMode !== 'Pending' ? sum + b.grandTotal : sum;
-    }, 0);
-    const pending = bills.reduce((sum, b) => {
-      if (b.status === 'Cancelled') return sum;
-      if (b.paymentMode === 'Split' && b.splitPayments) {
-        return sum + (b.splitPayments.pending || 0);
-      }
-      return b.paymentMode === 'Pending' ? sum + b.grandTotal : sum;
-    }, 0);
-    
-    const tankerCounts = bills.reduce((acc, b) => {
-      if (b.status === 'Cancelled') return acc;
-      acc[b.tankerSize] = (acc[b.tankerSize] || 0) + b.quantity;
-      return acc;
-    }, {} as Record<string, number>);
+  useEffect(() => {
+    const q = query(
+      collection(db, 'bills'),
+      where('date', '>=', dateRange.start),
+      where('date', '<=', dateRange.end + 'T23:59:59')
+    );
 
-    return { bills, totalSales, collected, pending, tankerCounts };
+    return onSnapshot(q, 
+      (snapshot) => {
+        const bills = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill));
+        const totalSales = bills.reduce((sum, b) => b.status !== 'Cancelled' ? sum + b.grandTotal : sum, 0);
+        const collected = bills.reduce((sum, b) => {
+          if (b.status === 'Cancelled') return sum;
+          if (b.paymentMode === 'Split' && b.splitPayments) {
+            return sum + (b.splitPayments.cash || 0) + (b.splitPayments.upi || 0) + (b.splitPayments.bank || 0);
+          }
+          return b.paymentMode !== 'Pending' ? sum + b.grandTotal : sum;
+        }, 0);
+        const pending = bills.reduce((sum, b) => {
+          if (b.status === 'Cancelled') return sum;
+          if (b.paymentMode === 'Split' && b.splitPayments) {
+            return sum + (b.splitPayments.pending || 0);
+          }
+          return b.paymentMode === 'Pending' ? sum + b.grandTotal : sum;
+        }, 0);
+        
+        const tankerCounts = bills.reduce((acc, b) => {
+          if (b.status === 'Cancelled') return acc;
+          acc[b.tankerSize] = (acc[b.tankerSize] || 0) + b.quantity;
+          return acc;
+        }, {} as Record<string, number>);
+
+        setReportData({ bills, totalSales, collected, pending, tankerCounts });
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'bills-history')
+    );
   }, [dateRange]);
 
-  const unsettledBills = useLiveQuery(
-    () => db.bills.where('isSettled').equals(0 as any).toArray() // index is numeric boolean usually or just check false
-  );
+  useEffect(() => {
+    const q = query(
+      collection(db, 'bills'),
+      where('isSettled', '==', false)
+    );
+
+    return onSnapshot(q, 
+      (snapshot) => setUnsettledBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'unsettled-bills')
+    );
+  }, []);
 
   const handleSettle = async (bill: Bill) => {
     if (bill.id && !bill.isSettled) {
-      // 1. Mark as settled
-      await db.bills.update(bill.id, { isSettled: true });
-      
-      // 2. Add to customer pending if there is any pending amount
-      if (bill.status === 'Delivered') {
-        let pendingToAdd = 0;
-        if (bill.paymentMode === 'Pending') {
-          pendingToAdd = bill.grandTotal;
-        } else if (bill.paymentMode === 'Split' && bill.splitPayments) {
-          pendingToAdd = bill.splitPayments.pending;
-        }
+      try {
+        await runTransaction(db, async (transaction) => {
+          const billRef = doc(db, 'bills', bill.id!);
+          const customerRef = doc(db, 'customers', bill.customerId);
 
-        if (pendingToAdd > 0) {
-          const customer = await db.customers.get(bill.customerId);
-          if (customer) {
-            await db.customers.update(bill.customerId, {
-              pendingAmount: (customer.pendingAmount || 0) + pendingToAdd
+          // 1. Calculate values for read (if needed)
+          let pendingToAdd = 0;
+          if (bill.status === 'Delivered') {
+            if (bill.paymentMode === 'Pending') {
+              pendingToAdd = bill.grandTotal;
+            } else if (bill.paymentMode === 'Split' && bill.splitPayments) {
+              pendingToAdd = bill.splitPayments.pending;
+            }
+          }
+
+          // 2. READS FIRST
+          let currentPending = 0;
+          let customerExists = false;
+          if (pendingToAdd > 0) {
+            const custDoc = await transaction.get(customerRef);
+            if (custDoc.exists()) {
+              currentPending = custDoc.data().pendingAmount || 0;
+              customerExists = true;
+            }
+          }
+
+          // 3. WRITES LAST
+          transaction.update(billRef, { isSettled: true });
+
+          if (pendingToAdd > 0 && customerExists) {
+            transaction.update(customerRef, {
+              pendingAmount: currentPending + pendingToAdd
             });
           }
-        }
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `settle/${bill.id}`);
       }
     }
   };
@@ -85,12 +121,12 @@ export function ReportView() {
     for (const bill of unsettledBills) {
       await handleSettle(bill);
     }
-    alert('All bills posted to ledger successfully!');
+    alert('All tokens posted to ledger successfully!');
   };
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    documentTitle: `Bill_${selectedBillForPrint?.billNumber || 'Order'}`,
+    documentTitle: `Token_${selectedBillForPrint?.billNumber || 'Order'}`,
     onAfterPrint: () => setSelectedBillForPrint(null)
   });
 
@@ -109,7 +145,7 @@ export function ReportView() {
               className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl"
             >
               <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
-                <span className="font-bold text-slate-800">Re-print Bill</span>
+                <span className="font-bold text-slate-800">Re-print Trip Token</span>
                 <button onClick={() => setSelectedBillForPrint(null)} className="bg-white p-2 rounded-full shadow-sm text-slate-400">
                   <XCircle size={20}/>
                 </button>
@@ -217,7 +253,11 @@ export function ReportView() {
                   </button>
                   <div>
                     <div className="font-bold text-sm tracking-tight text-slate-800">{bill.customerName}</div>
-                    <div className="text-[10px] text-slate-400 font-medium">{format(bill.date, 'dd MMM yyyy')} • {bill.billNumber}</div>
+                    <div className="text-[10px] text-slate-400 font-medium">
+                      {bill.createdAt?.toDate 
+                        ? format(bill.createdAt.toDate(), 'dd MMM yyyy, hh:mm a') 
+                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+                    </div>
                   </div>
                 </div>
                 <div className="text-right">
@@ -237,7 +277,7 @@ export function ReportView() {
             <div>
               <h4 className="font-bold text-orange-900 text-sm">Post to Ledger</h4>
               <p className="text-xs text-orange-700 leading-relaxed mt-1">
-                Bills will be added to customer account balances and closed for the day after settlement.
+                Trip Tokens will be added to customer account balances and closed for the day after settlement.
               </p>
             </div>
           </div>
@@ -245,7 +285,7 @@ export function ReportView() {
           {unsettledBills && unsettledBills.length > 0 ? (
             <>
               <div className="flex justify-between items-center mb-4">
-                <span className="text-sm font-semibold text-slate-500">{unsettledBills.length} Unsettled Bills</span>
+                <span className="text-sm font-semibold text-slate-500">{unsettledBills.length} Unsettled Tokens</span>
                 <button 
                   onClick={settleAll}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase shadow-lg shadow-blue-100"
@@ -288,7 +328,7 @@ export function ReportView() {
                 <CheckSquare size={40} />
               </div>
               <h3 className="text-lg font-bold text-slate-800">All Settled!</h3>
-              <p className="text-slate-400 text-sm max-w-[200px] mx-auto mt-1">No pending bills for today's ledger.</p>
+              <p className="text-slate-400 text-sm max-w-[200px] mx-auto mt-1">No pending trip tokens for today's ledger.</p>
             </div>
           )}
         </motion.div>

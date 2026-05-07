@@ -1,25 +1,30 @@
 import React from 'react';
-import { Bill } from '../db';
+import { Bill } from '../types';
 import { formatCurrency } from '../constants';
 import { Logo } from './Logo';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface ThermalInvoiceProps {
   bill: Bill;
 }
 
 export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
+  // UPI Payment Link
+  const upiId = "rajha94133@barodampay"; // Business UPI ID
+  const upiLink = `upi://pay?pa=${upiId}&pn=Rajhans%20Steel%20And%20Water&am=${bill.grandTotal}&cu=INR&tn=Token%20${bill.billNumber}`;
+
   return (
     <div className="bg-white p-6 shadow-sm border border-slate-200" style={{ width: '80mm', margin: '0 auto', fontFamily: 'Inter' }}>
       <div className="flex flex-col items-center border-b border-dashed pb-4 mb-4">
         <Logo size={64} className="mb-2" />
-        <h2 className="text-xl font-bold uppercase">Rajhans Water Tanker</h2>
+        <h2 className="text-xl font-bold uppercase">Rajhans steel and Water</h2>
         <p className="text-xs text-slate-500">Supplier & Service</p>
         <p className="text-[10px] mt-1 whitespace-pre-line">Behind balaji dharm kanta, near puniya wines jaipur road sikar, Rajasthan 332001</p>
         <p className="text-[10px]">Ph: +91 94133 39987</p>
       </div>
 
       <div className="space-y-1 text-xs mb-4">
-        <div className="flex justify-between"><span>Bill No:</span> <span className="font-bold">{bill.billNumber}</span></div>
+        <div className="flex justify-between"><span>Token No:</span> <span className="font-bold">{bill.billNumber}</span></div>
         <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
         {bill.driverName && (
           <div className="flex justify-between items-center">
@@ -96,11 +101,24 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
         )}
       </div>
 
+      <div className="mt-4 flex flex-col items-center border-t border-dashed pt-4">
+        <p className="text-[10px] font-bold mb-2 uppercase text-slate-700">Scan to Pay via UPI</p>
+        <div className="bg-white p-2 border-2 border-slate-900 rounded-lg shadow-sm">
+          <QRCodeSVG 
+            value={upiLink}
+            size={100}
+            level="H"
+            includeMargin={false}
+          />
+        </div>
+        <p className="text-[9px] mt-2 font-medium text-slate-500">{upiId}</p>
+      </div>
+
       <div className="mt-6 text-center text-[9px] border-t border-dashed pt-4 leading-relaxed">
         <p className="font-bold text-slate-900 border border-slate-900 p-1 mb-2">NOTE</p>
-        <p className="text-slate-600">नये बुकिंग आदेश के लिए कृपया ड्राइवर के नंबर पर फोन न करें।</p>
+        <p className="text-slate-600 uppercase">नये बुकिंग आदेश के लिए कृपया ड्राइवर के नंबर पर फोन न करें।</p>
         <p className="text-slate-900 font-bold mt-0.5">केवल ऑफिस के नंबर (+91 94133 39987) पर ही संपर्क करें।</p>
-        <p className="mt-2 text-[8px] text-slate-400 italic">धन्यवाद - राजहंस ट्रांसपोर्ट</p>
+        <p className="mt-2 text-[9px] text-slate-900 font-bold italic">धन्यवाद Rajhans steel and Water ☺</p>
       </div>
     </div>
   );

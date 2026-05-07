@@ -1,31 +1,81 @@
-import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
-import { Plus, Phone, User, Trash2, X, Truck } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, onSnapshot, addDoc, deleteDoc, doc } from 'firebase/firestore';
+import { Driver } from '../types';
+import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Map as MapIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { ConfirmationModal } from './ConfirmationModal';
+import { DriverTrackingAdmin } from './DriverTrackingAdmin';
 
 export function DriverManagement() {
   const [isAdding, setIsAdding] = useState(false);
+  const [showLiveMap, setShowLiveMap] = useState(false);
   const [newDriver, setNewDriver] = useState({ name: '', mobile: '' });
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
 
-  const drivers = useLiveQuery(() => db.drivers.toArray());
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'drivers'));
+    return onSnapshot(q, 
+      (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'drivers')
+    );
+  }, []);
+
+  const handleShareTrackingLink = async (driver: Driver) => {
+    if (!driver.id) {
+      alert("Error: Driver ID missing. Please refresh and try again.");
+      return;
+    }
+    
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+    const url = `${baseUrl}?driverId=${driver.id}`;
+    
+    const shareText = `Hi ${driver.name}, please open this link to start sharing your live location for tanker tracking at Rajhans Steel and Water: ${url}`;
+    
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Rajhans Driver Tracking',
+          text: shareText,
+          url: url
+        });
+      } else {
+        await navigator.clipboard.writeText(url);
+        alert('Tracking link copied to clipboard!\n\nSend this link to the driver.');
+      }
+    } catch (err) {
+      // Ignore abort errors from share sheet
+      if (err instanceof Error && err.name !== 'AbortError') {
+        console.error('Share error:', err);
+        await navigator.clipboard.writeText(url);
+        alert('Tracking link copied to clipboard!');
+      }
+    }
+  };
 
   const handleAddDriver = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDriver.name || !newDriver.mobile) return;
     
-    await db.drivers.add({
-      ...newDriver,
-      mobile: newDriver.mobile.replace(/\D/g, '')
-    });
-    
-    setNewDriver({ name: '', mobile: '' });
-    setIsAdding(false);
+    try {
+      await addDoc(collection(db, 'drivers'), {
+        ...newDriver,
+        mobile: newDriver.mobile.replace(/\D/g, '')
+      });
+      setNewDriver({ name: '', mobile: '' });
+      setIsAdding(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'drivers');
+    }
   };
 
-  const deleteDriver = async (id: number) => {
-    if (confirm('Delete this driver?')) {
-      await db.drivers.delete(id);
+  const deleteDriver = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'drivers', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `drivers/${id}`);
     }
   };
 
@@ -37,12 +87,21 @@ export function DriverManagement() {
             <h1 className="text-3xl font-display font-bold text-slate-900 tracking-tight">Tanker Drivers</h1>
             <p className="text-slate-500 text-sm">{drivers?.length || 0} active drivers</p>
           </div>
-          <button 
-            onClick={() => setIsAdding(true)}
-            className="w-12 h-12 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all hover:scale-105 active:scale-95"
-          >
-            <Plus size={24} />
-          </button>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setShowLiveMap(true)}
+              className="px-5 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center gap-2 font-bold hover:bg-indigo-100 transition-all active:scale-95"
+            >
+              <MapIcon size={20} />
+              <span className="hidden sm:inline">Live Map</span>
+            </button>
+            <button 
+              onClick={() => setIsAdding(true)}
+              className="w-12 h-12 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all hover:scale-105 active:scale-95"
+            >
+              <Plus size={24} />
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -66,6 +125,13 @@ export function DriverManagement() {
                 </div>
                 
                 <div className="flex gap-2">
+                  <button 
+                    onClick={() => handleShareTrackingLink(driver)}
+                    className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors"
+                    title="Share Tracking Link"
+                  >
+                    <Share2 size={18} />
+                  </button>
                   <a 
                     href={`tel:${driver.mobile}`}
                     className="w-10 h-10 bg-green-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-green-100 hover:scale-110 active:scale-95 transition-transform"
@@ -73,7 +139,7 @@ export function DriverManagement() {
                     <Phone size={18} />
                   </a>
                   <button 
-                    onClick={() => driver.id && deleteDriver(driver.id)}
+                    onClick={() => driver.id && setDeleteConfirm({ id: driver.id, name: driver.name })}
                     className="w-10 h-10 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center hover:bg-red-50 hover:text-red-500 transition-colors"
                   >
                     <Trash2 size={18} />
@@ -161,6 +227,18 @@ export function DriverManagement() {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmationModal 
+        isOpen={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={() => deleteConfirm && deleteDriver(deleteConfirm.id)}
+        title="Delete Driver?"
+        message={`Are you sure you want to delete ${deleteConfirm?.name}? This action cannot be undone.`}
+      />
+
+      {showLiveMap && (
+        <DriverTrackingAdmin onClose={() => setShowLiveMap(false)} />
+      )}
     </div>
   );
 }

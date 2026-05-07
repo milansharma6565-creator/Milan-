@@ -1,6 +1,7 @@
-import React from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import React, { useState, useEffect } from 'react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc } from 'firebase/firestore';
+import { Customer, Driver, Bill, Tractor, LedgerEntry } from '../types';
 import { 
   TrendingUp, 
   Clock, 
@@ -15,7 +16,9 @@ import {
   Smartphone,
   Banknote,
   History,
-  Share2
+  Share2,
+  Trash2,
+  MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -24,55 +27,95 @@ import { startOfDay, endOfDay, subDays, format } from 'date-fns';
 import { useReactToPrint } from 'react-to-print';
 import { ThermalInvoice } from './ThermalInvoice';
 import { toJpeg } from 'html-to-image';
+import { ConfirmationModal } from './ConfirmationModal';
 
 export function Dashboard() {
   const todayStart = startOfDay(new Date());
   
-  const stats = useLiveQuery(async () => {
-    const allBills = await db.bills.toArray();
-    const allCustomers = await db.customers.toArray();
-    const drivers = await db.drivers.toArray();
-    const tractors = await db.tractors.toArray();
-    
-    const todayBills = allBills.filter(b => b.date >= todayStart);
+  const [bills, setBills] = useState<Bill[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [tractors, setTractors] = useState<Tractor[]>([]);
+  const [stats, setStats] = useState<any>(null);
+
+  useEffect(() => {
+    const unsubBills = onSnapshot(collection(db, 'bills'), 
+      (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'bills-dashboard')
+    );
+    const unsubCustomers = onSnapshot(collection(db, 'customers'), 
+      (snapshot) => setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'customers-dashboard')
+    );
+    const unsubDrivers = onSnapshot(collection(db, 'drivers'), 
+      (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'drivers-dashboard')
+    );
+    const unsubTractors = onSnapshot(collection(db, 'tractors'), 
+      (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tractor))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'tractors-dashboard')
+    );
+
+    return () => {
+      unsubBills();
+      unsubCustomers();
+      unsubDrivers();
+      unsubTractors();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!bills.length || !customers.length) return;
+    // ... rest of effect
+
+    const todayBills = bills.filter(b => {
+      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+      return bDate >= todayStart;
+    });
 
     const todayCollection = todayBills
       .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
       .reduce((sum, b) => sum + b.grandTotal, 0);
       
-    const totalPending = allCustomers.reduce((sum, c) => sum + (c.pendingAmount || 0), 0);
-    const deliveredCount = allBills.filter(b => b.status === 'Delivered').length;
-    const unsettledCount = allBills.filter(b => !b.isSettled).length;
+    const totalPending = customers.reduce((sum, c) => sum + (c.pendingAmount || 0), 0);
+    const deliveredCount = bills.filter(b => b.status === 'Delivered').length;
+    const unsettledCount = bills.filter(b => !b.isSettled).length;
     
-    // Chart data for last 7 days
     const chartData = Array.from({ length: 7 }).map((_, i) => {
       const date = subDays(new Date(), 6 - i);
-      const dayBills = allBills.filter(b => 
-        format(b.date, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') && 
-        b.status !== 'Cancelled'
-      );
+      const dayBills = bills.filter(b => {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        return format(bDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') && 
+               b.status !== 'Cancelled';
+      });
       return {
         name: format(date, 'EEE'),
         amount: dayBills.reduce((sum, b) => sum + b.grandTotal, 0)
       };
     });
 
-    return {
+    const allBillsSorted = [...bills].sort((a, b) => {
+      const timeA = a.createdAt?.seconds || 0;
+      const timeB = b.createdAt?.seconds || 0;
+      return timeB - timeA;
+    });
+
+    setStats({
       todayCollection,
       totalPending,
       deliveredCount,
       unsettledCount,
-      customerCount: allCustomers.length,
+      customerCount: customers.length,
       drivers,
       tractors,
       chartData,
-      recentBills: allBills.slice(-10).reverse()
-    };
-  });
-
+      recentBills: allBillsSorted.slice(0, 10)
+    });
+  }, [bills, customers, drivers, tractors]);
 
   const [editingBill, setEditingBill] = React.useState<any>(null);
   const [showPaymentSelection, setShowPaymentSelection] = React.useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, number: string } | null>(null);
 
   const handleStatusUpdate = async (status: 'Delivered' | 'Pending' | 'Cancelled') => {
     if (editingBill?.id) {
@@ -80,10 +123,13 @@ export function Dashboard() {
         setShowPaymentSelection(true);
         return;
       }
-      await db.bills.update(editingBill.id, { status });
-      // Refresh editing bill to show changes
-      const updated = await db.bills.get(editingBill.id);
-      setEditingBill(updated);
+      try {
+        await updateDoc(doc(db, 'bills', editingBill.id), { status });
+        const updated = await getDoc(doc(db, 'bills', editingBill.id));
+        setEditingBill({ id: updated.id, ...updated.data() });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `bills/${editingBill.id}`);
+      }
     }
   };
 
@@ -94,102 +140,141 @@ export function Dashboard() {
     const finalPaymentMode = isCredit ? 'Pending' : mode;
 
     try {
-      await db.transaction('rw', [db.bills, db.ledger, db.customers], async () => {
-        // 1. Update Bill
-        await db.bills.update(editingBill.id, { 
+      await runTransaction(db, async (transaction) => {
+        const billRef = doc(db, 'bills', editingBill.id);
+        const customerRef = doc(db, 'customers', editingBill.customerId);
+        
+        // READS FIRST
+        let currentPending = 0;
+        if (isCredit) {
+          const custDoc = await transaction.get(customerRef);
+          if (custDoc.exists()) {
+            currentPending = custDoc.data().pendingAmount || 0;
+          }
+        }
+
+        // WRITES SECOND
+        transaction.update(billRef, { 
           status: 'Delivered', 
           paymentMode: finalPaymentMode,
           isSettled: !isCredit 
         });
 
-        // 2. Ledger & Customer Logic
         if (isCredit) {
-          // Increase customer's pending amount (Due Account)
-          const customer = await db.customers.get(editingBill.customerId);
-          if (customer) {
-            await db.customers.update(editingBill.customerId, {
-              pendingAmount: (customer.pendingAmount || 0) + editingBill.grandTotal
-            });
-          }
+          transaction.update(customerRef, {
+            pendingAmount: currentPending + editingBill.grandTotal
+          });
         } else {
-          // Record Income in Ledger (Cash/Bank Account)
-          await db.ledger.add({
-            date: new Date(),
+          const ledgerRef = collection(db, 'ledger');
+          const newLedgerDoc = {
+            date: new Date().toISOString(),
             type: 'Income',
             category: 'Customer Collection',
             partyName: editingBill.customerName,
             partyId: editingBill.customerId,
-            description: `Payment for Bill #${editingBill.billNumber} via ${mode}`,
+            description: `Payment for Token #${editingBill.billNumber} via ${mode}`,
             amount: editingBill.grandTotal,
             paymentMode: mode === 'UPI' ? 'UPI' : 'Cash',
-            createdAt: new Date()
-          });
+            createdAt: serverTimestamp()
+          };
+          transaction.set(doc(ledgerRef), newLedgerDoc);
         }
       });
 
       setShowPaymentSelection(false);
       setEditingBill(null);
-    } catch (err) {
-      alert('Error settling bill: ' + err);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'transaction');
     }
   };
 
   const handlePaymentUpdate = async (mode: typeof PAYMENT_MODES[number]) => {
     if (editingBill?.id) {
       const oldMode = editingBill.paymentMode;
-      await db.bills.update(editingBill.id, { paymentMode: mode });
       
-      // If moving from Pending to Paid, record in ledger and reduce customer balance
-      if (oldMode === 'Pending' && mode !== 'Pending') {
-        await db.ledger.add({
-          date: new Date(),
-          type: 'Income',
-          category: 'Customer Collection',
-          partyName: editingBill.customerName,
-          partyId: editingBill.customerId,
-          description: `Payment for Bill #${editingBill.billNumber}`,
-          amount: editingBill.grandTotal,
-          paymentMode: mode === 'Split' ? 'Cash' : (mode as any),
-          createdAt: new Date()
-        });
-        
-        const customer = await db.customers.get(editingBill.customerId);
-        if (customer) {
-          await db.customers.update(editingBill.customerId, {
-            pendingAmount: Math.max(0, (customer.pendingAmount || 0) - editingBill.grandTotal)
-          });
-        }
-      }
-      
-      // If moving from Paid to Pending, we should technically revert but that gets complex
-      // For now, let's just handle the primary flow of settling bills.
+      try {
+        if (oldMode === 'Pending' && mode !== 'Pending') {
+          await runTransaction(db, async (transaction) => {
+            const billRef = doc(db, 'bills', editingBill.id);
+            const customerRef = doc(db, 'customers', editingBill.customerId);
+            const ledgerRef = collection(db, 'ledger');
 
-      // Refresh editing bill
-      const updated = await db.bills.get(editingBill.id);
-      setEditingBill(updated);
+            // READS FIRST
+            let currentPending = 0;
+            const custDoc = await transaction.get(customerRef);
+            if (custDoc.exists()) {
+              currentPending = custDoc.data().pendingAmount || 0;
+            }
+
+            // WRITES SECOND
+            transaction.update(billRef, { paymentMode: mode });
+
+            const newLedgerDoc = {
+              date: new Date().toISOString(),
+              type: 'Income',
+              category: 'Customer Collection',
+              partyName: editingBill.customerName,
+              partyId: editingBill.customerId,
+              description: `Payment for Token #${editingBill.billNumber}`,
+              amount: editingBill.grandTotal,
+              paymentMode: mode === 'Split' ? 'Cash' : (mode as any),
+              createdAt: serverTimestamp()
+            };
+            transaction.set(doc(ledgerRef), newLedgerDoc);
+
+            transaction.update(customerRef, {
+              pendingAmount: Math.max(0, currentPending - editingBill.grandTotal)
+            });
+          });
+        } else {
+          await updateDoc(doc(db, 'bills', editingBill.id), { paymentMode: mode });
+        }
+        
+        const updated = await getDoc(doc(db, 'bills', editingBill.id));
+        setEditingBill({ id: updated.id, ...updated.data() });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'transaction');
+      }
     }
   };
 
   const handleDriverUpdate = async (driver: { name: string; mobile: string }) => {
     if (editingBill?.id) {
-      await db.bills.update(editingBill.id, { 
-        driverName: driver.name,
-        driverMobile: driver.mobile
-      });
-      const updated = await db.bills.get(editingBill.id);
-      setEditingBill(updated);
+      try {
+        await updateDoc(doc(db, 'bills', editingBill.id), { 
+          driverName: driver.name,
+          driverMobile: driver.mobile
+        });
+        const updated = await getDoc(doc(db, 'bills', editingBill.id));
+        setEditingBill({ id: updated.id, ...updated.data() });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `bills/${editingBill.id}`);
+      }
     }
   };
 
-  const handleTractorUpdate = async (tractorId: number) => {
+  const handleTractorUpdate = async (tractorId: string) => {
     if (editingBill?.id) {
-      await db.bills.update(editingBill.id, { tractorId });
-      const updated = await db.bills.get(editingBill.id);
-      setEditingBill(updated);
+      try {
+        await updateDoc(doc(db, 'bills', editingBill.id), { tractorId });
+        const updated = await getDoc(doc(db, 'bills', editingBill.id));
+        setEditingBill({ id: updated.id, ...updated.data() });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `bills/${editingBill.id}`);
+      }
     }
   };
 
-  const shareBillImage = async (bill: any) => {
+  const handleDeleteToken = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'bills', id));
+      setEditingBill(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `bills/${id}`);
+    }
+  };
+
+  const shareBillImage = async (bill: any, target: 'customer' | 'driver' = 'customer') => {
     if (!printRef.current) return;
     
     try {
@@ -201,64 +286,77 @@ export function Dashboard() {
       });
       
       const blob = await (await fetch(dataUrl)).blob();
-      const fileName = `Bill_${bill.billNumber}.jpg`;
+      const fileName = `Token_${bill.billNumber}.jpg`;
       const file = new File([blob], fileName, { type: 'image/jpeg' });
 
       // Try Web Share API (Best for Mobile WhatsApp)
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `Bill #${bill.billNumber}`,
-          text: `Invoice from Rajhans Transport for amount ₹${bill.grandTotal}`
-        });
-        return;
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Token #${bill.billNumber}`,
+            text: `Trip Token from Rajhans steel and Water. Target: ${target.toUpperCase()}`
+          });
+          return;
+        } catch (shareErr: any) {
+          if (shareErr.name === 'AbortError') return;
+          console.warn('Web Share failed, trying fallback:', shareErr);
+        }
       }
 
-      // Try Copy to Clipboard (Excellent for Desktop users - they can just Ctrl+V in WhatsApp)
+      // Try Copy to Clipboard
       try {
         if (navigator.clipboard && window.ClipboardItem) {
           const item = new ClipboardItem({ [blob.type]: blob });
           await navigator.clipboard.write([item]);
-          alert('Bill image copied to clipboard! opening WhatsApp... Just press Ctrl+V to send it.');
+          alert('Token image copied! Opening WhatsApp... Just Paste (Ctrl+V) and send.');
         } else {
-          // Fallback: Download
           const link = document.createElement('a');
           link.href = dataUrl;
           link.download = fileName;
           link.click();
-          alert('Bill Image Downloaded. You can now share it manually on WhatsApp.');
         }
       } catch (err) {
-        console.warn('Clipboard share failed, falling back to download', err);
-        const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = fileName;
-        link.click();
+        console.warn('Clipboard share failed', err);
       }
 
-      // Open WhatsApp link as fallback
-      sendWhatsApp(bill);
+      // Open WhatsApp text as fallback
+      sendWhatsApp(bill, target);
     } catch (err) {
       console.error('Error sharing image:', err);
-      // Fallback to text WhatsApp
-      sendWhatsApp(bill);
+      sendWhatsApp(bill, target);
     }
   };
 
-  const sendWhatsApp = (bill: any) => {
-    // Robust cleaning of phone number
-    const cleanPhone = (bill.customerMobile || '').replace(/\D/g, '');
+  const sendWhatsApp = (bill: any, target: 'customer' | 'driver' = 'customer') => {
+    const rawPhone = target === 'customer' ? (bill.customerMobile || '') : (bill.driverMobile || '');
+    if (!rawPhone) {
+      alert(`No ${target} mobile number found.`);
+      return;
+    }
+
+    const cleanPhone = rawPhone.replace(/\D/g, '');
     const phone = cleanPhone.startsWith('91') && cleanPhone.length > 10 
       ? cleanPhone 
       : `91${cleanPhone.slice(-10)}`;
 
-    const message = `*Bill Status Update - Rajhans Transport* 🚛\n\n` +
-      `*Bill No:* #${bill.billNumber}\n` +
-      `*Customer:* ${bill.customerName}\n` +
-      `*Total Amount:* ₹${bill.grandTotal}\n` +
-      `*Status:* ${bill.status}\n` +
-      `*Driver:* ${bill.driverName || 'Not Assigned'}\n\n` +
-      `Thank you for choosing Rajhans Transport!`;
+    const message = target === 'customer' 
+      ? `*Token Details - Rajhans steel and Water* 🚛\n\n` +
+        `Dear ${bill.customerName},\n` +
+        `Your trip token #${bill.billNumber} has been generated.\n\n` +
+        `*Amount:* ₹${bill.grandTotal}\n` +
+        `*Tractor:* ${stats.tractors.find((t: any) => t.id === bill.tractorId)?.name || 'N/A'}\n` +
+        `*Driver:* ${bill.driverName || 'N/A'}\n` +
+        `*Status:* ${bill.status}\n\n` +
+        `Thank you for choosing Rajhans steel and Water!`
+      : `*Duty Assignment - Rajhans steel and Water* 🚛\n\n` +
+        `Hi ${bill.driverName},\n` +
+        `New trip assigned to you.\n\n` +
+        `*Token:* #${bill.billNumber}\n` +
+        `*Customer:* ${bill.customerName}\n` +
+        `*Address:* ${bill.customerAddress || 'N/A'}\n` +
+        `*Tanker:* ${bill.tankerSize}\n\n` +
+        `Please proceed for delivery.`;
     
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
   };
@@ -267,10 +365,19 @@ export function Dashboard() {
   const printRef = React.useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    documentTitle: `Bill_${editingBill?.billNumber || 'Order'}`,
+    documentTitle: `Token_${editingBill?.billNumber || 'Order'}`,
   });
 
-  if (!stats) return null;
+  if (!stats) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] p-4 text-center">
+        <div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-500 font-medium">Loading Dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 pb-24">
@@ -280,7 +387,7 @@ export function Dashboard() {
             <Droplets size={28} />
           </div>
           <div>
-            <h1 className="text-2xl font-display font-bold">Rajhans Water</h1>
+            <h1 className="text-2xl font-display font-bold">Rajhans steel and Water</h1>
             <p className="text-slate-500 text-sm">Dashboard Overview</p>
           </div>
         </div>
@@ -327,7 +434,7 @@ export function Dashboard() {
           </div>
           <div>
             <div className="text-xs text-slate-400 font-medium">Delivered</div>
-            <div className="font-bold text-slate-800">{stats.deliveredCount} Bills</div>
+            <div className="font-bold text-slate-800">{stats.deliveredCount} Tokens</div>
           </div>
         </div>
         <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-50 shadow-sm">
@@ -385,10 +492,10 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Recent Bills */}
+      {/* Recent Tokens */}
       <div>
         <div className="flex justify-between items-center mb-4">
-          <h3 className="font-display font-bold text-lg">Recent Bills</h3>
+          <h3 className="font-display font-bold text-lg">Recent Tokens</h3>
           <button className="text-blue-600 text-sm font-semibold flex items-center gap-1">
             View All <ArrowRight size={14} />
           </button>
@@ -396,7 +503,7 @@ export function Dashboard() {
         <div className="flex flex-col gap-3">
           {stats.recentBills.length === 0 && (
             <div className="text-center py-8 text-slate-400 bg-white rounded-3xl border border-dashed">
-              No bills generated yet
+              No tokens generated yet
             </div>
           )}
           {stats.recentBills.map(bill => (
@@ -418,7 +525,9 @@ export function Dashboard() {
                 <div>
                   <div className="font-bold">{bill.customerName}</div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-slate-400 font-medium">{format(bill.date, 'dd MMM, hh:mm a')}</span>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+                    </span>
                     {(bill.tractorId || bill.driverName) && (
                       <div className="flex items-center gap-1.5 ml-1">
                         <span className="w-1 h-1 rounded-full bg-slate-200" />
@@ -460,7 +569,7 @@ export function Dashboard() {
                   <CheckCircle2 size={32} />
                 </div>
                 <h3 className="text-2xl font-display font-bold text-slate-900">Record Payment</h3>
-                <p className="text-slate-500 font-medium">Order: #{editingBill.billNumber}</p>
+                <p className="text-slate-500 font-medium">Token: #{editingBill.billNumber}</p>
                 <div className="mt-4 text-3xl font-display font-black text-slate-900">
                   {formatCurrency(editingBill.grandTotal)}
                 </div>
@@ -532,12 +641,21 @@ export function Dashboard() {
                   <h3 className="text-xl font-bold">{editingBill.customerName}</h3>
                   <p className="text-sm text-slate-400 font-mono">{editingBill.billNumber}</p>
                 </div>
-                <button 
-                  onClick={() => setEditingBill(null)}
-                  className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center"
-                >
-                  <AlertCircle size={20} className="rotate-45" />
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => editingBill && setDeleteConfirm({ id: editingBill.id, number: editingBill.billNumber })}
+                    className="w-10 h-10 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors"
+                    title="Delete Token"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  <button 
+                    onClick={() => setEditingBill(null)}
+                    className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center"
+                  >
+                    <AlertCircle size={20} className="rotate-45" />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-6">
@@ -622,19 +740,26 @@ export function Dashboard() {
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-slate-100 flex flex-col gap-3">
+                <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-3">
                   <button 
-                    onClick={() => shareBillImage(editingBill)}
-                    className="w-full bg-[#25D366] text-white flex items-center justify-center gap-3 py-4 rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all"
+                    onClick={() => shareBillImage(editingBill, 'customer')}
+                    className="bg-[#25D366] text-white flex flex-col items-center justify-center gap-1 p-4 rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all"
                   >
-                    <Share2 size={24} />
-                    <span>Share on WhatsApp</span>
+                    <MessageSquare size={20} />
+                    <span className="text-[10px] uppercase">Customer Copy</span>
+                  </button>
+                  <button 
+                    onClick={() => shareBillImage(editingBill, 'driver')}
+                    className="bg-slate-800 text-white flex flex-col items-center justify-center gap-1 p-4 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all"
+                  >
+                    <Share2 size={20} />
+                    <span className="text-[10px] uppercase">Driver Copy</span>
                   </button>
                   <button 
                     onClick={() => handlePrint()}
-                    className="w-full material-btn bg-slate-900 text-white flex items-center justify-center gap-2 py-4 shadow-xl shadow-slate-200"
+                    className="col-span-2 material-btn bg-white border-2 border-slate-100 text-slate-900 flex items-center justify-center gap-2 py-4 shadow-sm"
                   >
-                    <Printer size={20} /> Print Bill
+                    <Printer size={20} /> Print Token
                   </button>
                 </div>
               </div>
@@ -649,6 +774,14 @@ export function Dashboard() {
           {editingBill && <ThermalInvoice bill={editingBill} />}
         </div>
       </div>
+
+      <ConfirmationModal 
+        isOpen={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={() => deleteConfirm && handleDeleteToken(deleteConfirm.id)}
+        title="Delete Trip Token?"
+        message={`Are you sure you want to delete Token #${deleteConfirm?.number}? This will remove the record from history, but will NOT reverse manual payments or existing customer balance changes.`}
+      />
     </div>
   );
 }

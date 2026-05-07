@@ -1,7 +1,5 @@
-import Dexie, { Table } from 'dexie';
-
 export interface Customer {
-  id?: number;
+  id?: string;
   name: string;
   mobile: string;
   secondaryMobiles?: string[];
@@ -11,14 +9,14 @@ export interface Customer {
   notes?: string;
   pendingAmount: number;
   lastRate?: number;
-  createdAt: Date;
+  createdAt: any;
 }
 
 export interface Bill {
-  id?: number;
+  id?: string;
   billNumber: string;
-  date: Date;
-  customerId: number;
+  date: any;
+  customerId: string;
   customerName: string;
   customerMobile: string;
   customerAddress: string;
@@ -38,80 +36,65 @@ export interface Bill {
   };
   driverName?: string;
   driverMobile?: string;
-  tractorId?: number;
+  tractorId?: string;
   status: 'Delivered' | 'Pending' | 'Cancelled' | 'Printed';
   isSettled: boolean;
-  createdAt: Date;
+  createdAt: any;
 }
 
 export interface Tractor {
-  id?: number;
+  id?: string;
   name: string;
   vehicleNumber: string;
-  createdAt: Date;
+  createdAt: any;
 }
 
 export interface DieselLog {
-  id?: number;
-  tractorId: number;
+  id?: string;
+  tractorId: string;
   tractorName: string;
-  date: Date;
+  date: any;
   liters: number;
   amount: number;
   description: string;
-  createdAt: Date;
+  createdAt: any;
 }
 
 export interface MaintenanceLog {
-  id?: number;
-  tractorId: number;
+  id?: string;
+  tractorId: string;
   tractorName: string;
-  date: Date;
+  date: any;
   amount: number;
   description: string;
-  createdAt: Date;
+  createdAt: any;
 }
 
 export interface LedgerEntry {
-  id?: number;
-  date: Date;
+  id?: string;
+  date: any;
   type: 'Income' | 'Expense';
   category: string;
   partyName?: string;
-  partyId?: number;
+  partyId?: string;
   description: string;
   amount: number;
   paymentMode: 'Cash' | 'UPI' | 'Bank Transfer';
-  createdAt: Date;
-}
-
-export class RajhansDatabase extends Dexie {
-  customers!: Table<Customer>;
-  bills!: Table<Bill>;
-  drivers!: Table<Driver>;
-  ledger!: Table<LedgerEntry>;
-  tractors!: Table<Tractor>;
-  dieselLogs!: Table<DieselLog>;
-  maintenanceLogs!: Table<MaintenanceLog>;
-
-  constructor() {
-    super('RajhansDB');
-    this.version(6).stores({
-      customers: '++id, &mobile, *secondaryMobiles, name',
-      bills: '++id, billNumber, date, customerId, status, isSettled, tractorId',
-      drivers: '++id, name, mobile',
-      ledger: '++id, date, type, category, partyId',
-      tractors: '++id, vehicleNumber',
-      dieselLogs: '++id, date, tractorId',
-      maintenanceLogs: '++id, date, tractorId'
-    });
-  }
+  createdAt: any;
 }
 
 export interface Driver {
-  id?: number;
+  id?: string;
   name: string;
   mobile: string;
 }
 
-export const db = new RajhansDatabase();
+export interface DriverLocation {
+  id?: string;
+  driverId: string;
+  driverName: string;
+  latitude: number;
+  longitude: number;
+  lastUpdated: any;
+  isActive: boolean;
+}

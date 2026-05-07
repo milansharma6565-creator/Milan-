@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, Customer } from '../db';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { Customer, Driver, Bill } from '../types';
 import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber } from '../constants';
 import { useReactToPrint } from 'react-to-print';
 import { ThermalInvoice } from './ThermalInvoice';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
+import { format } from 'date-fns';
 import { toJpeg } from 'html-to-image';
 
 export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
@@ -20,7 +19,35 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
   const [lastBill, setLastBill] = useState<any>(null);
   const [isQuickAdding, setIsQuickAdding] = useState(false);
   const [quickAddForm, setQuickAddForm] = useState({ name: '', mobile: '', address: '' });
+  const [quickAddValidation, setQuickAddValidation] = useState<{ name?: string }>({});
   const thermalRef = useRef<HTMLDivElement>(null);
+
+  // Real-time duplicate checking for Quick Register
+  useEffect(() => {
+    if (!isQuickAdding || !quickAddForm.name) {
+      setQuickAddValidation({});
+      return;
+    }
+    
+    const checkName = async () => {
+      const q = query(collection(db, 'customers'), where('name', '==', quickAddForm.name.trim()));
+      const snap = await getDocs(q);
+      
+      const nameExists = !snap.empty;
+      const mobileExists = snap.docs.some(doc => doc.data().mobile === quickAddForm.mobile);
+
+      if (nameExists && !mobileExists && quickAddForm.mobile) {
+        setQuickAddValidation({ name: 'name already exist try different name' });
+      } else if (nameExists && mobileExists) {
+        setQuickAddValidation({ name: 'customer already exist' });
+      } else {
+        setQuickAddValidation({});
+      }
+    };
+
+    const timer = setTimeout(checkName, 500);
+    return () => clearTimeout(timer);
+  }, [quickAddForm.name, quickAddForm.mobile, isQuickAdding]);
 
   const [form, setForm] = useState({
     billNumber: '',
@@ -39,31 +66,54 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
     splitPending: 0
   });
 
-  const drivers = useLiveQuery(() => db.drivers.toArray());
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [searchResults, setSearchResults] = useState<Customer[]>([]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'drivers'));
+    return onSnapshot(q, 
+      (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'drivers')
+    );
+  }, []);
 
   useEffect(() => {
     async function initBillNumber() {
-      const count = await db.bills.count();
-      setForm(prev => ({ ...prev, billNumber: generateBillNumber(count + 1) }));
+      try {
+        const snapshot = await getDocs(collection(db, 'bills'));
+        setForm(prev => ({ ...prev, billNumber: generateBillNumber(snapshot.size + 1) }));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, 'bills');
+      }
     }
     initBillNumber();
   }, []);
 
-  const searchResults = useLiveQuery(
-    async () => {
-      if (searchTerm.length < 2) return [];
-      const term = searchTerm.toLowerCase();
-      return db.customers
-        .filter(c => 
-          c.name.toLowerCase().includes(term) || 
-          c.mobile.includes(term) ||
-          (c.secondaryMobiles?.some(m => m.includes(term)) || false)
-        )
-        .limit(10)
-        .toArray();
-    },
-    [searchTerm]
-  );
+  useEffect(() => {
+    if (searchTerm.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    // Since Firestore doesn't support 'contains', we fetch all and filter client-side 
+    // or use prefix search. For now, let's fetch all customers and filter.
+    // In a real production app with thousands of customers, we'd use Algolia or prefix search.
+    const q = query(collection(db, 'customers'));
+    return onSnapshot(q, 
+      (snapshot) => {
+        const term = searchTerm.toLowerCase();
+        const filtered = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer))
+          .filter(c => 
+            c.name.toLowerCase().includes(term) || 
+            c.mobile.includes(term) ||
+            (c.secondaryMobiles?.some(m => m.includes(term)) || false)
+          )
+          .slice(0, 10);
+        setSearchResults(filtered);
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'customers')
+    );
+  }, [searchTerm]);
 
   const handleCustomerSelect = async (c: Customer) => {
     setSelectedCustomer(c);
@@ -74,11 +124,14 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
     }));
     setSearchTerm(c.name);
 
-    // If search term is a 10-digit number but not the primary or already secondary, add it
     const cleanTerm = searchTerm.replace(/\D/g, '');
     if (cleanTerm.length === 10 && cleanTerm !== c.mobile && !c.secondaryMobiles?.includes(cleanTerm)) {
       const updatedSecondaries = [...(c.secondaryMobiles || []), cleanTerm];
-      await db.customers.update(c.id!, { secondaryMobiles: updatedSecondaries });
+      try {
+        await updateDoc(doc(db, 'customers', c.id!), { secondaryMobiles: updatedSecondaries });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `customers/${c.id}`);
+      }
     }
   };
 
@@ -106,17 +159,25 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
       });
       
       const blob = await (await fetch(dataUrl)).blob();
-      const fileName = `Bill_${bill.billNumber}.jpg`;
+      const fileName = `Token_${bill.billNumber}.jpg`;
       const file = new File([blob], fileName, { type: 'image/jpeg' });
 
       // Try Web Share API (Best for Mobile WhatsApp)
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `Bill #${bill.billNumber}`,
-          text: `Invoice from Rajhans Transport for amount ₹${bill.grandTotal}`
-        });
-        return;
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Token #${bill.billNumber}`,
+            text: `Trip Token from Rajhans steel and Water for amount ₹${bill.grandTotal}`
+          });
+          return;
+        } catch (shareErr: any) {
+          if (shareErr.name === 'AbortError') {
+            console.log('Share canceled by user');
+            return; // Exit silently
+          }
+          console.warn('Web Share failed, trying fallback:', shareErr);
+        }
       }
 
       // Fallback: Download and Send Message
@@ -127,7 +188,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
 
       // Open WhatsApp link as fallback
       sendWhatsApp(bill);
-      alert('Bill Image Downloaded. You can now share it manually on WhatsApp.');
+      alert('Token Image Downloaded. You can now share it manually on WhatsApp.');
     } catch (err) {
       console.error('Error sharing image:', err);
       // Fallback to text WhatsApp
@@ -137,12 +198,12 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
 
   const sendWhatsApp = (bill: any) => {
     if (!selectedCustomer) return;
-    const message = `*Bill Generated - Rajhans Transport* 🚛\n\n` +
-      `*Bill No:* #${bill.billNumber}\n` +
+    const message = `*Trip Token Generated - Rajhans steel and Water* 🚛\n\n` +
+      `*Token No:* #${bill.billNumber}\n` +
       `*Date:* ${new Date(bill.date).toLocaleDateString()}\n` +
       `*Total Amount:* ₹${bill.grandTotal}\n` +
       `*Current Balance:* ₹${selectedCustomer.balance}\n\n` +
-      `Thank you for choosing Rajhans Transport!`;
+      `Thank you for choosing Rajhans steel and Water!`;
     
     // Using international format for mobile if needed, but assuming 10 digit Indian number
     const phone = selectedCustomer.mobile.startsWith('91') ? selectedCustomer.mobile : `91${selectedCustomer.mobile}`;
@@ -166,80 +227,114 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
       return;
     }
 
-    // Save sticky rate to customer
-    await db.customers.update(selectedCustomer.id!, { lastRate: form.rate });
+    try {
+      // Save sticky rate to customer
+      await updateDoc(doc(db, 'customers', selectedCustomer.id!), { lastRate: form.rate });
 
-    const billData = {
-      billNumber: form.billNumber,
-      date: new Date(form.date),
-      customerId: selectedCustomer.id!,
-      customerName: selectedCustomer.name,
-      customerMobile: selectedCustomer.mobile,
-      customerAddress: form.customAddress || selectedCustomer.address,
-      tankerSize: form.tankerSize,
-      quantity: form.quantity,
-      rate: form.rate,
-      totalAmount: subtotal,
-      extraCharges: form.extraCharges,
-      discount: form.discount,
-      grandTotal: grandTotal,
-      paymentMode: 'Pending',
-      driverName: form.driverName,
-      status: 'Pending',
-      isSettled: false,
-      createdAt: new Date()
-    };
+      const billData = {
+        billNumber: form.billNumber,
+        date: form.date, // Store as string ISO in firestore or convert to Date
+        customerId: selectedCustomer.id!,
+        customerName: selectedCustomer.name,
+        customerMobile: selectedCustomer.mobile,
+        customerAddress: form.customAddress || selectedCustomer.address,
+        tankerSize: form.tankerSize,
+        quantity: form.quantity,
+        rate: form.rate,
+        totalAmount: subtotal,
+        extraCharges: form.extraCharges,
+        discount: form.discount,
+        grandTotal: grandTotal,
+        paymentMode: 'Pending',
+        driverName: form.driverName,
+        status: 'Pending',
+        isSettled: false,
+        createdAt: serverTimestamp()
+      };
 
-    const id = await db.bills.add(billData as any);
-    setBookedBill({ ...billData, id });
-    setShowBookingSuccess(true);
-    
-    // Reset form for next entry partially
-    const count = await db.bills.count();
-    setForm(prev => ({
-      ...prev,
-      billNumber: generateBillNumber(count + 1),
-      quantity: 1,
-      extraCharges: 0,
-      discount: 0,
-      driverName: ''
-    }));
+      const docRef = await addDoc(collection(db, 'bills'), billData);
+      setBookedBill({ ...billData, id: docRef.id });
+      setShowBookingSuccess(true);
+      
+      // Reset form for next entry partially
+      const snapshotSize = (await getDocs(collection(db, 'bills'))).size;
+      setForm(prev => ({
+        ...prev,
+        billNumber: generateBillNumber(snapshotSize + 1),
+        quantity: 1,
+        extraCharges: 0,
+        discount: 0,
+        driverName: ''
+      }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'bills');
+    }
   };
 
   const handleStatusUpdate = async (status: typeof BILL_STATUSES[number]) => {
     if (!lastBill?.id) return;
     
-    await db.bills.update(lastBill.id, { status });
-    setShowStatusSelection(false);
-    setShowInvoice(false);
-    if (onBillCreated) onBillCreated();
+    try {
+      await updateDoc(doc(db, 'bills', lastBill.id), { status });
+      setShowStatusSelection(false);
+      setShowInvoice(false);
+      if (onBillCreated) onBillCreated();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bills/${lastBill.id}`);
+    }
   };
 
   const handleQuickAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickAddForm.name || !quickAddForm.mobile) return;
 
-    const newCust = {
-      name: quickAddForm.name,
-      mobile: quickAddForm.mobile,
-      address: quickAddForm.address,
-      pendingAmount: 0,
-      createdAt: new Date()
-    };
+    try {
+      // Check for duplicate mobile or name
+      const qMobile = query(collection(db, 'customers'), where('mobile', '==', quickAddForm.mobile));
+      const qName = query(collection(db, 'customers'), where('name', '==', quickAddForm.name.trim()));
+      
+      const [mobileSnap, nameSnap] = await Promise.all([getDocs(qMobile), getDocs(qName)]);
+      
+      if (!mobileSnap.empty || !nameSnap.empty) {
+        const duplicateType = !mobileSnap.empty ? 'mobile number' : 'name';
+        alert(`A customer with this ${duplicateType} already exists!`);
+        
+        // Select the existing customer instead
+        const existingDoc = !mobileSnap.empty ? mobileSnap.docs[0] : nameSnap.docs[0];
+        const existing = { id: existingDoc.id, ...existingDoc.data() } as Customer;
+        
+        setSelectedCustomer(existing);
+        setForm(prev => ({ ...prev, customAddress: existing.address }));
+        setSearchTerm(existing.name);
+        setIsQuickAdding(false);
+        setQuickAddForm({ name: '', mobile: '', address: '' });
+        return;
+      }
 
-    const id = await db.customers.add(newCust);
-    const added = { ...newCust, id };
-    setSelectedCustomer(added);
-    setForm(prev => ({ ...prev, customAddress: added.address }));
-    setSearchTerm(added.name);
-    setIsQuickAdding(false);
-    setQuickAddForm({ name: '', mobile: '', address: '' });
+      const newCust = {
+        name: quickAddForm.name.trim(),
+        mobile: quickAddForm.mobile,
+        address: quickAddForm.address,
+        pendingAmount: 0,
+        createdAt: serverTimestamp()
+      };
+
+      const docRef = await addDoc(collection(db, 'customers'), newCust);
+      const added = { ...newCust, id: docRef.id } as Customer;
+      setSelectedCustomer(added);
+      setForm(prev => ({ ...prev, customAddress: added.address }));
+      setSearchTerm(added.name);
+      setIsQuickAdding(false);
+      setQuickAddForm({ name: '', mobile: '', address: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'customers');
+    }
   };
 
   return (
     <div className="p-4 pb-24">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-display font-bold">New Bill</h1>
+        <h1 className="text-3xl font-display font-bold">New Trip Token</h1>
         <div className="text-sm font-mono bg-blue-50 text-blue-600 px-3 py-1 rounded-full border border-blue-100">
           {form.billNumber}
         </div>
@@ -331,6 +426,9 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
                     value={quickAddForm.name}
                     onChange={e => setQuickAddForm({...quickAddForm, name: e.target.value})}
                   />
+                  {quickAddValidation.name && (
+                    <p className="text-red-500 text-[10px] font-bold mt-1 ml-1">{quickAddValidation.name}</p>
+                  )}
                   <input 
                     placeholder="Mobile Number"
                     className="material-input bg-slate-50 border-transparent focus:bg-white"
@@ -443,7 +541,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         </div>
 
         <button type="submit" className="material-btn material-btn-secondary h-16 text-lg">
-          Create Bill
+          Create Trip Token
         </button>
       </form>
 
@@ -466,9 +564,9 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
                 <CheckCircle2 size={40} />
               </div>
 
-              <h2 className="text-3xl font-display font-black text-slate-900 mb-2">Order Booked!</h2>
+              <h2 className="text-3xl font-display font-black text-slate-900 mb-2">Token Generated!</h2>
               <p className="text-slate-500 font-medium mb-8">
-                Bill <span className="font-bold text-slate-900">#{bookedBill.billNumber}</span> has been generated successfully.
+                Trip Token <span className="font-bold text-slate-900">#{bookedBill.billNumber}</span> has been generated successfully at <span className="text-slate-900 font-bold">{format(new Date(), 'hh:mm a')}</span>.
               </p>
 
               <div className="bg-slate-50 rounded-3xl p-6 mb-8 border border-slate-100">
