@@ -1,0 +1,40 @@
+import React from 'react';
+
+interface LogoProps {
+  className?: string;
+  size?: number;
+}
+
+export function Logo({ className = '', size = 40 }: LogoProps) {
+  return (
+    <div className={`relative flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
+      <svg 
+        viewBox="0 0 100 100" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+        className="w-full h-full"
+      >
+        <circle cx="50" cy="50" r="48" fill="#004A99" />
+        {/* Simplified Swan Shape */}
+        <path 
+          d="M72 45C72 38 65 32 58 32C52 32 48 35 46 38C44 35 40 32 35 32C28 32 22 38 22 45C22 55 35 65 47 72L50 74L53 72C65 65 78 55 78 45" 
+          fill="white"
+          transform="scale(0.8) translate(12, 12)"
+          opacity="0.2"
+        />
+        <path 
+          d="M65 35C65 35 60 25 50 25C40 25 35 35 35 35C35 35 30 40 30 50C30 60 40 75 50 75C60 75 70 60 70 50C70 40 65 35 65 35Z" 
+          fill="white"
+        />
+        <path 
+          d="M50 30C55 30 58 34 58 38C58 42 55 45 50 45C45 45 42 42 42 38C42 34 45 30 50 30Z" 
+          fill="#004A99" 
+        />
+        <path 
+          d="M48 35C48 35 49 33 50 33C51 33 52 35 52 35Z" 
+          fill="white" 
+        />
+      </svg>
+    </div>
+  );
+}

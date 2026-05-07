@@ -1,0 +1,766 @@
+import React, { useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../db';
+import { 
+  Plus, 
+  Truck, 
+  TrendingDown, 
+  Settings,
+  Calendar,
+  IndianRupee,
+  Fuel,
+  Activity,
+  Wrench,
+  AlertCircle,
+  Download,
+  FileText
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { formatCurrency } from '../constants';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+
+export function TractorDiesel() {
+  const [activeView, setActiveView] = useState<'diesel' | 'maintenance'>('diesel');
+  const [isAddingDiesel, setIsAddingDiesel] = useState(false);
+  const [isAddingMaintenance, setIsAddingMaintenance] = useState(false);
+  const [showTractorModal, setShowTractorModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  
+  const [reportConfig, setReportConfig] = useState({
+    period: 'monthly' as 'daily' | 'weekly' | 'monthly',
+    includeMaintenance: true,
+    tractorId: 'all' as number | 'all'
+  });
+
+  const [newDiesel, setNewDiesel] = useState({
+    date: new Date(),
+    tractorId: 0,
+    liters: 0,
+    amount: 0,
+    description: ''
+  });
+
+  const [newMaintenance, setNewMaintenance] = useState({
+    date: new Date(),
+    tractorId: 0,
+    amount: 0,
+    description: ''
+  });
+
+  const [newTractor, setNewTractor] = useState({
+    name: '',
+    vehicleNumber: ''
+  });
+
+  const tractors = useLiveQuery(() => db.tractors.toArray());
+  const dieselLogs = useLiveQuery(() => db.dieselLogs.orderBy('date').reverse().toArray());
+  const maintenanceLogs = useLiveQuery(() => db.maintenanceLogs.orderBy('date').reverse().toArray());
+  const bills = useLiveQuery(() => db.bills.toArray());
+
+  const tractorStats = React.useMemo(() => {
+    if (!tractors || !bills || !dieselLogs || !maintenanceLogs) return {};
+    
+    return tractors.reduce((acc, tractor) => {
+      const trips = bills.filter(b => b.tractorId === tractor.id).length;
+      const fuelTotal = dieselLogs.filter(l => l.tractorId === tractor.id).reduce((sum, l) => sum + l.amount, 0);
+      const maintTotal = maintenanceLogs.filter(l => l.tractorId === tractor.id).reduce((sum, l) => sum + l.amount, 0);
+      const fuelLiters = dieselLogs.filter(l => l.tractorId === tractor.id).reduce((sum, l) => sum + l.liters, 0);
+      
+      acc[tractor.id!] = { trips, fuelTotal, fuelLiters, maintTotal };
+      return acc;
+    }, {} as Record<number, { trips: number, fuelTotal: number, fuelLiters: number, maintTotal: number }>);
+  }, [tractors, bills, dieselLogs, maintenanceLogs]);
+
+  const handleAddDiesel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDiesel.tractorId || !newDiesel.amount) return;
+
+    const tractor = tractors?.find(t => t.id === Number(newDiesel.tractorId));
+    if (!tractor) return;
+
+    try {
+      await db.transaction('rw', [db.ledger, db.dieselLogs], async () => {
+        await db.dieselLogs.add({
+          tractorId: tractor.id!,
+          tractorName: tractor.name,
+          date: new Date(newDiesel.date),
+          liters: Number(newDiesel.liters),
+          amount: Number(newDiesel.amount),
+          description: newDiesel.description,
+          createdAt: new Date()
+        });
+
+        await db.ledger.add({
+          date: new Date(newDiesel.date),
+          type: 'Expense',
+          category: 'Fuel',
+          description: `Diesel for ${tractor.name}: ${newDiesel.description || 'Fuel tank'}`,
+          amount: Number(newDiesel.amount),
+          paymentMode: 'Cash',
+          createdAt: new Date()
+        });
+      });
+
+      setIsAddingDiesel(false);
+      setNewDiesel({ date: new Date(), tractorId: 0, liters: 0, amount: 0, description: '' });
+    } catch (err) {
+      alert('Error adding diesel log');
+    }
+  };
+
+  const handleAddMaintenance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMaintenance.tractorId || !newMaintenance.amount) return;
+
+    const tractor = tractors?.find(t => t.id === Number(newMaintenance.tractorId));
+    if (!tractor) return;
+
+    try {
+      await db.transaction('rw', [db.ledger, db.maintenanceLogs], async () => {
+        await db.maintenanceLogs.add({
+          tractorId: tractor.id!,
+          tractorName: tractor.name,
+          date: new Date(newMaintenance.date),
+          amount: Number(newMaintenance.amount),
+          description: newMaintenance.description,
+          createdAt: new Date()
+        });
+
+        await db.ledger.add({
+          date: new Date(newMaintenance.date),
+          type: 'Expense',
+          category: 'Maintenance',
+          description: `Maintenance for ${tractor.name}: ${newMaintenance.description}`,
+          amount: Number(newMaintenance.amount),
+          paymentMode: 'Cash',
+          createdAt: new Date()
+        });
+      });
+
+      setIsAddingMaintenance(false);
+      setNewMaintenance({ date: new Date(), tractorId: 0, amount: 0, description: '' });
+    } catch (err) {
+      alert('Error adding maintenance log');
+    }
+  };
+
+  const generateReport = async () => {
+    if (!tractors) return;
+
+    const doc = new jsPDF();
+    const now = new Date();
+    let start: Date;
+    let end: Date;
+
+    const periodLabel = reportConfig.period.charAt(0).toUpperCase() + reportConfig.period.slice(1);
+
+    switch (reportConfig.period) {
+      case 'daily':
+        start = startOfDay(now);
+        end = endOfDay(now);
+        break;
+      case 'weekly':
+        start = startOfWeek(now, { weekStartsOn: 1 });
+        end = endOfWeek(now, { weekStartsOn: 1 });
+        break;
+      case 'monthly':
+      default:
+        start = startOfMonth(now);
+        end = endOfMonth(now);
+    }
+
+    // Filter Data
+    const filteredTractors = reportConfig.tractorId === 'all' 
+      ? tractors 
+      : tractors.filter(t => t.id === reportConfig.tractorId);
+
+    doc.setFontSize(22);
+    doc.text('Rajhans Transport - Tractor Report', 14, 20);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Period: ${periodLabel} (${start.toLocaleDateString()} - ${end.toLocaleDateString()})`, 14, 28);
+    doc.text(`Generated on: ${now.toLocaleString()}`, 14, 33);
+
+    let yPos = 45;
+
+    for (const tractor of filteredTractors) {
+      if (yPos > 240) { doc.addPage(); yPos = 20; }
+
+      doc.setFontSize(14);
+      doc.setTextColor(0);
+      doc.text(`${tractor.name} (${tractor.vehicleNumber})`, 14, yPos);
+      yPos += 7;
+
+      const tractorDiesel = dieselLogs?.filter(l => 
+        l.tractorId === tractor.id && 
+        isWithinInterval(l.date, { start, end })
+      ) || [];
+
+      const tractorMaintenance = maintenanceLogs?.filter(l => 
+        l.tractorId === tractor.id && 
+        isWithinInterval(l.date, { start, end })
+      ) || [];
+
+      const tractorTrips = bills?.filter(b => 
+        b.tractorId === tractor.id && 
+        isWithinInterval(b.date, { start, end })
+      ) || [];
+
+      const totalDiesel = tractorDiesel.reduce((sum, l) => sum + l.amount, 0);
+      const totalLiters = tractorDiesel.reduce((sum, l) => sum + l.liters, 0);
+      const totalMaint = tractorMaintenance.reduce((sum, l) => sum + l.amount, 0);
+
+      // Summary Table for this tractor
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Fuel (L)', 'Fuel Cost', 'Trips', 'Maintenance']],
+        body: [[
+          totalLiters.toFixed(1),
+          `Rs. ${totalDiesel.toLocaleString()}`,
+          tractorTrips.length,
+          reportConfig.includeMaintenance ? `Rs. ${totalMaint.toLocaleString()}` : 'N/A'
+        ]],
+        theme: 'striped',
+        headStyles: { fillColor: [51, 65, 85] }
+      });
+
+      yPos = (doc as any).lastAutoTable.finalY + 10;
+
+      // Activity Details
+      if (tractorDiesel.length > 0) {
+        doc.setFontSize(10);
+        doc.text(`Diesel Logs for ${tractor.name}:`, 14, yPos);
+        yPos += 5;
+        autoTable(doc, {
+          startY: yPos,
+          head: [['Date', 'Liters', 'Amount', 'Note']],
+          body: tractorDiesel.map(l => [
+            l.date.toLocaleDateString(),
+            l.liters.toFixed(1),
+            `Rs. ${l.amount.toLocaleString()}`,
+            l.description || '-'
+          ]),
+          styles: { fontSize: 8 }
+        });
+        yPos = (doc as any).lastAutoTable.finalY + 10;
+      }
+
+      if (reportConfig.includeMaintenance && tractorMaintenance.length > 0) {
+        if (yPos > 240) { doc.addPage(); yPos = 20; }
+        doc.setFontSize(10);
+        doc.text(`Maintenance Logs for ${tractor.name}:`, 14, yPos);
+        yPos += 5;
+        autoTable(doc, {
+          startY: yPos,
+          head: [['Date', 'Amount', 'Description']],
+          body: tractorMaintenance.map(l => [
+            l.date.toLocaleDateString(),
+            `Rs. ${l.amount.toLocaleString()}`,
+            l.description
+          ]),
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [234, 88, 12] }
+        });
+        yPos = (doc as any).lastAutoTable.finalY + 15;
+      } else {
+        yPos += 5;
+      }
+    }
+
+    doc.save(`Tractor_Report_${periodLabel}_${now.getTime()}.pdf`);
+    setShowReportModal(false);
+  };
+
+  const handleAddTractor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTractor.name || !newTractor.vehicleNumber) return;
+
+    try {
+      await db.tractors.add({
+        ...newTractor,
+        createdAt: new Date()
+      });
+      setShowTractorModal(false);
+      setNewTractor({ name: '', vehicleNumber: '' });
+    } catch (err) {
+      alert('Error adding tractor');
+    }
+  };
+
+  return (
+    <div className="p-4 pb-24 max-w-4xl mx-auto">
+      <div className="flex flex-col gap-6 mb-8">
+        <div className="flex justify-between items-center text-slate-900">
+          <div>
+            <h1 className="text-3xl font-display font-black tracking-tight">Maintenance & Diesel</h1>
+            <p className="text-slate-500 font-medium font-sans">Manage fleet and tractor expenses</p>
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setShowReportModal(true)}
+              className="w-14 h-14 bg-white border-2 border-slate-100 text-slate-900 rounded-[1.25rem] flex items-center justify-center shadow-sm active:scale-95 transition-all"
+              title="Reports"
+            >
+              <FileText size={28} />
+            </button>
+            <button 
+              onClick={() => setShowTractorModal(true)}
+              className="w-14 h-14 bg-white border-2 border-slate-100 text-slate-900 rounded-[1.25rem] flex items-center justify-center shadow-sm active:scale-95 transition-all"
+            >
+              <Settings size={28} />
+            </button>
+            <div className="relative group">
+               <button 
+                className="w-14 h-14 bg-slate-900 text-white rounded-[1.25rem] flex items-center justify-center shadow-xl shadow-slate-200 active:scale-95 transition-all"
+              >
+                <Plus size={28} />
+              </button>
+              <div className="absolute top-0 right-0 pt-16 flex flex-col gap-2 opacity-0 group-hover:opacity-100 group-active:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all z-20">
+                <button 
+                  onClick={() => setIsAddingDiesel(true)}
+                  className="whitespace-nowrap px-4 py-3 bg-white border border-slate-100 shadow-xl rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-slate-50"
+                >
+                  <Fuel size={14} className="text-orange-500" /> Log Diesel
+                </button>
+                <button 
+                  onClick={() => setIsAddingMaintenance(true)}
+                  className="whitespace-nowrap px-4 py-3 bg-white border border-slate-100 shadow-xl rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-slate-50"
+                >
+                  <Wrench size={14} className="text-blue-500" /> Log Maintenance
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Fleet Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {tractors?.map(tractor => (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              key={tractor.id} 
+              className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden relative"
+            >
+              <div className="absolute top-0 right-0 p-8 opacity-[0.03] scale-[2.5] pointer-events-none">
+                <Truck size={48} />
+              </div>
+              
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
+                  <Truck size={28} />
+                </div>
+                <div>
+                  <h4 className="text-lg font-black text-slate-900">{tractor.name}</h4>
+                  <p className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-md inline-block uppercase tracking-wider">
+                    {tractor.vehicleNumber}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-4 pt-4 border-t border-slate-50">
+                <div className="bg-slate-50/50 p-3 rounded-2xl">
+                  <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
+                    <Fuel size={10} /> Fuel Cost
+                  </div>
+                  <div className="text-lg font-black text-slate-800">₹{(tractorStats[tractor.id!]?.fuelTotal || 0).toLocaleString()}</div>
+                  <div className="text-[10px] text-slate-400 font-bold">{tractorStats[tractor.id!]?.fuelLiters?.toFixed(1) || 0}L consumed</div>
+                </div>
+
+                <div className="bg-slate-50/50 p-3 rounded-2xl">
+                  <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
+                    <Wrench size={10} /> Maint. Cost
+                  </div>
+                  <div className="text-lg font-black text-orange-600">₹{(tractorStats[tractor.id!]?.maintTotal || 0).toLocaleString()}</div>
+                  <div className="text-[10px] text-slate-400 font-bold">{tractorStats[tractor.id!]?.trips || 0} Total Trips</div>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+          {tractors?.length === 0 && (
+            <div className="sm:col-span-2 text-center py-16 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200">
+               <Truck className="mx-auto text-slate-300 mb-4" size={48} />
+               <p className="text-slate-400 font-bold">No tractors added yet</p>
+               <button onClick={() => setShowTractorModal(true)} className="text-blue-500 font-bold text-sm mt-2">Add your first tractor</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Activity Selector */}
+      <div className="flex bg-slate-100 p-1 rounded-2xl mb-6">
+        <button 
+          onClick={() => setActiveView('diesel')}
+          className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${activeView === 'diesel' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+        >
+          <Fuel size={14} /> Diesel Logs
+        </button>
+        <button 
+          onClick={() => setActiveView('maintenance')}
+          className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${activeView === 'maintenance' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+        >
+          <Wrench size={14} /> Maintenance
+        </button>
+      </div>
+
+      {/* Activity List */}
+      <div className="space-y-3">
+        {activeView === 'diesel' ? (
+          dieselLogs?.slice(0, 20).map(log => (
+            <motion.div 
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              key={log.id} 
+              className="bg-white p-4 rounded-3xl border border-slate-100 flex items-center justify-between group hover:shadow-lg hover:border-slate-200 transition-all"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Fuel size={24} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-900">{log.tractorName}</h4>
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                    <span>{log.liters}L</span>
+                    <span>•</span>
+                    <span>{log.date.toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-lg font-black text-red-600">{formatCurrency(log.amount)}</div>
+              </div>
+            </motion.div>
+          ))
+        ) : (
+          maintenanceLogs?.slice(0, 20).map(log => (
+            <motion.div 
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              key={log.id} 
+              className="bg-white p-4 rounded-3xl border border-slate-100 flex items-center justify-between group hover:shadow-lg hover:border-slate-200 transition-all"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Wrench size={24} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-900">{log.tractorName}</h4>
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                    <span className="truncate max-w-[150px]">{log.description}</span>
+                    <span>•</span>
+                    <span>{log.date.toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-lg font-black text-orange-600">{formatCurrency(log.amount)}</div>
+              </div>
+            </motion.div>
+          ))
+        )}
+        
+        {((activeView === 'diesel' && dieselLogs?.length === 0) || (activeView === 'maintenance' && maintenanceLogs?.length === 0)) && (
+          <div className="text-center py-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+            <p className="text-slate-400 font-bold italic">No logs found in this category</p>
+          </div>
+        )}
+      </div>
+
+      {/* Log Diesel Modal */}
+      <AnimatePresence>
+        {isAddingDiesel && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4">
+            <motion.div
+              initial={{ y: "100%", scale: 0.95 }}
+              animate={{ y: 0, scale: 1 }}
+              exit={{ y: "100%", scale: 0.95 }}
+              className="bg-white w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h2 className="text-2xl font-display font-bold text-slate-900">Log Diesel</h2>
+                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+                </div>
+                <button onClick={() => setIsAddingDiesel(false)} className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                  <Plus size={24} className="rotate-45" />
+                </button>
+              </div>
+              
+              <form onSubmit={handleAddDiesel} className="flex flex-col gap-6">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Select Tractor</label>
+                  <select
+                    required
+                    className="material-input h-14 bg-slate-50 appearance-none"
+                    value={newDiesel.tractorId}
+                    onChange={e => setNewDiesel({...newDiesel, tractorId: parseInt(e.target.value)})}
+                  >
+                    <option value="">Select Tractor</option>
+                    {tractors?.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.vehicleNumber})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Date</label>
+                    <input
+                      type="date"
+                      className="material-input h-14 bg-slate-50"
+                      value={newDiesel.date.toISOString().split('T')[0]}
+                      onChange={e => setNewDiesel({...newDiesel, date: new Date(e.target.value)})}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Liters</label>
+                    <input
+                      required
+                      type="number" step="0.01"
+                      className="material-input h-14 bg-slate-50"
+                      value={newDiesel.liters || ''}
+                      onChange={e => setNewDiesel({...newDiesel, liters: parseFloat(e.target.value)})}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Total Amount (₹)</label>
+                  <input
+                    required
+                    type="number"
+                    className="material-input h-16 text-2xl font-black bg-slate-50"
+                    placeholder="0"
+                    value={newDiesel.amount || ''}
+                    onChange={e => setNewDiesel({...newDiesel, amount: parseFloat(e.target.value)})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Short Note</label>
+                  <input
+                    className="material-input h-14 bg-slate-50"
+                    placeholder="e.g. Full tank"
+                    value={newDiesel.description}
+                    onChange={e => setNewDiesel({...newDiesel, description: e.target.value})}
+                  />
+                </div>
+
+                <button type="submit" className="material-btn material-btn-primary h-16 text-lg mt-2 shadow-lg shadow-blue-100">
+                  Save Diesel Log
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Log Maintenance Modal */}
+      <AnimatePresence>
+        {isAddingMaintenance && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4">
+            <motion.div
+              initial={{ y: "100%", scale: 0.95 }}
+              animate={{ y: 0, scale: 1 }}
+              exit={{ y: "100%", scale: 0.95 }}
+              className="bg-white w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h2 className="text-2xl font-display font-bold text-slate-900">Maintenance Expense</h2>
+                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+                </div>
+                <button onClick={() => setIsAddingMaintenance(false)} className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                  <Plus size={24} className="rotate-45" />
+                </button>
+              </div>
+              
+              <form onSubmit={handleAddMaintenance} className="flex flex-col gap-6">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Select Tractor</label>
+                  <select
+                    required
+                    className="material-input h-14 bg-slate-50 appearance-none"
+                    value={newMaintenance.tractorId}
+                    onChange={e => setNewMaintenance({...newMaintenance, tractorId: parseInt(e.target.value)})}
+                  >
+                    <option value="">Select Tractor</option>
+                    {tractors?.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.vehicleNumber})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Date</label>
+                  <input
+                    type="date"
+                    className="material-input h-14 bg-slate-50"
+                    value={newMaintenance.date.toISOString().split('T')[0]}
+                    onChange={e => setNewMaintenance({...newMaintenance, date: new Date(e.target.value)})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Total Amount (₹)</label>
+                  <input
+                    required
+                    type="number"
+                    className="material-input h-16 text-2xl font-black bg-slate-50"
+                    placeholder="0"
+                    value={newMaintenance.amount || ''}
+                    onChange={e => setNewMaintenance({...newMaintenance, amount: parseFloat(e.target.value)})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Description / Repair Details</label>
+                  <textarea
+                    required
+                    rows={3}
+                    className="material-input p-4 min-h-[100px] bg-slate-50"
+                    placeholder="e.g. Tire tube replacement, Engine oil change"
+                    value={newMaintenance.description}
+                    onChange={e => setNewMaintenance({...newMaintenance, description: e.target.value})}
+                  />
+                </div>
+
+                <button type="submit" className="material-btn bg-orange-600 hover:bg-orange-700 text-white h-16 text-lg mt-2 shadow-lg shadow-orange-100">
+                  Save Maintenance Log
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Report Modal */}
+      <AnimatePresence>
+        {showReportModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Download Report</h2>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Select Period & Options</p>
+                </div>
+                <button onClick={() => setShowReportModal(false)} className="text-slate-400">
+                  <Plus size={24} className="rotate-45" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Report Period</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['daily', 'weekly', 'monthly'].map(p => (
+                      <button
+                        key={p}
+                        onClick={() => setReportConfig({...reportConfig, period: p as any})}
+                        className={`py-3 rounded-xl text-xs font-black uppercase tracking-wider border-2 transition-all ${reportConfig.period === p ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-50 text-slate-400'}`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Include Maintenance?</label>
+                  <div className="flex bg-slate-50 p-1 rounded-xl">
+                    <button
+                      onClick={() => setReportConfig({...reportConfig, includeMaintenance: true})}
+                      className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${reportConfig.includeMaintenance ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}
+                    >
+                      Yes, include
+                    </button>
+                    <button
+                      onClick={() => setReportConfig({...reportConfig, includeMaintenance: false})}
+                      className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${!reportConfig.includeMaintenance ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}
+                    >
+                      Diesel Only
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Select Tractor</label>
+                  <select
+                    className="material-input h-14 bg-slate-50 appearance-none"
+                    value={reportConfig.tractorId}
+                    onChange={e => setReportConfig({...reportConfig, tractorId: e.target.value === 'all' ? 'all' : parseInt(e.target.value)})}
+                  >
+                    <option value="all">FLeet Summary (All)</option>
+                    {tractors?.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button 
+                  onClick={generateReport}
+                  className="w-full material-btn material-btn-primary h-16 mt-4 shadow-xl shadow-blue-100 flex items-center justify-center gap-3"
+                >
+                  <Download size={20} /> Download PDF
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Tractor Modal */}
+      <AnimatePresence>
+        {showTractorModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-slate-900">Add New Tractor</h2>
+                <button onClick={() => setShowTractorModal(false)} className="text-slate-400">
+                  <Plus size={24} className="rotate-45" />
+                </button>
+              </div>
+              <form onSubmit={handleAddTractor} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Tractor Name</label>
+                  <input
+                    required
+                    className="material-input h-14 bg-slate-50"
+                    placeholder="e.g. Swaraj 744"
+                    value={newTractor.name}
+                    onChange={e => setNewTractor({...newTractor, name: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Vehicle Number</label>
+                  <input
+                    required
+                    className="material-input h-14 bg-slate-50"
+                    placeholder="e.g. RJ-14-GH-1234"
+                    value={newTractor.vehicleNumber}
+                    onChange={e => setNewTractor({...newTractor, vehicleNumber: e.target.value})}
+                  />
+                </div>
+                <button type="submit" className="w-full material-btn material-btn-primary h-14 mt-4 shadow-lg shadow-blue-100">
+                  Add Tractor
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

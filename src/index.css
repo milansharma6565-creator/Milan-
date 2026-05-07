@@ -1,0 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+  }
+}
+
+.material-card {
+  @apply bg-white rounded-3xl shadow-sm border border-slate-100 p-6;
+}
+
+.material-btn {
+  @apply px-6 py-3 rounded-2xl font-medium transition-all active:scale-95 flex items-center justify-center gap-2;
+}
+
+.material-btn-primary {
+  @apply bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-200/50;
+}
+
+.material-btn-secondary {
+  @apply bg-orange-500 text-white hover:bg-orange-600 shadow-md shadow-orange-200/50;
+}
+
+.material-input {
+  @apply w-full px-4 py-3 bg-slate-100/50 border-transparent rounded-2xl focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all outline-none;
+}
+
+.bottom-nav-item {
+  @apply flex flex-col items-center justify-center py-2 px-4 transition-colors;
+}
+
+.bottom-nav-item.active {
+  @apply text-blue-600;
+}
+
