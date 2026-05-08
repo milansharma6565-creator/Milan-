@@ -7,7 +7,8 @@ service cloud.firestore {
     function isSignedIn() { 
       return request.auth != null && 
              request.auth.token.email_verified == true &&
-             request.auth.token.email == 'rajhanssikar@gmail.com'; 
+             (request.auth.token.email == 'rajhanssikar@gmail.com' || 
+              request.auth.token.email == 'milan.sharma6565@gmail.com'); 
     }
     function isAdmin() { 
       return isSignedIn(); 
@@ -43,6 +44,7 @@ service cloud.firestore {
              data.customerId is string && isValidId(data.customerId) &&
              data.grandTotal is number &&
              data.status in ['Delivered', 'Pending', 'Cancelled', 'Printed'] &&
+             (data.get('remarks', '').size() <= 500) &&
              (data.get('paymentMode', 'Pending') in ['Cash', 'UPI', 'Bank Transfer', 'Pending', 'Split']) &&
              (data.get('createdAt', request.time) == request.time);
     }
@@ -84,9 +86,25 @@ service cloud.firestore {
              (data.get('lastUpdated', request.time) == request.time);
     }
 
+    function isValidBookingRequest(data) {
+      return data.keys().hasAll(['billId', 'customerId', 'status', 'customerName', 'requestedAt']) &&
+             data.billId is string && isValidId(data.billId) &&
+             data.customerId is string && isValidId(data.customerId) &&
+             data.status in ['Pending', 'Accepted', 'Rejected'] &&
+             (data.get('remarks', '').size() <= 500) &&
+             (data.get('requestedAt', request.time) == request.time);
+    }
+
     // ---------------------------------------------------------
     // COLLECTIONS
     // ---------------------------------------------------------
+
+    match /bookingRequests/{requestId} {
+      allow get: if isValidId(requestId);
+      allow create: if isValidId(requestId) && isValidBookingRequest(incoming());
+      allow list: if true; 
+      allow update, delete: if isAdmin();
+    }
 
     match /driverLocations/{driverId} {
       allow get: if true;
@@ -110,7 +128,7 @@ service cloud.firestore {
     }
 
     match /bills/{billId} {
-      allow get: if isSignedIn() && isValidId(billId);
+      allow get: if isValidId(billId); // Allow public view for rebooking
       allow list: if isSignedIn();
       allow create: if isAdmin() && isValidId(billId) && isValidBill(incoming()) && 
                     exists(/databases/$(database)/documents/customers/$(incoming().customerId));

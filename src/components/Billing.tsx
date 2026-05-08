@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { Customer, Driver, Bill } from '../types';
-import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText } from 'lucide-react';
+import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber } from '../constants';
 import { useReactToPrint } from 'react-to-print';
@@ -61,6 +61,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
     customAddress: '',
     driverName: '',
     paymentMode: 'Cash' as typeof PAYMENT_MODES[number],
+    remarks: '',
     splitCash: 0,
     splitUPI: 0,
     splitPending: 0
@@ -198,12 +199,13 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
 
   const sendWhatsApp = (bill: any) => {
     if (!selectedCustomer) return;
-    const message = `*Trip Token Generated - Rajhans steel and Water* 🚛\n\n` +
-      `*Token No:* #${bill.billNumber}\n` +
-      `*Date:* ${new Date(bill.date).toLocaleDateString()}\n` +
-      `*Total Amount:* ₹${bill.grandTotal}\n` +
-      `*Current Balance:* ₹${selectedCustomer.balance}\n\n` +
-      `Thank you for choosing Rajhans steel and Water!`;
+    const rebookUrl = `${window.location.origin}/?o=${bill.id}`;
+    const message = `*Order Token - Rajhans* 🚛\n\n` +
+      `Token: #${bill.billNumber}\n` +
+      `Amt: ₹${bill.grandTotal}\n` +
+      `Size: ${bill.tankerSize}\n\n` +
+      `Rebook: ${rebookUrl}\n\n` +
+      `Rajhans Steel & Water`;
     
     // Using international format for mobile if needed, but assuming 10 digit Indian number
     const phone = selectedCustomer.mobile.startsWith('91') ? selectedCustomer.mobile : `91${selectedCustomer.mobile}`;
@@ -249,6 +251,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         driverName: form.driverName,
         status: 'Pending',
         isSettled: false,
+        remarks: form.remarks.trim(),
         createdAt: serverTimestamp()
       };
 
@@ -264,7 +267,8 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         quantity: 1,
         extraCharges: 0,
         discount: 0,
-        driverName: ''
+        driverName: '',
+        remarks: ''
       }));
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'bills');
@@ -332,24 +336,27 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
   };
 
   return (
-    <div className="p-4 pb-24">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-display font-bold">New Trip Token</h1>
-        <div className="text-sm font-mono bg-blue-50 text-blue-600 px-3 py-1 rounded-full border border-blue-100">
-          {form.billNumber}
+    <div className="p-4 md:p-0 pb-32">
+      <div className="flex items-center justify-between mb-10">
+        <div>
+          <h1 className="text-3xl font-display font-bold">Create New Token</h1>
+          <p className="text-slate-500">Generate trip bill and token</p>
+        </div>
+        <div className="bg-blue-50 text-blue-600 px-4 py-2 rounded-2xl border border-blue-100 text-sm font-bold">
+          Bill No: {form.billNumber}
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-6">
         {/* Customer Search Section */}
-        <div className="material-card">
-          <label className="text-sm font-semibold text-slate-500 mb-2 block">Search Customer</label>
+        <div className="material-card relative">
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Customer Information</label>
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input
               type="text"
-              placeholder="Enter mobile or name..."
-              className="material-input pl-12"
+              placeholder="Search customer by name or mobile..."
+              className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-2xl py-4 pl-12 pr-4 font-medium transition-all"
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -363,21 +370,21 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="mt-2 border rounded-2xl overflow-hidden bg-white shadow-xl z-20 flex flex-col"
+                exit={{ opacity: 0, y: -10 }}
+                className="absolute left-0 right-0 mt-2 bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden z-20"
               >
-                {searchResults && searchResults.map(c => (
+                {searchResults.map(c => (
                   <button
                     key={c.id}
                     type="button"
                     onClick={() => handleCustomerSelect(c)}
-                    className="w-full p-4 flex items-center justify-between hover:bg-slate-50 text-left border-b border-slate-100 last:border-0"
+                    className="w-full p-4 flex items-center justify-between hover:bg-slate-50 border-b border-slate-50 last:border-0 transition-colors"
                   >
                     <div>
-                      <div className="font-bold">{c.name}</div>
-                      <div className="text-sm text-slate-500">{c.mobile}</div>
+                      <div className="font-bold text-slate-900">{c.name}</div>
+                      <div className="text-xs text-slate-500">{c.mobile}</div>
                     </div>
-                    <CheckCircle2 className="text-blue-500" size={20} />
+                    <div className="text-blue-600 bg-blue-50 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Select</div>
                   </button>
                 ))}
                 
@@ -391,12 +398,12 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
                     });
                     setIsQuickAdding(true);
                   }}
-                  className="w-full p-4 flex items-center gap-3 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors text-left"
+                  className="w-full p-4 flex items-center gap-3 bg-blue-600 text-white hover:bg-blue-700 transition-colors text-left"
                 >
                   <UserPlus size={20} />
                   <div>
-                    <div className="font-bold">Add as New Customer</div>
-                    <div className="text-[10px] uppercase font-bold opacity-70">Quick Register</div>
+                    <div className="font-bold">Register New Customer</div>
+                    <div className="text-[10px] opacity-80 uppercase font-bold tracking-wider">Quick Add to Database</div>
                   </div>
                 </button>
               </motion.div>
@@ -409,45 +416,43 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
                 initial={{ height: 0, opacity: 0 }} 
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                className="mt-4 border-2 border-blue-100 rounded-3xl p-5 bg-white shadow-inner overflow-hidden"
+                className="mt-6 border-t border-slate-100 pt-6"
               >
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold flex items-center gap-2 text-blue-900">
-                    <UserPlus size={18} /> Quick Register
-                  </h3>
-                  <button type="button" onClick={() => setIsQuickAdding(false)} className="text-slate-400">
-                    <X size={18} />
+                  <h3 className="font-bold text-sm text-slate-900">New Customer Details</h3>
+                  <button type="button" onClick={() => setIsQuickAdding(false)} className="text-slate-400 hover:text-slate-600">
+                    <X size={20} />
                   </button>
                 </div>
-                <div className="grid gap-4">
+                <div className="grid gap-3">
                   <input 
-                    placeholder="Full Name"
-                    className="material-input bg-slate-50 border-transparent focus:bg-white"
+                    placeholder="Customer Name"
+                    className="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm font-medium border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 transition-all uppercase"
                     value={quickAddForm.name}
                     onChange={e => setQuickAddForm({...quickAddForm, name: e.target.value})}
                   />
                   {quickAddValidation.name && (
-                    <p className="text-red-500 text-[10px] font-bold mt-1 ml-1">{quickAddValidation.name}</p>
+                    <p className="text-red-500 text-[10px] font-bold uppercase ml-1">{quickAddValidation.name}</p>
                   )}
                   <input 
                     placeholder="Mobile Number"
-                    className="material-input bg-slate-50 border-transparent focus:bg-white"
+                    className="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm font-medium border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 transition-all"
                     value={quickAddForm.mobile}
                     onChange={e => setQuickAddForm({...quickAddForm, mobile: e.target.value})}
                   />
                   <textarea 
-                    placeholder="Delivery Address"
+                    placeholder="Address"
                     rows={2}
-                    className="material-input bg-slate-50 border-transparent focus:bg-white resize-none"
+                    className="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm font-medium border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 transition-all resize-none"
                     value={quickAddForm.address}
                     onChange={e => setQuickAddForm({...quickAddForm, address: e.target.value})}
                   />
                   <button 
                     type="button"
                     onClick={handleQuickAdd}
-                    className="material-btn material-btn-primary py-3"
+                    className="w-full bg-slate-900 text-white rounded-xl py-3 font-bold text-sm shadow-lg shadow-slate-200"
                   >
-                    Save & Select
+                    Register & Select
                   </button>
                 </div>
               </motion.div>
@@ -455,20 +460,30 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
           </AnimatePresence>
 
           {selectedCustomer && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 p-4 bg-blue-50 rounded-2xl border border-blue-100">
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              className="mt-4 p-4 bg-blue-50 rounded-2xl relative border border-blue-100"
+            >
               <div className="flex justify-between items-start">
                 <div>
-                  <div className="font-bold text-blue-900">{selectedCustomer.name}</div>
-                  <div className="text-sm text-blue-700 flex items-center gap-1 mt-1">
-                    <Phone size={12} /> +91 {selectedCustomer.mobile}
+                  <div className="font-bold text-slate-900 text-lg">{selectedCustomer.name}</div>
+                  <div className="text-slate-500 flex items-center gap-2 mt-1 text-sm">
+                    <Phone size={14} /> {selectedCustomer.mobile}
                   </div>
                 </div>
-                <button onClick={() => setSelectedCustomer(null)} className="text-blue-400"><X size={18}/></button>
+                <button 
+                  type="button"
+                  onClick={() => setSelectedCustomer(null)} 
+                  className="bg-white/50 p-1.5 rounded-lg text-slate-400 hover:text-slate-600"
+                >
+                    <X size={16}/>
+                </button>
               </div>
-              <div className="mt-2">
-                <label className="text-[10px] uppercase font-bold text-blue-400">Delivery Address</label>
+              <div className="mt-4 pt-4 border-t border-blue-200/50">
+                <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1 block">Delivery Location</label>
                 <textarea
-                  className="w-full bg-transparent border-0 p-0 text-sm focus:ring-0 resize-none text-blue-800"
+                  className="w-full bg-transparent border-0 p-0 text-sm focus:ring-0 resize-none text-blue-900 font-medium"
                   value={form.customAddress}
                   onChange={e => setForm({...form, customAddress: e.target.value})}
                   rows={2}
@@ -479,12 +494,13 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         </div>
 
         {/* Bill Details */}
-        <div className="material-card grid gap-4 overflow-hidden">
+        <div className="material-card">
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Trip Configuration</label>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-sm font-semibold text-slate-500 mb-1 block">Tanker Size</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Tanker Size</label>
               <select 
-                className="material-input appearance-none"
+                className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 px-4 font-bold transition-all text-sm"
                 value={form.tankerSize}
                 onChange={e => setForm({...form, tankerSize: e.target.value})}
               >
@@ -494,56 +510,83 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
               </select>
             </div>
             <div>
-              <label className="text-sm font-semibold text-slate-500 mb-1 block">Quantity</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Quantity</label>
               <input
                 type="number"
                 min="1"
-                className="material-input"
+                className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 px-4 font-bold transition-all text-sm"
                 value={form.quantity}
                 onChange={e => setForm({...form, quantity: parseInt(e.target.value) || 0})}
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 mt-4">
             <div>
-              <label className="text-sm font-semibold text-slate-500 mb-1 block">Rate (₹)</label>
-              <input
-                type="number"
-                className="material-input"
-                value={form.rate}
-                onChange={e => setForm({...form, rate: parseInt(e.target.value) || 0})}
-              />
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Rate (₹)</label>
+              <div className="relative">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">₹</div>
+                <input
+                  type="number"
+                  className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 pl-8 pr-4 font-bold transition-all text-sm"
+                  value={form.rate}
+                  onChange={e => setForm({...form, rate: parseInt(e.target.value) || 0})}
+                />
+              </div>
             </div>
             <div>
-              <label className="text-sm font-semibold text-slate-500 mb-1 block">Extra Charges (₹)</label>
-              <input
-                type="number"
-                placeholder="Extra"
-                className="material-input"
-                value={form.extraCharges}
-                onChange={e => setForm({...form, extraCharges: parseInt(e.target.value) || 0})}
-              />
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Extra / Discount (₹)</label>
+              <div className="relative">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">₹</div>
+                <input
+                  type="number"
+                  placeholder="Charges"
+                  className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 pl-8 pr-4 font-bold transition-all text-sm"
+                  value={form.extraCharges}
+                  onChange={e => setForm({...form, extraCharges: parseInt(e.target.value) || 0})}
+                />
+              </div>
             </div>
           </div>
 
-          <div className="bg-slate-900 text-white p-6 rounded-3xl mt-2 relative overflow-hidden">
+          <div className="mt-4">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Internal Remarks / Notes</label>
+            <textarea
+              placeholder="Add any specific notes for this trip..."
+              className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 px-4 font-medium transition-all text-sm resize-none"
+              rows={2}
+              value={form.remarks}
+              onChange={e => setForm({...form, remarks: e.target.value})}
+            />
+          </div>
 
-            <div className="flex justify-between items-center mb-1 text-slate-400 text-sm italic">
-              <span>Total Amount</span>
-              <span>{formatCurrency(subtotal)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-lg font-medium">Grand Total</span>
-              <span className="text-3xl font-display font-bold text-orange-400">{formatCurrency(grandTotal)}</span>
+          <div className="bg-slate-900 p-6 rounded-3xl mt-8 text-white relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/20 blur-3xl rounded-full translate-x-10 -translate-y-10" />
+            <div className="relative z-10">
+              <div className="flex justify-between items-center mb-1 text-slate-400 font-bold uppercase text-[10px] tracking-widest">
+                <span>Subtotal</span>
+                <span>{formatCurrency(subtotal)}</span>
+              </div>
+              <div className="flex justify-between items-end">
+                <div>
+                  <div className="text-xs font-bold text-blue-400 flex items-center gap-1 mb-1">
+                    <CheckCircle2 size={12} /> Live Calculation
+                  </div>
+                  <div className="text-3xl font-display font-black tracking-tight">{formatCurrency(grandTotal)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Grand Total</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <button type="submit" className="material-btn material-btn-secondary h-16 text-lg">
-          Create Trip Token
+        <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white h-16 rounded-2xl font-black text-lg transition-all shadow-xl shadow-blue-100 flex items-center justify-center gap-3 active:scale-[0.98]">
+           Commit Token
         </button>
       </form>
+
 
       {/* Removed Invoice Modal from New Bill flow as requested */}
 
@@ -578,6 +621,13 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
               </div>
 
               <div className="grid gap-3">
+                <button 
+                  onClick={() => sendWhatsApp(bookedBill)}
+                  className="h-16 font-bold text-white bg-green-600 rounded-2xl hover:bg-green-700 transition-all shadow-lg shadow-green-100 flex items-center justify-center gap-3 active:scale-95"
+                >
+                  <MessageSquare size={24} />
+                  Send on WhatsApp
+                </button>
                 <div className="grid grid-cols-2 gap-3">
                   <button 
                     onClick={() => setShowBookingSuccess(false)}

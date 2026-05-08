@@ -185,15 +185,21 @@ export function CustomerManagement() {
     }
   };
 
-  const exportPDF = () => {
-    if (!customers || customers.length === 0) return;
+  const exportPDF = (onlyPending: boolean = false) => {
+    const listToExport = onlyPending ? customers.filter(c => c.pendingAmount > 0) : customers;
+    
+    if (!listToExport || listToExport.length === 0) {
+      alert(onlyPending ? 'No customers with pending amount found.' : 'No customers to export.');
+      return;
+    }
     
     const doc = new jsPDF();
-    doc.text('Rajhans steel and Water - Customer List', 14, 15);
+    const title = onlyPending ? 'Rajhans steel and Water - Pending Dues List' : 'Rajhans steel and Water - Customer List';
+    doc.text(title, 14, 15);
     
     const pdfFormatCurrency = (val: number) => `Rs. ${val.toLocaleString('en-IN')}`;
     
-    const tableData = customers.map(c => [
+    const tableData = listToExport.map(c => [
       c.name,
       `+91 ${c.mobile}`,
       c.address || '-',
@@ -205,14 +211,26 @@ export function CustomerManagement() {
       body: tableData,
       startY: 25,
       theme: 'grid',
-      headStyles: { fillColor: [37, 99, 235] },
+      headStyles: { fillColor: onlyPending ? [220, 38, 38] : [37, 99, 235] },
       columnStyles: {
         3: { halign: 'right' }
       },
       styles: { fontSize: 9 }
     });
 
-    doc.save('Rajhans_Steel_Water_Customer_List.pdf');
+    const fileName = onlyPending ? `Rajhans_Pending_Dues_${format(new Date(), 'dd_MMM')}.pdf` : 'Rajhans_Steel_Water_Customer_List.pdf';
+    doc.save(fileName);
+  };
+
+  const shareCurrentBalance = (c: Customer) => {
+    const phone = c.mobile.startsWith('91') ? c.mobile : `91${c.mobile}`;
+    const message = `*Account Summary - Rajhans steel and Water* 🚛\n\n` +
+      `Dear ${c.name},\n` +
+      `Your current account status as of ${format(new Date(), 'dd MMM yyyy')}:\n\n` +
+      `*Total Outstanding Balance:* ₹${c.pendingAmount}\n\n` +
+      `Please settle the dues at your earliest convenience. Thank you!`;
+    
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   return (
@@ -225,9 +243,16 @@ export function CustomerManagement() {
           </div>
           <div className="flex gap-2">
             <button 
-              onClick={exportPDF}
+              onClick={() => exportPDF(true)}
+              className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center hover:bg-red-100 transition-colors border border-red-100"
+              title="Download Pending Dues Only"
+            >
+              <Clock size={20} />
+            </button>
+            <button 
+              onClick={() => exportPDF(false)}
               className="w-12 h-12 bg-slate-100 text-slate-600 rounded-2xl flex items-center justify-center hover:bg-slate-200 transition-colors"
-              title="Download PDF"
+              title="Download All Customers"
             >
               <Download size={20} />
             </button>
@@ -277,10 +302,20 @@ export function CustomerManagement() {
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
+                          shareCurrentBalance(customer);
+                        }}
+                        className="p-1 px-2.5 bg-[#25D366] text-white hover:bg-green-600 rounded-lg transition-all"
+                        title="Direct Balance Hisab"
+                      >
+                        <IndianRupee size={14} />
+                      </button>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setShareLedgerCustomer(customer);
                         }}
                         className="p-1 px-2.5 bg-green-600 text-white hover:bg-green-700 rounded-lg transition-all"
-                        title="Share Hisab on WhatsApp"
+                        title="Detailed Ledger PDF"
                       >
                         <MessageSquare size={14} />
                       </button>

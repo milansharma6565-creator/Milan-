@@ -49,6 +49,7 @@
         "driverName": { "type": "string" },
         "driverMobile": { "type": "string" },
         "tractorId": { "type": "string" },
+        "remarks": { "type": "string" },
         "status": { "type": "string", "enum": ["Delivered", "Pending", "Cancelled", "Printed"] },
         "isSettled": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
@@ -128,6 +129,22 @@
         "lastUpdated": { "type": "string", "format": "date-time" },
         "isActive": { "type": "boolean" }
       }
+    },
+    "BookingRequest": {
+      "title": "Booking Request",
+      "description": "Customer rebooking request from WhatsApp link",
+      "type": "object",
+      "properties": {
+        "billId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerMobile": { "type": "string" },
+        "tankerSize": { "type": "string" },
+        "remarks": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Accepted", "Rejected"] },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -138,6 +155,7 @@
     "dieselLogs": { "schema": "DieselLog", "description": "Collection of diesel logs" },
     "maintenanceLogs": { "schema": "MaintenanceLog", "description": "Collection of maintenance logs" },
     "ledger": { "schema": "LedgerEntry", "description": "Collection of ledger entries" },
-    "driverLocations": { "schema": "DriverLocation", "description": "Collection of live driver locations" }
+    "driverLocations": { "schema": "DriverLocation", "description": "Collection of live driver locations" },
+    "bookingRequests": { "schema": "BookingRequest", "description": "Collection of customer rebooking requests" }
   }
 }

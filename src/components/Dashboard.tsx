@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc, where } from 'firebase/firestore';
 import { Customer, Driver, Bill, Tractor, LedgerEntry } from '../types';
 import { 
   TrendingUp, 
@@ -18,11 +18,13 @@ import {
   History,
   Share2,
   Trash2,
-  MessageSquare
+  MessageSquare,
+  Truck,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { formatCurrency, PAYMENT_MODES } from '../constants';
+import { formatCurrency, PAYMENT_MODES, generateBillNumber } from '../constants';
 import { startOfDay, endOfDay, subDays, format } from 'date-fns';
 import { useReactToPrint } from 'react-to-print';
 import { ThermalInvoice } from './ThermalInvoice';
@@ -33,6 +35,7 @@ export function Dashboard() {
   const todayStart = startOfDay(new Date());
   
   const [bills, setBills] = useState<Bill[]>([]);
+  const [bookingRequests, setBookingRequests] = useState<any[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [tractors, setTractors] = useState<Tractor[]>([]);
@@ -42,6 +45,11 @@ export function Dashboard() {
     const unsubBills = onSnapshot(collection(db, 'bills'), 
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'bills-dashboard')
+    );
+    const unsubRequests = onSnapshot(
+      query(collection(db, 'bookingRequests'), where('status', '==', 'Pending'), orderBy('requestedAt', 'desc')),
+      (snapshot) => setBookingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (error) => console.log('Requests err:', error)
     );
     const unsubCustomers = onSnapshot(collection(db, 'customers'), 
       (snapshot) => setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer))),
@@ -58,6 +66,7 @@ export function Dashboard() {
 
     return () => {
       unsubBills();
+      unsubRequests();
       unsubCustomers();
       unsubDrivers();
       unsubTractors();
@@ -265,6 +274,58 @@ export function Dashboard() {
     }
   };
 
+  const handleAcceptRequest = async (request: any) => {
+    try {
+      // 1. Get original bill details
+      const originalBillRef = doc(db, 'bills', request.billId);
+      const originalBillSnap = await getDoc(originalBillRef);
+      
+      if (!originalBillSnap.exists()) {
+        alert("Original order not found.");
+        return;
+      }
+
+      const originalData = originalBillSnap.data();
+      
+      // 2. Generate new bill number
+      const allBills = await getDocs(collection(db, 'bills'));
+      const newBillNumber = generateBillNumber(allBills.size + 1);
+
+      // 3. Create new bill based on original but with current time
+      const newBillData = {
+        ...originalData,
+        billNumber: newBillNumber,
+        date: new Date().toISOString(),
+        status: 'Pending',
+        isSettled: false,
+        paymentMode: 'Pending',
+        remarks: request.remarks || originalData.remarks || '',
+        createdAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'bills'), newBillData);
+
+      // 4. Update request status
+      await updateDoc(doc(db, 'bookingRequests', request.id), { 
+        status: 'Accepted',
+        updatedAt: serverTimestamp() 
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bookingRequests/${request.id}`);
+    }
+  };
+
+  const handleRejectRequest = async (request: any) => {
+    try {
+      await updateDoc(doc(db, 'bookingRequests', request.id), { 
+        status: 'Rejected',
+        updatedAt: serverTimestamp() 
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bookingRequests/${request.id}`);
+    }
+  };
+
   const handleDeleteToken = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'bills', id));
@@ -340,15 +401,15 @@ export function Dashboard() {
       ? cleanPhone 
       : `91${cleanPhone.slice(-10)}`;
 
+    const rebookUrl = `${window.location.origin}/?o=${bill.id}`;
     const message = target === 'customer' 
-      ? `*Token Details - Rajhans steel and Water* 🚛\n\n` +
-        `Dear ${bill.customerName},\n` +
-        `Your trip token #${bill.billNumber} has been generated.\n\n` +
-        `*Amount:* ₹${bill.grandTotal}\n` +
-        `*Tractor:* ${stats.tractors.find((t: any) => t.id === bill.tractorId)?.name || 'N/A'}\n` +
-        `*Driver:* ${bill.driverName || 'N/A'}\n` +
-        `*Status:* ${bill.status}\n\n` +
-        `Thank you for choosing Rajhans steel and Water!`
+      ? `*Order Token - Rajhans* 🚛\n\n` +
+        `Token: #${bill.billNumber}\n` +
+        `Amt: ₹${bill.grandTotal}\n` +
+        `Size: ${bill.tankerSize}\n` +
+        `Driver: ${bill.driverName || 'N/A'}\n\n` +
+        `Rebook: ${rebookUrl}\n\n` +
+        `Rajhans Steel & Water`
       : `*Duty Assignment - Rajhans steel and Water* 🚛\n\n` +
         `Hi ${bill.driverName},\n` +
         `New trip assigned to you.\n\n` +
@@ -380,7 +441,7 @@ export function Dashboard() {
   }
 
   return (
-    <div className="p-4 pb-24">
+    <div className="p-4 md:p-0 pb-32">
       <header className="mb-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-100">
@@ -426,7 +487,6 @@ export function Dashboard() {
         </motion.div>
       </div>
 
-      {/* Secondary Stats */}
       <div className="grid grid-cols-2 gap-4 mb-8">
         <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-50 shadow-sm">
           <div className="w-10 h-10 rounded-xl bg-green-50 text-green-600 flex items-center justify-center">
@@ -449,7 +509,7 @@ export function Dashboard() {
       </div>
 
       {/* Chart */}
-      <div className="material-card mb-8">
+      <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm mb-8">
         <div className="flex justify-between items-center mb-6">
           <h3 className="font-display font-bold text-lg">Weekly Analytics</h3>
           <div className="text-xs text-slate-400 font-semibold uppercase">Last 7 Days</div>
@@ -492,6 +552,59 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Booking Requests */}
+      <AnimatePresence>
+        {bookingRequests.length > 0 && (
+          <div className="mb-8 space-y-3">
+            <h3 className="font-display font-bold text-lg flex items-center gap-2 px-2">
+              <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+              Rebooking Requests
+            </h3>
+            {bookingRequests.map((req) => (
+              <motion.div
+                key={req.id}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white p-4 rounded-2xl border border-orange-100 shadow-sm flex items-center justify-between gap-4"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-orange-50 text-orange-600 rounded-full flex items-center justify-center">
+                    <RefreshCw size={20} />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900">{req.customerName}</div>
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                      Request for {req.tankerSize} Tanker
+                    </div>
+                    {req.remarks && (
+                      <div className="mt-1 text-[11px] text-orange-600 bg-orange-50 px-2 py-1 rounded-lg border border-orange-100 flex items-start gap-1">
+                        <MessageSquare size={10} className="mt-0.5" />
+                        <span className="italic">"{req.remarks}"</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleRejectRequest(req)}
+                    className="px-4 py-2 bg-slate-50 text-slate-400 hover:text-red-500 rounded-xl text-xs font-bold transition-colors"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => handleAcceptRequest(req)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all flex items-center gap-2"
+                  >
+                    <CheckCircle2 size={14} /> Accept
+                  </button>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Recent Tokens */}
       <div>
         <div className="flex justify-between items-center mb-4">
@@ -502,18 +615,18 @@ export function Dashboard() {
         </div>
         <div className="flex flex-col gap-3">
           {stats.recentBills.length === 0 && (
-            <div className="text-center py-8 text-slate-400 bg-white rounded-3xl border border-dashed">
-              No tokens generated yet
+            <div className="text-center py-8 text-slate-400 bg-white rounded-3xl border border-dashed text-xs uppercase font-bold tracking-widest">
+              No recent activity
             </div>
           )}
           {stats.recentBills.map(bill => (
-            <motion.button 
+            <motion.div 
               key={bill.id} 
               whileTap={{ scale: 0.98 }}
               onClick={() => setEditingBill(bill)}
-              className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-50 shadow-sm relative overflow-hidden text-left"
+              className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-50 shadow-sm relative overflow-hidden text-left cursor-pointer"
             >
-              {!bill.isSettled && (
+              {!bill.isSettled && bill.status !== 'Cancelled' && (
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-orange-400" />
               )}
               <div className="flex items-center gap-3">
@@ -532,24 +645,41 @@ export function Dashboard() {
                       <div className="flex items-center gap-1.5 ml-1">
                         <span className="w-1 h-1 rounded-full bg-slate-200" />
                         <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md flex items-center gap-1">
-                          {stats.tractors.find(t => t.id === bill.tractorId)?.name || 'N/A'} • {bill.driverName || 'N/A'}
+                          {tractors.find(t => t.id === bill.tractorId)?.name || 'N/A'} • {bill.driverName || 'N/A'}
                         </span>
                       </div>
                     )}
                   </div>
+                  {bill.remarks && (
+                    <div className="mt-2 text-[11px] text-slate-600 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100 flex items-start gap-1 max-w-[250px]">
+                      <MessageSquare size={10} className="mt-0.5 text-slate-400 flex-shrink-0" />
+                      <span className="italic truncate">{bill.remarks}</span>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="text-right">
-                <div className="font-bold text-sm">{formatCurrency(bill.grandTotal)}</div>
-                <div className={`text-[10px] font-bold uppercase ${
-                  bill.status === 'Delivered' ? 'text-green-500' : 
-                  bill.status === 'Cancelled' ? 'text-red-500' : 
-                  bill.status === 'Printed' ? 'text-slate-400 italic' : 'text-orange-500'
-                }`}>
-                  {bill.status === 'Printed' ? 'Ready' : bill.status}
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <div className="font-bold text-sm">{formatCurrency(bill.grandTotal)}</div>
+                  <div className={`text-[10px] font-bold uppercase ${
+                    bill.status === 'Delivered' ? 'text-green-500' : 
+                    bill.status === 'Cancelled' ? 'text-red-500' : 
+                    bill.status === 'Printed' ? 'text-slate-400 italic' : 'text-orange-500'
+                  }`}>
+                    {bill.status === 'Printed' ? 'Ready' : bill.status}
+                  </div>
                 </div>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    sendWhatsApp(bill, 'customer');
+                  }}
+                  className="w-8 h-8 bg-green-50 text-green-600 rounded-full flex items-center justify-center hover:bg-green-600 hover:text-white transition-all shadow-sm flex-shrink-0"
+                >
+                  <MessageSquare size={16} />
+                </button>
               </div>
-            </motion.button>
+            </motion.div>
           ))}
         </div>
       </div>

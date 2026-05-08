@@ -26,6 +26,7 @@ import { TractorDiesel } from './components/TractorDiesel';
 import { ReportView } from './components/ReportView';
 import { DriverManagement } from './components/DriverManagement';
 import { DriverLiveTracking } from './components/DriverLiveTracking';
+import { CustomerOrderView } from './components/CustomerOrderView';
 import { Logo } from './components/Logo';
 import { auth, googleProvider, signInWithPopup, onAuthStateChanged } from './firebase';
 import { User } from 'firebase/auth';
@@ -51,17 +52,18 @@ export default function App() {
 
   const queryParams = new URLSearchParams(window.location.search);
   const driverId = queryParams.get('driverId');
+  const orderId = queryParams.get('o');
 
   const handleLogin = async () => {
     if (loginInProgress) return;
     setLoginInProgress(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const authorizedEmail = 'rajhanssikar@gmail.com';
+      const authorizedEmails = ['rajhanssikar@gmail.com', 'milan.sharma6565@gmail.com'];
       
-      if (result.user.email !== authorizedEmail) {
+      if (!authorizedEmails.includes(result.user.email || '')) {
         await auth.signOut();
-        alert(`ACCESS DENIED: Only ${authorizedEmail} is authorized to access this system.`);
+        alert(`ACCESS DENIED: Only authorized administrative accounts can access this system.`);
         return;
       }
     } catch (error: any) {
@@ -87,6 +89,11 @@ export default function App() {
   // If driverId is present, show tracking page regardless of auth
   if (driverId) {
     return <DriverLiveTracking driverId={driverId} />;
+  }
+
+  // If orderId is present, show customer view regardless of auth
+  if (orderId) {
+    return <CustomerOrderView billId={orderId} />;
   }
 
   if (loading) {
@@ -217,7 +224,7 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* Mobile Nav Button (Floating New Token) */}
+      {/* Floating Action Button (Mobile Only) */}
       <div className="md:hidden">
         {activeTab !== 'billing' && (
           <motion.button
@@ -233,7 +240,7 @@ export default function App() {
 
       {/* Bottom Navigation (Mobile Only) */}
       <nav className="fixed bottom-0 left-0 right-0 md:hidden bg-white/80 backdrop-blur-xl border-t border-slate-100 h-20 flex items-center justify-around px-4 z-[40]">
-        <NavButton icon={<LayoutDashboard size={24} />} label="Home" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+        <NavButton icon={<LayoutDashboard size={24} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
         <NavButton icon={<Users size={24} />} label="Customers" active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} />
         <div className="w-16" />
         <NavButton icon={<History size={24} />} label="History" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />

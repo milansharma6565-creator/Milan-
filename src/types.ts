@@ -39,6 +39,7 @@ export interface Bill {
   tractorId?: string;
   status: 'Delivered' | 'Pending' | 'Cancelled' | 'Printed';
   isSettled: boolean;
+  remarks?: string;
   createdAt: any;
 }
 
