@@ -169,7 +169,8 @@ export function CustomerManagement() {
       const { id, ...updateData } = editingCustomer;
       await updateDoc(doc(db, 'customers', id!), {
         ...updateData,
-        name: editingCustomer.name.trim()
+        name: editingCustomer.name.trim(),
+        updatedAt: serverTimestamp()
       } as any);
       setEditingCustomer(null);
     } catch (error) {

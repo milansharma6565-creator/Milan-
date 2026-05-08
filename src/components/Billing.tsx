@@ -129,7 +129,10 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
     if (cleanTerm.length === 10 && cleanTerm !== c.mobile && !c.secondaryMobiles?.includes(cleanTerm)) {
       const updatedSecondaries = [...(c.secondaryMobiles || []), cleanTerm];
       try {
-        await updateDoc(doc(db, 'customers', c.id!), { secondaryMobiles: updatedSecondaries });
+        await updateDoc(doc(db, 'customers', c.id!), { 
+          secondaryMobiles: updatedSecondaries,
+          updatedAt: serverTimestamp()
+        });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `customers/${c.id}`);
       }
@@ -231,7 +234,10 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
 
     try {
       // Save sticky rate to customer
-      await updateDoc(doc(db, 'customers', selectedCustomer.id!), { lastRate: form.rate });
+      await updateDoc(doc(db, 'customers', selectedCustomer.id!), { 
+        lastRate: form.rate,
+        updatedAt: serverTimestamp()
+      });
 
       const billData = {
         billNumber: form.billNumber,
@@ -279,7 +285,10 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
     if (!lastBill?.id) return;
     
     try {
-      await updateDoc(doc(db, 'bills', lastBill.id), { status });
+      await updateDoc(doc(db, 'bills', lastBill.id), { 
+        status,
+        updatedAt: serverTimestamp()
+      });
       setShowStatusSelection(false);
       setShowInvoice(false);
       if (onBillCreated) onBillCreated();

@@ -15,7 +15,8 @@ import {
   Ticket,
   LineChart,
   ClipboardList,
-  Fuel
+  Fuel,
+  Navigation
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dashboard } from './components/Dashboard';
@@ -25,13 +26,14 @@ import { Ledger } from './components/Ledger';
 import { TractorDiesel } from './components/TractorDiesel';
 import { ReportView } from './components/ReportView';
 import { DriverManagement } from './components/DriverManagement';
+import { DriverTrackingAdmin } from './components/DriverTrackingAdmin';
 import { DriverLiveTracking } from './components/DriverLiveTracking';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { Logo } from './components/Logo';
 import { auth, googleProvider, signInWithPopup, onAuthStateChanged } from './firebase';
 import { User } from 'firebase/auth';
 
-type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors';
+type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map';
 
 import { format } from 'date-fns';
 import { formatCurrency } from './constants';
@@ -141,6 +143,7 @@ export default function App() {
       case 'customers': return <CustomerManagement />;
       case 'billing': return <Billing onBillCreated={() => setActiveTab('reports')} />;
       case 'drivers': return <DriverManagement />;
+      case 'live-map': return <DriverTrackingAdmin isTab />;
       case 'reports': return <ReportView />;
       case 'ledger': return <Ledger />;
       case 'tractors': return <TractorDiesel />;
@@ -178,6 +181,7 @@ export default function App() {
 
         <nav className="flex flex-col gap-2 flex-1 scrollbar-hide overflow-y-auto">
           <SidebarButton icon={<LayoutDashboard size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }} />
+          <SidebarButton icon={<Navigation size={20} />} label="Live Map" active={activeTab === 'live-map'} onClick={() => { setActiveTab('live-map'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Users size={20} />} label="Customers" active={activeTab === 'customers'} onClick={() => { setActiveTab('customers'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Ticket size={20} />} label="Create Token" active={activeTab === 'billing'} onClick={() => { setActiveTab('billing'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Truck size={20} />} label="Drivers" active={activeTab === 'drivers'} onClick={() => { setActiveTab('drivers'); setIsSidebarOpen(false); }} />

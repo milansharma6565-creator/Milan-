@@ -19,6 +19,11 @@ service cloud.firestore {
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
 
+    function isTimestampValid(field) {
+      return !incoming().diff(existing()).affectedKeys().hasAny([field]) || 
+             incoming()[field] == request.time;
+    }
+
     // ---------------------------------------------------------
     // DEFAULT DENY
     // ---------------------------------------------------------
@@ -120,9 +125,9 @@ service cloud.firestore {
       allow create: if isAdmin() && isValidId(customerId) && isValidCustomer(incoming());
       allow update: if isAdmin() && isValidId(customerId) && (
         (incoming().diff(existing()).affectedKeys().hasOnly(['pendingAmount', 'lastRate', 'secondaryMobiles', 'address', 'updatedAt']) && 
-         incoming().get('updatedAt', request.time) == request.time) ||
+         isTimestampValid('updatedAt')) ||
         (incoming().diff(existing()).affectedKeys().hasAny(['name', 'mobile', 'address', 'alternateMobile', 'vehicleNumber', 'notes', 'updatedAt']) &&
-         incoming().get('updatedAt', request.time) == request.time)
+         isTimestampValid('updatedAt'))
       );
       allow delete: if isAdmin() && isValidId(customerId);
     }
@@ -134,7 +139,7 @@ service cloud.firestore {
                     exists(/databases/$(database)/documents/customers/$(incoming().customerId));
       allow update: if isAdmin() && isValidId(billId) && (
         (incoming().diff(existing()).affectedKeys().hasAny(['status', 'driverName', 'driverMobile', 'tractorId', 'paymentMode', 'isSettled', 'updatedAt']) &&
-         incoming().get('updatedAt', request.time) == request.time &&
+         isTimestampValid('updatedAt') &&
          incoming().billNumber == existing().billNumber && 
          incoming().customerId == existing().customerId)
       );

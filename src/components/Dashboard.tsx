@@ -40,6 +40,52 @@ export function Dashboard() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [tractors, setTractors] = useState<Tractor[]>([]);
   const [stats, setStats] = useState<any>(null);
+  const [smileyMood, setSmileyMood] = useState<'normal' | 'happy' | 'sad'>('normal');
+  const [eatingState, setEatingState] = useState<'walking' | 'sitting' | 'eating' | 'idle'>('idle');
+  const [removedDigits, setRemovedDigits] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (!stats?.totalPending) return;
+
+    const startAnimation = () => {
+      setEatingState('walking');
+      setRemovedDigits([]);
+      
+      const amountStr = Math.floor(stats.totalPending).toString();
+      let digitIndex = amountStr.length - 1;
+
+      setTimeout(() => {
+        setEatingState('sitting');
+        
+        const performEating = () => {
+          if (digitIndex < 0) {
+            setEatingState('idle');
+            setTimeout(startAnimation, 12000); // Wait longer before restarting
+            return;
+          }
+
+          setEatingState('eating');
+          
+          setTimeout(() => {
+            setRemovedDigits(prev => [...prev, digitIndex]);
+            digitIndex--;
+            setEatingState('sitting'); 
+            setTimeout(performEating, 2500); // Slower eating for "relaxed" feel
+          }, 1500);
+        };
+
+        setTimeout(performEating, 1500);
+      }, 3500);
+    };
+
+    const initialDelay = setTimeout(startAnimation, 2000);
+    return () => clearTimeout(initialDelay);
+  }, [stats?.totalPending]);
+
+  const triggerSmiley = (mood: 'happy' | 'sad') => {
+    setSmileyMood(mood);
+    setTimeout(() => setSmileyMood('normal'), 1200);
+  };
 
   useEffect(() => {
     const unsubBills = onSnapshot(collection(db, 'bills'), 
@@ -109,6 +155,23 @@ export function Dashboard() {
       return timeB - timeA;
     });
 
+    const driverStats = drivers.map(driver => {
+      const driverBills = bills.filter(b => b.driverName === driver.name && b.status === 'Delivered');
+      const tractorUsage: Record<string, number> = {};
+      driverBills.forEach(b => {
+        if (b.tractorId) {
+          const tractorName = tractors.find(t => t.id === b.tractorId)?.name || 'Unknown';
+          tractorUsage[tractorName] = (tractorUsage[tractorName] || 0) + 1;
+        }
+      });
+      return {
+        name: driver.name,
+        mobile: driver.mobile,
+        tripCount: driverBills.length,
+        mostUsedTractor: Object.entries(tractorUsage).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A'
+      };
+    }).filter(d => d.tripCount > 0).sort((a, b) => b.tripCount - a.tripCount);
+
     setStats({
       todayCollection,
       totalPending,
@@ -117,7 +180,7 @@ export function Dashboard() {
       customerCount: customers.length,
       drivers,
       tractors,
-      chartData,
+      driverStats,
       recentBills: allBillsSorted.slice(0, 10)
     });
   }, [bills, customers, drivers, tractors]);
@@ -133,7 +196,10 @@ export function Dashboard() {
         return;
       }
       try {
-        await updateDoc(doc(db, 'bills', editingBill.id), { status });
+        await updateDoc(doc(db, 'bills', editingBill.id), { 
+          status,
+          updatedAt: serverTimestamp()
+        });
         const updated = await getDoc(doc(db, 'bills', editingBill.id));
         setEditingBill({ id: updated.id, ...updated.data() });
       } catch (error) {
@@ -148,50 +214,56 @@ export function Dashboard() {
     const isCredit = mode === 'Credit';
     const finalPaymentMode = isCredit ? 'Pending' : mode;
 
-    try {
-      await runTransaction(db, async (transaction) => {
-        const billRef = doc(db, 'bills', editingBill.id);
-        const customerRef = doc(db, 'customers', editingBill.customerId);
-        
-        // READS FIRST
-        let currentPending = 0;
-        if (isCredit) {
+      try {
+        await runTransaction(db, async (transaction) => {
+          const billRef = doc(db, 'bills', editingBill.id);
+          const customerRef = doc(db, 'customers', editingBill.customerId);
+          
+          // READS FIRST
+          const billDoc = await transaction.get(billRef);
+          if (!billDoc.exists()) {
+            throw new Error("Bill does not exist anymore.");
+          }
+
+          let currentPending = 0;
           const custDoc = await transaction.get(customerRef);
           if (custDoc.exists()) {
             currentPending = custDoc.data().pendingAmount || 0;
           }
-        }
 
-        // WRITES SECOND
-        transaction.update(billRef, { 
-          status: 'Delivered', 
-          paymentMode: finalPaymentMode,
-          isSettled: !isCredit 
-        });
-
-        if (isCredit) {
-          transaction.update(customerRef, {
-            pendingAmount: currentPending + editingBill.grandTotal
+          // WRITES SECOND
+          transaction.update(billRef, { 
+            status: 'Delivered', 
+            paymentMode: finalPaymentMode,
+            isSettled: !isCredit,
+            updatedAt: serverTimestamp()
           });
-        } else {
-          const ledgerRef = collection(db, 'ledger');
-          const newLedgerDoc = {
-            date: new Date().toISOString(),
-            type: 'Income',
-            category: 'Customer Collection',
-            partyName: editingBill.customerName,
-            partyId: editingBill.customerId,
-            description: `Payment for Token #${editingBill.billNumber} via ${mode}`,
-            amount: editingBill.grandTotal,
-            paymentMode: mode === 'UPI' ? 'UPI' : 'Cash',
-            createdAt: serverTimestamp()
-          };
-          transaction.set(doc(ledgerRef), newLedgerDoc);
-        }
-      });
+
+          if (isCredit && custDoc.exists()) {
+            transaction.update(customerRef, {
+              pendingAmount: currentPending + editingBill.grandTotal,
+              updatedAt: serverTimestamp()
+            });
+          } else if (!isCredit) {
+            const ledgerRef = collection(db, 'ledger');
+            const newLedgerDoc = {
+              date: new Date().toISOString(),
+              type: 'Income',
+              category: 'Customer Collection',
+              partyName: editingBill.customerName,
+              partyId: editingBill.customerId,
+              description: `Payment for Token #${editingBill.billNumber} via ${mode}`,
+              amount: editingBill.grandTotal,
+              paymentMode: mode === 'UPI' ? 'UPI' : 'Cash',
+              createdAt: serverTimestamp()
+            };
+            transaction.set(doc(ledgerRef), newLedgerDoc);
+          }
+        });
 
       setShowPaymentSelection(false);
       setEditingBill(null);
+      triggerSmiley(mode === 'Credit' ? 'sad' : 'happy');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'transaction');
     }
@@ -209,6 +281,11 @@ export function Dashboard() {
             const ledgerRef = collection(db, 'ledger');
 
             // READS FIRST
+            const billDoc = await transaction.get(billRef);
+            if (!billDoc.exists()) {
+              throw new Error("Bill does not exist.");
+            }
+
             let currentPending = 0;
             const custDoc = await transaction.get(customerRef);
             if (custDoc.exists()) {
@@ -216,7 +293,10 @@ export function Dashboard() {
             }
 
             // WRITES SECOND
-            transaction.update(billRef, { paymentMode: mode });
+            transaction.update(billRef, { 
+              paymentMode: mode,
+              updatedAt: serverTimestamp()
+            });
 
             const newLedgerDoc = {
               date: new Date().toISOString(),
@@ -231,16 +311,23 @@ export function Dashboard() {
             };
             transaction.set(doc(ledgerRef), newLedgerDoc);
 
-            transaction.update(customerRef, {
-              pendingAmount: Math.max(0, currentPending - editingBill.grandTotal)
-            });
+            if (custDoc.exists()) {
+              transaction.update(customerRef, {
+                pendingAmount: Math.max(0, currentPending - editingBill.grandTotal),
+                updatedAt: serverTimestamp()
+              });
+            }
           });
         } else {
-          await updateDoc(doc(db, 'bills', editingBill.id), { paymentMode: mode });
+          await updateDoc(doc(db, 'bills', editingBill.id), { 
+            paymentMode: mode,
+            updatedAt: serverTimestamp()
+          });
         }
         
         const updated = await getDoc(doc(db, 'bills', editingBill.id));
         setEditingBill({ id: updated.id, ...updated.data() });
+        triggerSmiley(mode === 'Pending' ? 'sad' : 'happy');
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'transaction');
       }
@@ -252,7 +339,8 @@ export function Dashboard() {
       try {
         await updateDoc(doc(db, 'bills', editingBill.id), { 
           driverName: driver.name,
-          driverMobile: driver.mobile
+          driverMobile: driver.mobile,
+          updatedAt: serverTimestamp()
         });
         const updated = await getDoc(doc(db, 'bills', editingBill.id));
         setEditingBill({ id: updated.id, ...updated.data() });
@@ -265,7 +353,10 @@ export function Dashboard() {
   const handleTractorUpdate = async (tractorId: string) => {
     if (editingBill?.id) {
       try {
-        await updateDoc(doc(db, 'bills', editingBill.id), { tractorId });
+        await updateDoc(doc(db, 'bills', editingBill.id), { 
+          tractorId,
+          updatedAt: serverTimestamp()
+        });
         const updated = await getDoc(doc(db, 'bills', editingBill.id));
         setEditingBill({ id: updated.id, ...updated.data() });
       } catch (error) {
@@ -422,7 +513,6 @@ export function Dashboard() {
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
-
   const printRef = React.useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -469,7 +559,38 @@ export function Dashboard() {
           <div className="bg-blue-500/50 w-10 h-10 rounded-xl flex items-center justify-center mb-4">
             <TrendingUp size={20} />
           </div>
-          <div className="text-[10px] uppercase font-bold tracking-wider opacity-70 mb-1">Today's Collection</div>
+          <div className="flex items-center gap-3 mb-1">
+            <div className="text-[10px] uppercase font-bold tracking-wider opacity-70">Today's Collection</div>
+            <motion.div
+              key={smileyMood}
+              initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
+              animate={{ 
+                scale: 1, 
+                opacity: 1, 
+                rotate: 0,
+                y: smileyMood === 'sad' ? [0, 5, 0] : [0, -5, 0]
+              }}
+              transition={{ 
+                scale: { type: "spring", stiffness: 260, damping: 20 },
+                opacity: { duration: 0.2 },
+                rotate: { type: "spring", stiffness: 260, damping: 20 },
+                y: { duration: 0.5, times: [0, 0.5, 1], ease: "easeInOut" }
+              }}
+              className="relative w-10 h-10 -mt-1"
+            >
+              <img 
+                src={
+                  smileyMood === 'happy' 
+                    ? "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Smiling%20Face%20with%20Sunglasses.png" 
+                    : smileyMood === 'sad' 
+                      ? "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Crying%20Face.png"
+                      : "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Slightly%20Smiling%20Face.png"
+                } 
+                alt="mood sticker"
+                className="w-full h-full object-contain drop-shadow-md"
+              />
+            </motion.div>
+          </div>
           <div className="text-2xl font-display font-bold">{formatCurrency(stats.todayCollection)}</div>
         </motion.div>
 
@@ -477,13 +598,80 @@ export function Dashboard() {
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1 }}
-          className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm"
+          className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden h-[180px] group"
         >
-          <div className="bg-orange-100 text-orange-600 w-10 h-10 rounded-xl flex items-center justify-center mb-4">
+          <div className="bg-orange-100 text-orange-600 w-10 h-10 rounded-xl flex items-center justify-center mb-4 relative z-20">
             <Clock size={20} />
           </div>
-          <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1">Total Pending</div>
-          <div className="text-2xl font-display font-bold text-slate-800">{formatCurrency(stats.totalPending)}</div>
+          
+          <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1 relative z-20">Total Pending</div>
+          
+          <div className="text-4xl font-display font-black text-slate-800 flex items-baseline relative z-20">
+            <span className="text-xl mr-1 text-orange-500">₹</span>
+            {Math.floor(stats.totalPending).toString().split('').map((digit, i) => {
+              const isEaten = removedDigits.includes(i);
+              return (
+                <motion.span
+                  key={i}
+                  initial={{ opacity: 1, y: 0 }}
+                  animate={{ 
+                    opacity: isEaten ? 0 : 1,
+                    y: isEaten ? -40 : 0,
+                    scale: isEaten ? 0 : 1,
+                    rotate: isEaten ? [0, 10, -10, 0] : 0
+                  }}
+                  transition={{ 
+                    duration: 0.8, 
+                    type: 'spring',
+                    rotate: { type: 'keyframes' }
+                  }}
+                  className="inline-block"
+                >
+                  {digit}
+                </motion.span>
+              );
+            })}
+          </div>
+
+          {/* Baal Hanuman Animation - Sticker Style */}
+          <motion.div
+            initial={{ x: 280, y: 40, opacity: 0 }}
+            animate={{ 
+              x: eatingState === 'walking' ? 120 : eatingState === 'idle' ? 280 : 80,
+              y: eatingState === 'sitting' || eatingState === 'eating' ? 50 : 30,
+              opacity: 1,
+              scale: eatingState === 'eating' ? [1.4, 1.55, 1.4] : 1.4,
+            }}
+            transition={{ 
+              x: { duration: eatingState === 'walking' ? 3 : 1, ease: "easeOut" },
+              scale: { type: 'keyframes', duration: 0.5, repeat: eatingState === 'eating' ? Infinity : 0 }
+            }}
+            className="absolute bottom-4 right-0 w-28 h-28 pointer-events-none z-10"
+          >
+            <div className="relative w-full h-full">
+              <img 
+                src="https://raw.githubusercontent.com/msharma6565/assets/main/hanuman_kid_hd.png" 
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/People/Child.png";
+                }}
+                className="w-full h-full object-contain filter drop-shadow-[0_0_8px_rgba(255,255,255,0.8)] drop-shadow-[2px_4px_12px_rgba(0,0,0,0.15)]"
+                alt="Baal Hanuman Sticker"
+              />
+              
+              <AnimatePresence>
+                {eatingState === 'eating' && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0, y: 0 }}
+                    animate={{ opacity: 1, scale: 1.1, y: -25 }}
+                    exit={{ opacity: 0, scale: 0 }}
+                    className="absolute -top-4 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border-2 border-white/50 whitespace-nowrap z-30"
+                  >
+                    CHOMP!
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </motion.div>
         </motion.div>
       </div>
 
@@ -505,50 +693,6 @@ export function Dashboard() {
             <div className="text-xs text-slate-400 font-medium">Customers</div>
             <div className="font-bold text-slate-800">{stats.customerCount}</div>
           </div>
-        </div>
-      </div>
-
-      {/* Chart */}
-      <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm mb-8">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="font-display font-bold text-lg">Weekly Analytics</h3>
-          <div className="text-xs text-slate-400 font-semibold uppercase">Last 7 Days</div>
-        </div>
-        <div className="h-48 w-full -ml-4">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={stats.chartData}>
-              <defs>
-                <linearGradient id="colorAmt" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
-                  <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis 
-                dataKey="name" 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{fontSize: 10, fill: '#94a3b8'}}
-                dy={10}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  borderRadius: '16px', 
-                  border: 'none', 
-                  boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                  padding: '10px'
-                }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="amount" 
-                stroke="#2563eb" 
-                strokeWidth={3}
-                fillOpacity={1} 
-                fill="url(#colorAmt)" 
-              />
-            </AreaChart>
-          </ResponsiveContainer>
         </div>
       </div>
 
@@ -614,18 +758,41 @@ export function Dashboard() {
           </button>
         </div>
         <div className="flex flex-col gap-3">
-          {stats.recentBills.length === 0 && (
-            <div className="text-center py-8 text-slate-400 bg-white rounded-3xl border border-dashed text-xs uppercase font-bold tracking-widest">
-              No recent activity
-            </div>
-          )}
-          {stats.recentBills.map(bill => (
-            <motion.div 
-              key={bill.id} 
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setEditingBill(bill)}
-              className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-50 shadow-sm relative overflow-hidden text-left cursor-pointer"
-            >
+          <AnimatePresence mode="popLayout">
+            {stats.recentBills.length === 0 && (
+              <motion.div 
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-center py-8 text-slate-400 bg-white rounded-3xl border border-dashed text-xs uppercase font-bold tracking-widest"
+              >
+                No recent activity
+              </motion.div>
+            )}
+            {stats.recentBills.map(bill => (
+              <motion.div 
+                key={bill.id} 
+                layout
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ 
+                  opacity: 0, 
+                  scale: 1.15, 
+                  x: 40, 
+                  y: -60, 
+                  rotate: 6,
+                  skewX: 12,
+                  filter: 'blur(30px) grayscale(100%) sepia(30%) brightness(1.3)',
+                  transition: { 
+                    duration: 2, 
+                    ease: [0.4, 0, 1, 1], // accelerated ease in
+                    opacity: { duration: 1.2 }
+                  }
+                }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setEditingBill(bill)}
+                className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-50 shadow-sm relative overflow-hidden text-left cursor-pointer"
+              >
               {!bill.isSettled && bill.status !== 'Cancelled' && (
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-orange-400" />
               )}
@@ -661,11 +828,16 @@ export function Dashboard() {
               <div className="flex items-center gap-3">
                 <div className="text-right">
                   <div className="font-bold text-sm">{formatCurrency(bill.grandTotal)}</div>
-                  <div className={`text-[10px] font-bold uppercase ${
+                  <div className={`text-[10px] font-bold uppercase flex items-center gap-1 justify-end ${
                     bill.status === 'Delivered' ? 'text-green-500' : 
                     bill.status === 'Cancelled' ? 'text-red-500' : 
                     bill.status === 'Printed' ? 'text-slate-400 italic' : 'text-orange-500'
                   }`}>
+                    {bill.status === 'Delivered' && (
+                      <span className="bg-slate-100 text-slate-500 px-1 rounded lowercase font-medium border border-slate-200">
+                        {bill.paymentMode === 'Pending' ? 'credit' : bill.paymentMode}
+                      </span>
+                    )}
                     {bill.status === 'Printed' ? 'Ready' : bill.status}
                   </div>
                 </div>
@@ -681,6 +853,58 @@ export function Dashboard() {
               </div>
             </motion.div>
           ))}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Trip Board */}
+      <div className="mt-8">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-display font-bold text-lg">Trip Board</h3>
+          <div className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-lg font-bold uppercase tracking-wider">
+            Live Rankings
+          </div>
+        </div>
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+          {stats.driverStats.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm italic">
+              No completed trips recorded yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {stats.driverStats.map((driver: any, index: number) => (
+                <div key={driver.name} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm ${
+                      index === 0 ? 'bg-yellow-100 text-yellow-600' :
+                      index === 1 ? 'bg-slate-100 text-slate-500' :
+                      index === 2 ? 'bg-orange-100 text-orange-600' :
+                      'bg-slate-50 text-slate-400'
+                    }`}>
+                      #{index + 1}
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-900">{driver.name}</div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <Truck size={10} className="text-blue-600" />
+                        <span className="text-[10px] font-bold text-blue-600 uppercase">
+                          {driver.mostUsedTractor}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xl font-display font-black text-slate-900">
+                      {driver.tripCount}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
+                      Trips Done
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
