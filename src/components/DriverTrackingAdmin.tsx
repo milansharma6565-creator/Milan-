@@ -29,7 +29,11 @@ interface DriverTrackingAdminProps {
 // Component to handle map centering
 function ChangeView({ center, zoom }: { center: [number, number], zoom: number }) {
   const map = useMap();
-  map.setView(center, zoom);
+  
+  useEffect(() => {
+    map.setView(center, zoom, { animate: true });
+  }, [center, zoom, map]);
+
   return null;
 }
 
@@ -157,7 +161,7 @@ export function DriverTrackingAdmin({ onClose, isTab = false }: DriverTrackingAd
             />
             <ChangeView center={mapCenter} zoom={zoom} />
             
-            {locations.map(loc => (
+            {React.useMemo(() => locations.map(loc => (
               <Marker 
                 key={loc.id} 
                 position={[loc.latitude, loc.longitude]}
@@ -183,7 +187,7 @@ export function DriverTrackingAdmin({ onClose, isTab = false }: DriverTrackingAd
                   </div>
                 </Popup>
               </Marker>
-            ))}
+            )), [locations, selectedDriverId])}
           </MapContainer>
 
           {/* Map Controls */}
