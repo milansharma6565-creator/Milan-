@@ -5,13 +5,12 @@ service cloud.firestore {
     // GLOBAL HELPERS
     // ---------------------------------------------------------
     function isSignedIn() { 
-      return request.auth != null && request.auth.token.email_verified == true; 
+      return request.auth != null && 
+             request.auth.token.email_verified == true &&
+             request.auth.token.email == 'rajhanssikar@gmail.com'; 
     }
     function isAdmin() { 
-      return isSignedIn() && (
-        request.auth.token.email == 'rajhanssikar@gmail.com' || 
-        request.auth.token.email == 'milan.sharma6565@gmail.com'
-      ); 
+      return isSignedIn(); 
     }
     function isValidId(id) { 
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 

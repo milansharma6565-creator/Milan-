@@ -40,6 +40,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loginInProgress, setLoginInProgress] = useState(false);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (user) => {
@@ -52,17 +53,32 @@ export default function App() {
   const driverId = queryParams.get('driverId');
 
   const handleLogin = async () => {
+    if (loginInProgress) return;
+    setLoginInProgress(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      const authorizedEmail = 'rajhanssikar@gmail.com';
+      
+      if (result.user.email !== authorizedEmail) {
+        await auth.signOut();
+        alert(`ACCESS DENIED: Only ${authorizedEmail} is authorized to access this system.`);
+        return;
+      }
     } catch (error: any) {
       console.error('Login failed:', error);
       if (error.code === 'auth/unauthorized-domain') {
-        alert('This domain is not authorized in Firebase Console. Please add it to "Authentication > Settings > Authorized Domains".');
+        const domain = window.location.hostname;
+        alert(`ACCESS DENIED: The domain "${domain}" is not authorized in your Firebase Console.\n\nTo fix this:\n1. Go to Firebase Console\n2. Authentication > Settings > Authorized Domains\n3. Add "${domain}" to the list.`);
       } else if (error.code === 'auth/popup-closed-by-user') {
         // Just ignore
+      } else if (error.code === 'auth/network-request-failed') {
+        const domain = window.location.hostname;
+        alert(`NETWORK ERROR: Firebase couldn't connect to the auth server.\n\nMost common fixes:\n1. Ensure "${domain}" is added to "Authorized Domains" in your Firebase Console.\n2. Disable "Prevent Cross-Site Tracking" or "Block Third-Party Cookies" in your browser settings (often an issue in Safari/Chrome).\n3. Check if an Ad-Blocker is blocking Google's login scripts.`);
       } else {
-        alert(`Login failed: ${error.message}`);
+        alert(`Login failed (${error.code}): ${error.message}\n\nTip: If nothing happened, please check if your browser blocked the sign-in popup.`);
       }
+    } finally {
+      setLoginInProgress(false);
     }
   };
 
@@ -97,10 +113,15 @@ export default function App() {
           
           <button 
             onClick={handleLogin}
-            className="w-full bg-slate-900 text-white h-14 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
+            disabled={loginInProgress}
+            className={`w-full ${loginInProgress ? 'bg-slate-400 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800 shadow-slate-200'} text-white h-14 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-lg`}
           >
-            <LogIn size={20} />
-            Sign in with Google
+            {loginInProgress ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+            ) : (
+              <LogIn size={20} />
+            )}
+            {loginInProgress ? 'Signing in...' : 'Sign in with Google'}
           </button>
         </motion.div>
       </div>

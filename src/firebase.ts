@@ -1,12 +1,26 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from 'firebase/auth';
+import { 
+  initializeAuth, 
+  browserLocalPersistence, 
+  browserPopupRedirectResolver, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  onAuthStateChanged 
+} from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
-export const auth = getAuth();
+
+// Use initializeAuth for more robust configuration
+export const auth = initializeAuth(app, {
+  persistence: browserLocalPersistence,
+  popupRedirectResolver: browserPopupRedirectResolver,
+});
+
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export { signInWithPopup, onAuthStateChanged };
 
