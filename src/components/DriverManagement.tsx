@@ -10,7 +10,7 @@ import { DriverTrackingAdmin } from './DriverTrackingAdmin';
 export function DriverManagement() {
   const [isAdding, setIsAdding] = useState(false);
   const [showLiveMap, setShowLiveMap] = useState(false);
-  const [newDriver, setNewDriver] = useState({ name: '', mobile: '' });
+  const [newDriver, setNewDriver] = useState({ name: '', mobile: '', monthlySalary: '' });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
 
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -62,9 +62,11 @@ export function DriverManagement() {
     try {
       await addDoc(collection(db, 'drivers'), {
         ...newDriver,
-        mobile: newDriver.mobile.replace(/\D/g, '')
+        mobile: newDriver.mobile.replace(/\D/g, ''),
+        monthlySalary: Number(newDriver.monthlySalary) || 0,
+        createdAt: new Date()
       });
-      setNewDriver({ name: '', mobile: '' });
+      setNewDriver({ name: '', mobile: '', monthlySalary: '' });
       setIsAdding(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'drivers');
@@ -121,6 +123,9 @@ export function DriverManagement() {
                   <div>
                     <h3 className="text-lg font-bold text-slate-800">{driver.name}</h3>
                     <p className="text-slate-400 text-xs font-mono">+91 {driver.mobile}</p>
+                    {driver.monthlySalary > 0 && (
+                      <p className="text-indigo-600 text-xs font-bold mt-1">₹{driver.monthlySalary.toLocaleString()} / month</p>
+                    )}
                   </div>
                 </div>
                 
@@ -217,6 +222,17 @@ export function DriverManagement() {
                       placeholder="10 digit number"
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Monthly Salary (₹)</label>
+                  <input
+                    required
+                    type="number"
+                    className="material-input h-14 bg-slate-50 border-2 border-transparent focus:border-blue-100 focus:bg-white"
+                    value={newDriver.monthlySalary}
+                    onChange={e => setNewDriver({...newDriver, monthlySalary: e.target.value})}
+                    placeholder="e.g. 15000"
+                  />
                 </div>
                 
                 <button type="submit" className="material-btn material-btn-primary h-16 text-lg mt-4 shadow-blue-500/20">

@@ -61,7 +61,22 @@
       "type": "object",
       "properties": {
         "name": { "type": "string" },
-        "mobile": { "type": "string" }
+        "mobile": { "type": "string" },
+        "monthlySalary": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "AttendanceRecord": {
+      "title": "Attendance Record",
+      "description": "Daily attendance for drivers",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["Full Day", "Half Day", "Absent"] },
+        "note": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
       }
     },
     "Tractor": {
@@ -145,6 +160,56 @@
         "requestedAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "AccountGroup": {
+      "title": "Account Group",
+      "description": "Accounting groups (e.g., Assets, Liabilities)",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "parentGroupId": { "type": "string" },
+        "type": { "type": "string", "enum": ["Asset", "Liability", "Income", "Expense", "Equity"] }
+      }
+    },
+    "Account": {
+      "title": "Account",
+      "description": "Ledger accounts",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "groupId": { "type": "string" },
+        "openingBalance": { "type": "number" },
+        "balanceType": { "type": "string", "enum": ["Dr", "Cr"] },
+        "currentBalance": { "type": "number" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Voucher": {
+      "title": "Voucher",
+      "description": "Accounting vouchers (double-entry)",
+      "type": "object",
+      "properties": {
+        "voucherNumber": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["Receipt", "Payment", "Journal", "Contra", "Sales", "Purchase"] },
+        "items": { 
+          "type": "array", 
+          "items": {
+            "type": "object",
+            "properties": {
+              "accountId": { "type": "string" },
+              "accountName": { "type": "string" },
+              "amount": { "type": "number" },
+              "type": { "type": "string", "enum": ["Dr", "Cr"] },
+              "narration": { "type": "string" }
+            }
+          }
+        },
+        "narration": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -156,6 +221,10 @@
     "maintenanceLogs": { "schema": "MaintenanceLog", "description": "Collection of maintenance logs" },
     "ledger": { "schema": "LedgerEntry", "description": "Collection of ledger entries" },
     "driverLocations": { "schema": "DriverLocation", "description": "Collection of live driver locations" },
-    "bookingRequests": { "schema": "BookingRequest", "description": "Collection of customer rebooking requests" }
+    "bookingRequests": { "schema": "BookingRequest", "description": "Collection of customer rebooking requests" },
+    "accountGroups": { "schema": "AccountGroup", "description": "Accounting groups" },
+    "accounts": { "schema": "Account", "description": "Ledger accounts" },
+    "vouchers": { "schema": "Voucher", "description": "Accounting vouchers" },
+    "attendance": { "schema": "AttendanceRecord", "description": "Daily driver attendance" }
   }
 }

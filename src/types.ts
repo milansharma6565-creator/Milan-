@@ -84,10 +84,63 @@ export interface LedgerEntry {
   createdAt: any;
 }
 
+export type AccountMainType = 'Asset' | 'Liability' | 'Income' | 'Expense' | 'Equity';
+
+export interface AccountGroup {
+  id?: string;
+  name: string;
+  parentGroupId?: string;
+  type: AccountMainType;
+}
+
+export interface Account {
+  id?: string;
+  name: string;
+  groupId: string;
+  openingBalance: number;
+  balanceType: 'Dr' | 'Cr';
+  currentBalance: number;
+  description?: string;
+}
+
+export type VoucherType = 'Receipt' | 'Payment' | 'Journal' | 'Contra' | 'Sales' | 'Purchase';
+
+export interface VoucherItem {
+  accountId: string;
+  accountName: string;
+  amount: number;
+  type: 'Dr' | 'Cr';
+  narration?: string;
+}
+
+export interface Voucher {
+  id?: string;
+  voucherNumber: string;
+  date: any;
+  type: VoucherType;
+  items: VoucherItem[];
+  narration: string;
+  createdAt: any;
+  totalAmount: number;
+}
+
 export interface Driver {
   id?: string;
   name: string;
   mobile: string;
+  monthlySalary: number;
+}
+
+export type AttendanceStatus = 'Full Day' | 'Half Day' | 'Absent';
+
+export interface AttendanceRecord {
+  id?: string;
+  driverId: string;
+  driverName: string;
+  date: any;
+  status: AttendanceStatus;
+  note?: string;
+  createdAt: any;
 }
 
 export interface DriverLocation {

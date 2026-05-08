@@ -16,7 +16,8 @@ import {
   LineChart,
   ClipboardList,
   Fuel,
-  Navigation
+  Navigation,
+  CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dashboard } from './components/Dashboard';
@@ -26,6 +27,7 @@ import { Ledger } from './components/Ledger';
 import { TractorDiesel } from './components/TractorDiesel';
 import { ReportView } from './components/ReportView';
 import { DriverManagement } from './components/DriverManagement';
+import { DriverAttendance } from './components/DriverAttendance';
 import { DriverTrackingAdmin } from './components/DriverTrackingAdmin';
 import { DriverLiveTracking } from './components/DriverLiveTracking';
 import { CustomerOrderView } from './components/CustomerOrderView';
@@ -33,13 +35,13 @@ import { Logo } from './components/Logo';
 import { auth, googleProvider, signInWithPopup, onAuthStateChanged } from './firebase';
 import { User } from 'firebase/auth';
 
-type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map';
+type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance';
 
 import { format } from 'date-fns';
 import { formatCurrency } from './constants';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('billing');
+  const [activeTab, setActiveTab] = useState<Tab>('attendance');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,6 +145,7 @@ export default function App() {
       case 'customers': return <CustomerManagement />;
       case 'billing': return <Billing onBillCreated={() => setActiveTab('reports')} />;
       case 'drivers': return <DriverManagement />;
+      case 'attendance': return <DriverAttendance />;
       case 'live-map': return <DriverTrackingAdmin isTab />;
       case 'reports': return <ReportView />;
       case 'ledger': return <Ledger />;
@@ -182,6 +185,7 @@ export default function App() {
         <nav className="flex flex-col gap-2 flex-1 scrollbar-hide overflow-y-auto">
           <SidebarButton icon={<LayoutDashboard size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Navigation size={20} />} label="Live Map" active={activeTab === 'live-map'} onClick={() => { setActiveTab('live-map'); setIsSidebarOpen(false); }} />
+          <SidebarButton icon={<CheckCircle2 size={20} />} label="Attendance" active={activeTab === 'attendance'} onClick={() => { setActiveTab('attendance'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Users size={20} />} label="Customers" active={activeTab === 'customers'} onClick={() => { setActiveTab('customers'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Ticket size={20} />} label="Create Token" active={activeTab === 'billing'} onClick={() => { setActiveTab('billing'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Truck size={20} />} label="Drivers" active={activeTab === 'drivers'} onClick={() => { setActiveTab('drivers'); setIsSidebarOpen(false); }} />
@@ -244,6 +248,7 @@ export default function App() {
 
       {/* Bottom Navigation (Mobile Only) */}
       <nav className="fixed bottom-0 left-0 right-0 md:hidden bg-white/80 backdrop-blur-xl border-t border-slate-100 h-20 flex items-center justify-around px-4 z-[40]">
+        <NavButton icon={<CheckCircle2 size={24} />} label="Atten." active={activeTab === 'attendance'} onClick={() => setActiveTab('attendance')} />
         <NavButton icon={<LayoutDashboard size={24} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
         <NavButton icon={<Users size={24} />} label="Customers" active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} />
         <div className="w-16" />

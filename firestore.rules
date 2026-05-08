@@ -57,7 +57,15 @@ service cloud.firestore {
     function isValidDriver(data) {
       return data.keys().hasAll(['name', 'mobile']) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             data.mobile is string && data.mobile.size() >= 10 && data.mobile.size() <= 15;
+             data.mobile is string && data.mobile.size() >= 10 && data.mobile.size() <= 15 &&
+             (data.get('monthlySalary', 0) is number);
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['driverId', 'status', 'date']) &&
+             data.driverId is string && isValidId(data.driverId) &&
+             data.status in ['Full Day', 'Half Day', 'Absent'] &&
+             (data.get('createdAt', request.time) == request.time);
     }
 
     function isValidTractor(data) {
@@ -98,6 +106,31 @@ service cloud.firestore {
              data.status in ['Pending', 'Accepted', 'Rejected'] &&
              (data.get('remarks', '').size() <= 500) &&
              (data.get('requestedAt', request.time) == request.time);
+    }
+
+    function isValidAccountGroup(data) {
+      return data.keys().hasAll(['name', 'type']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.type in ['Asset', 'Liability', 'Income', 'Expense', 'Equity'] &&
+             (data.get('parentGroupId', '') is string);
+    }
+
+    function isValidAccount(data) {
+      return data.keys().hasAll(['name', 'groupId', 'openingBalance', 'balanceType']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.groupId is string &&
+             data.openingBalance is number &&
+             data.balanceType in ['Dr', 'Cr'] &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
+    function isValidVoucher(data) {
+      return data.keys().hasAll(['voucherNumber', 'date', 'type', 'items', 'totalAmount']) &&
+             data.voucherNumber is string &&
+             data.type in ['Receipt', 'Payment', 'Journal', 'Contra', 'Sales', 'Purchase'] &&
+             data.items is list && data.items.size() >= 2 &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             (data.get('createdAt', request.time) == request.time);
     }
 
     // ---------------------------------------------------------
@@ -182,6 +215,27 @@ service cloud.firestore {
       allow create: if isAdmin() && isValidId(entryId) && isValidLedger(incoming());
       allow update: if false; 
       allow delete: if isAdmin() && isValidId(entryId);
+    }
+
+    match /accountGroups/{groupId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidAccountGroup(incoming());
+    }
+
+    match /accounts/{accountId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidAccount(incoming());
+    }
+
+    match /vouchers/{voucherId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() && isValidVoucher(incoming());
+      allow update, delete: if isAdmin();
+    }
+
+    match /attendance/{atId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidAttendance(incoming());
     }
   }
 }
