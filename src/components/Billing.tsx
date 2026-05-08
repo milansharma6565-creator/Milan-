@@ -263,6 +263,54 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
 
       const docRef = await addDoc(collection(db, 'bills'), billData);
       setBookedBill({ ...billData, id: docRef.id });
+
+      // --- ACCOUNTING INTEGRATION ---
+      try {
+        // 1. Get Sundry Debtors group
+        const groupSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Sundry Debtors')));
+        const debtorsGroupId = groupSnap.docs[0]?.id;
+
+        // 2. Check/Create Customer Ledger
+        let customerAccId: string;
+        const accSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', selectedCustomer.name)));
+        
+        if (accSnap.empty && debtorsGroupId) {
+          const newAcc = await addDoc(collection(db, 'accounts'), {
+            name: selectedCustomer.name,
+            groupId: debtorsGroupId,
+            openingBalance: 0,
+            balanceType: 'Dr',
+            currentBalance: 0,
+            createdAt: serverTimestamp()
+          });
+          customerAccId = newAcc.id;
+        } else {
+          customerAccId = accSnap.docs[0]?.id;
+        }
+
+        // 3. Get Service Income account
+        const incomeSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income')));
+        const incomeAccId = incomeSnap.docs[0]?.id;
+
+        if (customerAccId && incomeAccId) {
+          await addDoc(collection(db, 'vouchers'), {
+            date: new Date(form.date),
+            type: 'Sales',
+            voucherNumber: `SLS-${form.billNumber}`,
+            items: [
+              { accountId: customerAccId, accountName: selectedCustomer.name, amount: grandTotal, type: 'Dr' },
+              { accountId: incomeAccId, accountName: 'Service Income', amount: grandTotal, type: 'Cr' }
+            ],
+            narration: `Trip Bill #${form.billNumber} for ${selectedCustomer.name} (${form.tankerSize})`,
+            totalAmount: grandTotal,
+            createdAt: serverTimestamp()
+          });
+        }
+      } catch (accError) {
+        console.error("Accounting Sync Error:", accError);
+      }
+      // --- END ACCOUNTING ---
+
       setShowBookingSuccess(true);
       
       // Reset form for next entry partially

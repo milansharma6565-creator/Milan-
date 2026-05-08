@@ -137,6 +137,7 @@ export function Ledger() {
         { name: 'Fuel Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
         { name: 'Maintenance', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
         { name: 'Salary Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
+        { name: 'Service Income', group: 'Direct Income', opening: 0, type: 'Cr' },
       ];
 
       for (const acc of defaultAccounts) {
