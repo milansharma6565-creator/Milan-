@@ -18,7 +18,9 @@ import {
   Fuel,
   Navigation,
   CheckCircle2,
-  Droplets
+  Droplets,
+  Smartphone,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dashboard } from './components/Dashboard';
@@ -33,28 +35,98 @@ import { DriverTrackingAdmin } from './components/DriverTrackingAdmin';
 import { DriverLiveTracking } from './components/DriverLiveTracking';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { HydrantFilling } from './components/HydrantFilling';
+import { PhoneSync } from './components/PhoneSync';
+import { AIHub } from './components/AIHub';
 import { Logo } from './components/Logo';
 import { auth, googleProvider, signInWithPopup, onAuthStateChanged } from './firebase';
 import { User } from 'firebase/auth';
 
-type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance' | 'filling';
+type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance' | 'filling' | 'phone-sync' | 'ai-hub';
 
-import { format } from 'date-fns';
+import { format, startOfDay, endOfDay } from 'date-fns';
+import { db, handleFirestoreError, OperationType } from './firebase';
+import { collection, query, getDocs, where, Timestamp, onSnapshot } from 'firebase/firestore';
 import { formatCurrency } from './constants';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('attendance');
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [loginInProgress, setLoginInProgress] = useState(false);
+  const [isAttendanceForced, setIsAttendanceForced] = useState(false);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (user) => {
+    const unsub = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
     });
+    return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!user || loading) return;
+
+    const checkTime = () => {
+      const now = new Date();
+      const currentHour = now.getHours();
+      return currentHour >= 19 && currentHour < 21;
+    };
+
+    let unsubAttendance: (() => void) | null = null;
+    let unsubDrivers: (() => void) | null = null;
+
+    const startMonitoring = () => {
+      if (unsubDrivers) unsubDrivers();
+      if (unsubAttendance) unsubAttendance();
+
+      unsubDrivers = onSnapshot(collection(db, 'drivers'), (driversSnap) => {
+        const driversCount = driversSnap.docs.length;
+        
+        if (driversCount === 0) return;
+
+        if (unsubAttendance) unsubAttendance();
+        unsubAttendance = onSnapshot(
+          query(
+            collection(db, 'attendance'),
+            where('date', '>=', Timestamp.fromDate(startOfDay(new Date()))),
+            where('date', '<=', Timestamp.fromDate(endOfDay(new Date())))
+          ),
+          (attendanceSnap) => {
+            const recordsCount = attendanceSnap.docs.length;
+            const isWindow = checkTime();
+
+            if (isWindow && recordsCount < driversCount) {
+              if (activeTab !== 'attendance') {
+                setActiveTab('attendance');
+                setIsAttendanceForced(true);
+              }
+            } else if (isAttendanceForced && recordsCount >= driversCount) {
+              setIsAttendanceForced(false);
+              setActiveTab('dashboard');
+            }
+          }
+        );
+      });
+    };
+
+    // Check every 30 seconds for the time window
+    const timer = setInterval(() => {
+      const isWindow = checkTime();
+      if (isWindow && !isAttendanceForced) {
+        startMonitoring();
+      }
+    }, 30000);
+
+    // Initial check
+    if (checkTime()) startMonitoring();
+
+    return () => {
+      clearInterval(timer);
+      if (unsubDrivers) unsubDrivers();
+      if (unsubAttendance) unsubAttendance();
+    };
+  }, [user, loading, activeTab, isAttendanceForced]);
 
   const queryParams = new URLSearchParams(window.location.search);
   const driverId = queryParams.get('driverId');
@@ -153,7 +225,9 @@ export default function App() {
       case 'ledger': return <Ledger />;
       case 'tractors': return <TractorDiesel />;
       case 'filling': return <HydrantFilling />;
-      default: return <Dashboard />;
+      case 'phone-sync': return <PhoneSync />;
+      case 'ai-hub': return <AIHub />;
+      default: return <Dashboard onNavigate={(t) => { setActiveTab(t as any); setIsSidebarOpen(false); }} />;
     }
   };
 
@@ -194,6 +268,8 @@ export default function App() {
           <SidebarButton icon={<Truck size={20} />} label="Drivers" active={activeTab === 'drivers'} onClick={() => { setActiveTab('drivers'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<ClipboardList size={20} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => { setActiveTab('ledger'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Droplets size={20} />} label="Hydrant Filling" active={activeTab === 'filling'} onClick={() => { setActiveTab('filling'); setIsSidebarOpen(false); }} />
+          <SidebarButton icon={<Sparkles size={20} />} label="AI Business Hub" active={activeTab === 'ai-hub'} onClick={() => { setActiveTab('ai-hub'); setIsSidebarOpen(false); }} />
+          <SidebarButton icon={<Smartphone size={20} />} label="Business Sync" active={activeTab === 'phone-sync'} onClick={() => { setActiveTab('phone-sync'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Fuel size={20} />} label="Fleet & Fuel" active={activeTab === 'tractors'} onClick={() => { setActiveTab('tractors'); setIsSidebarOpen(false); }} />
         </nav>
 

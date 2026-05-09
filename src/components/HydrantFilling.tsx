@@ -25,6 +25,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { format, startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval } from 'date-fns';
 import { ConfirmationModal } from './ConfirmationModal';
+import { toPng } from 'html-to-image';
 
 export function HydrantFilling() {
   const [fillings, setFillings] = useState<HydrantFillingType[]>([]);
@@ -145,6 +146,43 @@ export function HydrantFilling() {
     }
   };
 
+  const [downloadingFilling, setDownloadingFilling] = useState<HydrantFillingType | null>(null);
+  
+  const downloadToken = async () => {
+    if (!printRef.current || !downloadingFilling) return;
+    
+    try {
+      // Ensure the printable area is visible but hidden from user flow
+      const container = printRef.current;
+      container.parentElement?.classList.remove('hidden');
+      
+      const dataUrl = await toPng(container, {
+        quality: 1,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+      });
+      
+      container.parentElement?.classList.add('hidden');
+      
+      const link = document.createElement('a');
+      link.download = `Token_${downloadingFilling.tokenNumber}.png`;
+      link.href = dataUrl;
+      link.click();
+      setDownloadingFilling(null);
+    } catch (e) {
+      console.error('Download Error:', e);
+      alert('Download failed. Please try again.');
+    }
+  };
+
+  useEffect(() => {
+    if (downloadingFilling) {
+      setTimeout(() => {
+        downloadToken();
+      }, 500);
+    }
+  }, [downloadingFilling]);
+
   useEffect(() => {
     if (printingFilling) {
       setTimeout(() => {
@@ -183,15 +221,12 @@ export function HydrantFilling() {
 
   useEffect(() => {
     // Generate suggestions based on mode and history
-    if (formData.paymentMode === 'Udhaar') {
-      const partyType = formData.type === 'Inward' ? 'Sundry Debtors' : 'Sundry Creditors';
-      // Find group ID first (approximate)
-      const suggestions = accounts.map(a => a.name);
-      setPartySuggestions([...new Set(suggestions)]);
-    } else {
-      const history = fillings.filter(f => f.type === formData.type).map(f => f.partyName);
-      setPartySuggestions([...new Set(history)]);
-    }
+    const history = fillings.filter(f => f.type === formData.type).map(f => f.partyName);
+    const accNames = accounts.map(a => a.name);
+    
+    // Combine history and accounts, remove duplicates
+    const allSuggestions = [...new Set([...history, ...accNames])];
+    setPartySuggestions(allSuggestions);
 
     if (formData.type === 'Outward') {
       const tSuggestions = tractors.map(t => `${t.name} (${t.vehicleNumber})`);
@@ -199,7 +234,7 @@ export function HydrantFilling() {
     } else {
       setVehicleSuggestions([...new Set(fillings.filter(f => f.type === 'Inward').map(f => f.vehicleNumber || ''))]);
     }
-  }, [formData.paymentMode, formData.type, accounts, fillings, tractors]);
+  }, [formData.type, accounts, fillings, tractors]);
 
   const [showDone, setShowDone] = useState(false);
 
@@ -307,6 +342,7 @@ export function HydrantFilling() {
           paymentAccountId: paymentAccId || 'CASH_FALLBACK',
           status: 'Completed',
           remarks: formData.remarks,
+          voucherId: voucherRef.id,
           createdAt: serverTimestamp()
         };
 
@@ -386,7 +422,65 @@ export function HydrantFilling() {
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     try {
-      await deleteDoc(doc(db, 'hydrantFillings', deleteConfirm.id!));
+      await runTransaction(db, async (transaction) => {
+        const fillingRef = doc(db, 'hydrantFillings', deleteConfirm.id!);
+        const fillingDoc = await transaction.get(fillingRef);
+        
+        if (!fillingDoc.exists()) return;
+        const data = fillingDoc.data();
+        
+        // --- 1. COLLECT ALL READS ---
+        let voucherRef: any = null;
+        let voucherDoc: any = null;
+        let vchItems: any[] = [];
+        let accRefs: any[] = [];
+        let accSnaps: any[] = [];
+
+        if (data.voucherId) {
+          voucherRef = doc(db, 'vouchers', data.voucherId);
+          voucherDoc = await transaction.get(voucherRef);
+          if (voucherDoc.exists()) {
+            vchItems = voucherDoc.data().items || [];
+            accRefs = vchItems.map(item => doc(db, 'accounts', item.accountId));
+            accSnaps = await Promise.all(accRefs.map(ref => transaction.get(ref)));
+          }
+        } else {
+          // Fallback search (using getDocs because we are outside transaction or in a separate query)
+          const vchQuery = query(collection(db, 'vouchers'), where('voucherNumber', '==', `VCH-${data.tokenNumber}`));
+          const vchSnap = await getDocs(vchQuery);
+          if (!vchSnap.empty) {
+            voucherRef = vchSnap.docs[0].ref;
+            // Since we found it via getDocs, we still need to 'get' it via transaction to participate in atomicity correctly
+            voucherDoc = await transaction.get(voucherRef);
+            if (voucherDoc.exists()) {
+              vchItems = voucherDoc.data().items || [];
+              accRefs = vchItems.map(item => doc(db, 'accounts', item.accountId));
+              accSnaps = await Promise.all(accRefs.map(ref => transaction.get(ref)));
+            }
+          }
+        }
+
+        // --- 2. PERFORM ALL WRITES ---
+        if (vchItems.length > 0) {
+          vchItems.forEach((item, index) => {
+            const accSnap = accSnaps[index];
+            if (accSnap.exists()) {
+              const accData = accSnap.data();
+              let newBalance = accData.currentBalance || 0;
+              if (item.type === 'Dr') {
+                newBalance -= (accData.balanceType === 'Dr' ? item.amount : -item.amount);
+              } else {
+                newBalance -= (accData.balanceType === 'Cr' ? item.amount : -item.amount);
+              }
+              transaction.update(accRefs[index], { currentBalance: newBalance });
+            }
+          });
+          if (voucherRef) transaction.delete(voucherRef);
+        }
+
+        // Delete filling record
+        transaction.delete(fillingRef);
+      });
       setDeleteConfirm(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'hydrantFillings');
@@ -544,8 +638,16 @@ export function HydrantFilling() {
               </div>
               <div className="flex gap-2">
                 <button 
+                  onClick={() => setDownloadingFilling(f)}
+                  className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all"
+                  title="Download Token"
+                >
+                  <Download size={18} />
+                </button>
+                <button 
                   onClick={() => setPrintingFilling(f)}
                   className="w-10 h-10 bg-slate-50 text-slate-600 rounded-xl flex items-center justify-center hover:bg-slate-900 hover:text-white transition-all"
+                  title="Print Token"
                 >
                   <Printer size={18} />
                 </button>
@@ -614,23 +716,27 @@ export function HydrantFilling() {
                       onChange={(e) => setFormData({...formData, partyName: e.target.value})}
                     />
                     <AnimatePresence>
-                      {showPartySuggestions && partySuggestions.length > 0 && (
+                      {showPartySuggestions && formData.partyName.length > 0 && (
                         <motion.div 
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -10 }}
-                          className="absolute z-[210] top-full left-0 right-0 mt-2 bg-white rounded-2xl border border-slate-100 shadow-xl max-h-48 overflow-y-auto"
+                          className="absolute z-[210] top-full left-0 right-0 mt-2 bg-white rounded-2xl border border-slate-100 shadow-xl max-h-64 overflow-y-auto"
                         >
-                          {partySuggestions.filter(p => p.toLowerCase().includes(formData.partyName.toLowerCase())).map((p, i) => (
-                            <button
-                              key={i}
-                              type="button"
-                              className="w-full text-left px-5 py-3 hover:bg-slate-50 text-sm font-bold text-slate-700 transition-colors"
-                              onClick={() => setFormData({ ...formData, partyName: p })}
-                            >
-                              {p}
-                            </button>
-                          ))}
+                          {partySuggestions
+                            .filter(p => p.toLowerCase().includes(formData.partyName.toLowerCase()))
+                            .slice(0, 15)
+                            .map((p, i) => (
+                              <button
+                                key={i}
+                                type="button"
+                                className="w-full text-left px-5 py-3 hover:bg-slate-50 border-b border-slate-50 last:border-0 flex items-center justify-between group transition-colors"
+                                onClick={() => setFormData({ ...formData, partyName: p })}
+                              >
+                                <span className="font-bold text-slate-700 group-hover:text-slate-900">{p}</span>
+                                <Plus size={14} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </button>
+                            ))}
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -732,10 +838,10 @@ export function HydrantFilling() {
         )}
       </AnimatePresence>
 
-      {/* Print View Hidden */}
+      {/* Print/Download View Hidden */}
       <div className="hidden">
-        <div ref={printRef} className="p-8 w-[80mm] font-mono text-xs text-slate-900 bg-white">
-          <div className="text-center border-b-2 border-dashed border-slate-300 pb-4 mb-4">
+        <div ref={printRef} className="p-8 w-[80mm] font-mono text-xs bg-white" style={{ color: '#0f172a' }}>
+          <div className="text-center border-b-2 border-dashed pb-4 mb-4" style={{ borderColor: '#cbd5e1' }}>
              <h2 className="text-lg font-black uppercase tracking-tighter">Rajhans Steel & Water</h2>
              <p className="text-[10px]">Tanker Hydrant & Filling Point</p>
              <p className="text-[10px]">Sikar, Rajasthan | 9876543210</p>
@@ -744,47 +850,47 @@ export function HydrantFilling() {
           <div className="space-y-3 mb-6">
             <div className="flex justify-between items-center">
               <span className="font-bold">TOKEN NO:</span>
-              <span className="text-sm font-black">{printingFilling?.tokenNumber}</span>
+              <span className="text-sm font-black">{(printingFilling || downloadingFilling)?.tokenNumber}</span>
             </div>
             <div className="flex justify-between">
               <span>DATE:</span>
-              <span className="font-bold">{printingFilling && format(new Date(printingFilling.date), 'dd/MM/yyyy HH:mm')}</span>
+              <span className="font-bold">{(printingFilling || downloadingFilling) && format(new Date((printingFilling || downloadingFilling)!.date), 'dd/MM/yyyy HH:mm')}</span>
             </div>
             <div className="flex justify-between">
               <span>PARTY:</span>
-              <span className="font-bold uppercase">{printingFilling?.partyName}</span>
+              <span className="font-bold uppercase">{(printingFilling || downloadingFilling)?.partyName}</span>
             </div>
             <div className="flex justify-between">
               <span>VEHICLE:</span>
-              <span className="font-bold uppercase">{printingFilling?.vehicleNumber || 'N/A'}</span>
+              <span className="font-bold uppercase">{(printingFilling || downloadingFilling)?.vehicleNumber || 'N/A'}</span>
             </div>
             <div className="flex justify-between">
               <span>TYPE:</span>
-              <span className="font-bold uppercase">{printingFilling?.type === 'Inward' ? 'Filling Others' : 'Self Filling'}</span>
+              <span className="font-bold uppercase">{(printingFilling || downloadingFilling)?.type === 'Inward' ? 'Filling Others' : 'Self Filling'}</span>
             </div>
-            <div className="flex justify-between border-t border-dashed border-slate-200 pt-2 text-sm">
+            <div className="flex justify-between border-t border-dashed pt-2 text-sm" style={{ borderColor: '#e2e8f0' }}>
               <span className="font-bold uppercase">TOTAL AMT:</span>
-              <span className="font-black">₹{printingFilling?.totalAmount}</span>
+              <span className="font-black">₹{(printingFilling || downloadingFilling)?.totalAmount}</span>
             </div>
           </div>
 
           {/* CIRCULAR STAMP */}
           <div className="flex justify-center my-8">
-            <div className="relative w-28 h-28 rounded-full border-[5px] border-blue-700/40 flex items-center justify-center p-3 text-center">
-              <div className="absolute inset-0 rounded-full border border-blue-700/20 m-1" />
-              <div className="text-[9px] font-black uppercase text-blue-800 tracking-tighter leading-[1.1] rotate-[-5deg]">
+            <div className="relative w-28 h-28 rounded-full border-[5px] flex items-center justify-center p-3 text-center" style={{ borderColor: 'rgba(29, 78, 216, 0.4)' }}>
+              <div className="absolute inset-0 rounded-full border m-1" style={{ borderColor: 'rgba(29, 78, 216, 0.2)' }} />
+              <div className="text-[9px] font-black uppercase tracking-tighter leading-[1.1] rotate-[-5deg]" style={{ color: '#1e40af' }}>
                 Rajhans Steel<br/>& Water<br/>
                 <span className="text-[14px]">TOKEN</span>
               </div>
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl font-black text-blue-900/10 -rotate-12 select-none pointer-events-none">
-                #{printingFilling?.tokenNumber.split('-')[1]}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl font-black -rotate-12 select-none pointer-events-none" style={{ color: 'rgba(30, 58, 138, 0.1)' }}>
+                #{(printingFilling || downloadingFilling)?.tokenNumber.split('-')[1]}
               </div>
             </div>
           </div>
 
-          <div className="text-center pt-4 border-t-2 border-dashed border-slate-300">
+          <div className="text-center pt-4 border-t-2 border-dashed" style={{ borderColor: '#cbd5e1' }}>
             <p className="text-[10px] font-bold">Authorized Filling Token</p>
-            <p className="text-[9px] mt-1 italic text-slate-400">Computer Generated Receipt</p>
+            <p className="text-[9px] mt-1 italic" style={{ color: '#94a3b8' }}>Computer Generated Receipt</p>
           </div>
         </div>
       </div>

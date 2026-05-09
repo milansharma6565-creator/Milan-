@@ -201,6 +201,10 @@ export function Ledger() {
     return balance;
   };
 
+  const sortedAccounts = useMemo(() => {
+    return [...accounts].sort((a, b) => a.name.localeCompare(b.name));
+  }, [accounts]);
+
   const stats = useMemo(() => {
     const cashId = accounts.find(a => a.name === 'Cash')?.id;
     const bankId = accounts.find(a => a.name === 'Bank Account')?.id;
@@ -211,6 +215,44 @@ export function Ledger() {
       vouchersCount: vouchers.length
     };
   }, [accounts, vouchers]);
+
+  const [deleteConfirm, setDeleteConfirm] = useState<Voucher | null>(null);
+
+  const handleDeleteVoucher = async (vch: Voucher) => {
+    if (!vch.id) return;
+    
+    try {
+      await runTransaction(db, async (transaction) => {
+        // 1. READS: Fetch all accounts first
+        const accRefs = vch.items.map(item => doc(db, 'accounts', item.accountId));
+        const accSnaps = await Promise.all(accRefs.map(ref => transaction.get(ref)));
+        
+        // 2. WRITES: Update balances and delete voucher
+        vch.items.forEach((item, index) => {
+          const accSnap = accSnaps[index];
+          if (accSnap.exists()) {
+            const accData = accSnap.data();
+            let newBalance = accData.currentBalance || 0;
+            
+            // Reversing the logic: if it was Dr, we subtract if acc is Dr-type.
+            if (item.type === 'Dr') {
+              newBalance -= (accData.balanceType === 'Dr' ? item.amount : -item.amount);
+            } else {
+              newBalance -= (accData.balanceType === 'Cr' ? item.amount : -item.amount);
+            }
+            
+            transaction.update(accRefs[index], { currentBalance: newBalance });
+          }
+        });
+        
+        // Delete voucher
+        transaction.delete(doc(db, 'vouchers', vch.id!));
+      });
+      setDeleteConfirm(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `vouchers/${vch.id}`);
+    }
+  };
 
   if (loading || isInitializing) {
     return (
@@ -241,25 +283,34 @@ export function Ledger() {
 
       {/* Main Content Area */}
       <div className="min-h-[400px]">
-        {activeTab === 'daybook' && <Daybook vouchers={vouchers} onAddVoucher={() => setIsAddingVoucher(true)} />}
+        {activeTab === 'daybook' && <Daybook vouchers={vouchers} onAddVoucher={() => setIsAddingVoucher(true)} onDeleteVoucher={(v) => setDeleteConfirm(v)} />}
         {activeTab === 'vouchers' && <VoucherManager vouchers={vouchers} onAdd={() => setIsAddingVoucher(true)} />}
-        {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} />}
-        {activeTab === 'reports' && <FinancialReports accounts={accounts} vouchers={vouchers} groups={groups} />}
-        {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} onAddAccount={() => setIsAddingAccount(true)} />}
+        {activeTab === 'ledgers' && <LedgerStatements accounts={sortedAccounts} vouchers={vouchers} />}
+        {activeTab === 'reports' && <FinancialReports accounts={sortedAccounts} vouchers={vouchers} groups={groups} />}
+        {activeTab === 'accounts' && <AccountSetup accounts={sortedAccounts} groups={groups} onAddAccount={() => setIsAddingAccount(true)} />}
       </div>
+
+      <ConfirmationModal
+        isOpen={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={() => deleteConfirm && handleDeleteVoucher(deleteConfirm)}
+        title="Delete Voucher?"
+        message={`Are you sure you want to delete ${deleteConfirm?.type} Voucher #${deleteConfirm?.voucherNumber}? This will reverse the impact on all involved accounts!`}
+      />
 
       {/* Modals */}
       <AnimatePresence>
         {isAddingVoucher && (
           <VoucherEntryModal 
             onClose={() => setIsAddingVoucher(false)} 
-            accounts={accounts} 
+            accounts={sortedAccounts} 
           />
         )}
         {isAddingAccount && (
           <AccountEntryModal 
             onClose={() => setIsAddingAccount(false)} 
             groups={groups} 
+            accounts={sortedAccounts}
           />
         )}
       </AnimatePresence>
@@ -286,93 +337,126 @@ function AccountingTabButton({ active, onClick, icon, label }: { active: boolean
 // --- SUB COMPONENTS ---
 
 /** Daybook View */
-function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher: () => void }) {
+function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Voucher[], onAddVoucher: () => void, onDeleteVoucher: (v: Voucher) => void }) {
   const [searchTerm, setSearchTerm] = useState('');
-  
-  const filtered = vouchers.filter(v => 
-    v.narration.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    v.voucherNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    v.type.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const [dateFilter, setDateFilter] = useState(new Date().toISOString().split('T')[0]);
+
+  const filtered = useMemo(() => {
+    return vouchers.filter(v => {
+      const vDate = v.date instanceof Date ? v.date : new Date(v.date);
+      const matchesDate = format(vDate, 'yyyy-MM-dd') === dateFilter;
+      const matchesSearch = v.narration.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            v.voucherNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            v.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            v.items.some(i => i.accountName.toLowerCase().includes(searchTerm.toLowerCase()));
+      return matchesDate && matchesSearch;
+    });
+  }, [vouchers, dateFilter, searchTerm]);
 
   return (
-    <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-      <div className="p-6 border-b border-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input 
-            placeholder="Search daybook (Ctrl + F)..."
-            className="w-full h-12 pl-12 pr-4 bg-slate-50 rounded-2xl text-sm font-medium border-none focus:ring-2 ring-slate-900/5 transition-all"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-          />
+    <div className="space-y-4">
+      <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-center gap-4 flex-1">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              placeholder="Search daybook..."
+              className="w-full h-12 pl-12 pr-4 bg-slate-50 rounded-2xl text-sm font-bold border-none focus:ring-2 ring-slate-900/5 transition-all"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="relative">
+            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              type="date"
+              className="h-12 pl-12 pr-4 bg-slate-50 rounded-2xl text-sm font-bold border-none focus:ring-2 ring-slate-900/5 transition-all"
+              value={dateFilter}
+              onChange={e => setDateFilter(e.target.value)}
+            />
+          </div>
         </div>
         <button 
           onClick={onAddVoucher}
-          className="h-12 px-6 bg-slate-900 text-white rounded-2xl flex items-center gap-2 text-sm font-bold shadow-lg shadow-slate-200 active:scale-95 transition-all"
+          className="h-12 px-8 bg-slate-900 text-white rounded-2xl flex items-center justify-center gap-2 text-sm font-bold shadow-lg shadow-slate-200 active:scale-95 transition-all"
         >
           <Plus size={18} />
-          <span>New Voucher</span>
+          <span>New Entry</span>
         </button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-50/50">
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-8">Date</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vch No.</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Particulars</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right pr-8">Amount</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {filtered.map(v => (
-              <tr key={v.id} className="hover:bg-slate-50/80 transition-colors group">
-                <td className="p-4 pl-8">
-                  <p className="text-sm font-bold text-slate-700">{format(v.date, 'dd MMM yyyy')}</p>
-                  <p className="text-[10px] font-bold text-slate-400">{format(v.date, 'hh:mm a')}</p>
-                </td>
-                <td className="p-4">
-                  <p className="text-xs font-mono font-bold text-slate-400">{v.voucherNumber}</p>
-                </td>
-                <td className="p-4">
-                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
-                    v.type === 'Payment' ? 'bg-red-50 text-red-600' :
-                    v.type === 'Receipt' ? 'bg-green-50 text-green-600' :
-                    v.type === 'Contra' ? 'bg-blue-50 text-blue-600' :
-                    v.type === 'Sales' ? 'bg-indigo-50 text-indigo-600' :
-                    v.type === 'Purchase' ? 'bg-orange-50 text-orange-600' :
-                    v.type === 'Journal' ? 'bg-purple-50 text-purple-600' :
-                    'bg-slate-100 text-slate-600'
-                  }`}>
-                    {v.type}
-                  </span>
-                </td>
-                <td className="p-4">
-                  <div className="max-w-md">
-                    <p className="text-sm font-bold text-slate-900 line-clamp-1">
-                      {v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName}
-                      {v.items.length > 2 && ` & others`}
-                    </p>
-                    <p className="text-[10px] text-slate-400 font-medium truncate">{v.narration}</p>
-                  </div>
-                </td>
-                <td className="p-4 pr-8 text-right">
-                  <p className="text-sm font-display font-black text-slate-900">{formatCurrency(v.totalAmount)}</p>
-                </td>
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/50">
+                <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-8">Time</th>
+                <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type / No.</th>
+                <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Particulars / Narration</th>
+                <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right pr-8">Amount</th>
+                <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right w-20"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {filtered.length === 0 && (
-        <div className="p-20 text-center text-slate-300">
-          <History size={48} className="mx-auto mb-4 opacity-20" />
-          <p className="font-bold text-sm uppercase tracking-widest">No entries found for today</p>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filtered.map(v => (
+                <tr key={v.id} className="hover:bg-slate-50/80 transition-colors group">
+                  <td className="p-4 pl-8">
+                    <p className="text-sm font-bold text-slate-800">{format(v.date, 'hh:mm a')}</p>
+                  </td>
+                  <td className="p-4">
+                    <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider mb-1 block w-fit ${
+                      v.type === 'Payment' ? 'bg-red-50 text-red-600' :
+                      v.type === 'Receipt' ? 'bg-green-50 text-green-600' :
+                      v.type === 'Contra' ? 'bg-blue-50 text-blue-600' :
+                      v.type === 'Sales' ? 'bg-indigo-50 text-indigo-600' :
+                      'bg-slate-100 text-slate-600'
+                    }`}>
+                      {v.type}
+                    </span>
+                    <p className="text-[10px] font-mono font-bold text-slate-400">{v.voucherNumber}</p>
+                  </td>
+                  <td className="p-4">
+                    <div className="max-w-md">
+                      <div className="flex flex-wrap gap-1.5 mb-1">
+                        {v.items.map((item, idx) => (
+                          <span key={idx} className="text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 rounded text-slate-600">
+                            <span className={item.type === 'Dr' ? 'text-indigo-600' : 'text-amber-600'}>{item.type}</span> {item.accountName}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-sm font-bold text-slate-900 line-clamp-1">{v.narration}</p>
+                    </div>
+                  </td>
+                  <td className="p-4 pr-8 text-right font-display font-black text-slate-900">
+                    {formatCurrency(v.totalAmount)}
+                  </td>
+                  <td className="p-4 text-right">
+                    <div className="flex justify-end gap-2 transition-opacity">
+                      <button 
+                        onClick={() => onDeleteVoucher(v)}
+                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Delete Voucher"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-20 text-center">
+                    <div className="flex flex-col items-center gap-3 text-slate-300">
+                      <BookOpen size={48} className="opacity-20" />
+                      <p className="text-xs font-bold uppercase tracking-widest">No entries for this date</p>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -406,13 +490,15 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
     setSubmitting(true);
     try {
       await runTransaction(db, async (transaction) => {
-        // --- 1. CALCULATE & UPDATE BALANCES ---
-        for (const item of items) {
-          const accRef = doc(db, 'accounts', item.accountId);
-          const accDoc = await transaction.get(accRef);
-          
-          if (accDoc.exists()) {
-            const accData = accDoc.data();
+        // 1. READS: Fetch all account data first
+        const accRefs = items.map(item => doc(db, 'accounts', item.accountId));
+        const accSnaps = await Promise.all(accRefs.map(ref => transaction.get(ref)));
+        
+        // 2. WRITES: Update balances and save voucher
+        items.forEach((item, index) => {
+          const accSnap = accSnaps[index];
+          if (accSnap.exists()) {
+            const accData = accSnap.data();
             let newBalance = accData.currentBalance || 0;
             
             if (item.type === 'Dr') {
@@ -428,11 +514,11 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
               }
             }
 
-            transaction.update(accRef, { currentBalance: newBalance });
+            transaction.update(accRefs[index], { currentBalance: newBalance });
           }
-        }
+        });
 
-        // --- 2. SAVE VOUCHER ---
+        // Save voucher
         const vchRef = doc(collection(db, 'vouchers'));
         transaction.set(vchRef, {
           date: new Date(date),
@@ -659,18 +745,27 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
 }
 
 /** Account Entry Modal */
-function AccountEntryModal({ onClose, groups }: { onClose: () => void, groups: AccountGroup[] }) {
+function AccountEntryModal({ onClose, groups, accounts }: { onClose: () => void, groups: AccountGroup[], accounts: Account[] }) {
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState('');
   const [opening, setOpening] = useState(0);
   const [type, setType] = useState<'Dr' | 'Cr'>('Dr');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !groupId) return;
 
+    // Check for duplicate name
+    const exists = accounts.some(acc => acc.name.toLowerCase() === name.trim().toLowerCase());
+    if (exists) {
+      setError('Account already exists with this name');
+      return;
+    }
+
     setSubmitting(true);
+    setError(null);
     try {
       await addDoc(collection(db, 'accounts'), {
         name,
@@ -708,11 +803,21 @@ function AccountEntryModal({ onClose, groups }: { onClose: () => void, groups: A
             <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Account Name</label>
             <input 
               required
-              className="w-full h-14 px-5 bg-slate-50 rounded-2xl text-base font-bold border-none"
+              className={`w-full h-14 px-5 bg-slate-50 rounded-2xl text-base font-bold transition-all ${
+                error ? 'ring-2 ring-red-500' : 'border-none'
+              }`}
               placeholder="e.g. Sales A/c, Petrol Expenses"
               value={name}
-              onChange={e => setName(e.target.value)}
+              onChange={e => {
+                setName(e.target.value);
+                setError(null);
+              }}
             />
+            {error && (
+              <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mt-1 ml-1">
+                {error}
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">

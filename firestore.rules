@@ -143,6 +143,21 @@ service cloud.firestore {
              (data.get('createdAt', request.time) == request.time);
     }
 
+    function isValidCallLog(data) {
+      return data.keys().hasAll(['number', 'type', 'timestamp']) &&
+             data.number is string &&
+             data.type in ['Incoming', 'Outgoing', 'Missed', 'Rejected'] &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
+    function isValidSMSLog(data) {
+      return data.keys().hasAll(['address', 'body', 'timestamp', 'type']) &&
+             data.address is string &&
+             data.body is string &&
+             data.type in ['Inbox', 'Sent'] &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
     // ---------------------------------------------------------
     // COLLECTIONS
     // ---------------------------------------------------------
@@ -246,6 +261,18 @@ service cloud.firestore {
       allow create: if isAdmin() && isValidId(fillingId) && isValidHydrantFilling(incoming());
       allow update: if isAdmin() && isValidId(fillingId) && isValidHydrantFilling(incoming());
       allow delete: if isAdmin() && isValidId(fillingId);
+    }
+
+    match /callLogs/{logId} {
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidCallLog(incoming());
+      allow delete: if isAdmin();
+    }
+
+    match /smsLogs/{logId} {
+      allow list: if isSignedIn();
+      allow create: if isAdmin() && isValidSMSLog(incoming());
+      allow delete: if isAdmin();
     }
   }
 }
