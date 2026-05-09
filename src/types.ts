@@ -58,6 +58,8 @@ export interface DieselLog {
   liters: number;
   amount: number;
   description: string;
+  paymentMode?: 'Cash' | 'Bank' | 'Udhaar';
+  paymentAccountId?: string;
   createdAt: any;
 }
 
@@ -68,6 +70,8 @@ export interface MaintenanceLog {
   date: any;
   amount: number;
   description: string;
+  paymentMode?: 'Cash' | 'Bank' | 'Udhaar';
+  paymentAccountId?: string;
   createdAt: any;
 }
 
@@ -129,6 +133,8 @@ export interface Driver {
   name: string;
   mobile: string;
   monthlySalary: number;
+  status?: 'Active' | 'Inactive';
+  createdAt?: any;
 }
 
 export type AttendanceStatus = 'Full Day' | 'Half Day' | 'Absent';

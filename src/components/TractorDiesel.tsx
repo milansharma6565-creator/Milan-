@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc, getDocs, where } from 'firebase/firestore';
 import { Tractor, DieselLog, MaintenanceLog, Bill } from '../types';
 import { 
   Plus, 
@@ -16,7 +16,11 @@ import {
   Download,
   FileText,
   Trash2,
-  Edit2
+  Edit2,
+  CheckCircle2,
+  Smartphone,
+  Banknote,
+  History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
@@ -75,14 +79,16 @@ export function TractorDiesel() {
     tractorId: '',
     liters: 0,
     amount: 0,
-    description: ''
+    description: '',
+    paymentMode: 'Cash' as 'Cash' | 'Bank' | 'Udhaar'
   });
 
   const [newMaintenance, setNewMaintenance] = useState({
     date: new Date().toISOString().split('T')[0],
     tractorId: '',
     amount: 0,
-    description: ''
+    description: '',
+    paymentMode: 'Cash' as 'Cash' | 'Bank' | 'Udhaar'
   });
 
   const [newTractor, setNewTractor] = useState({
@@ -112,35 +118,152 @@ export function TractorDiesel() {
     if (!tractor) return;
 
     try {
-      await runTransaction(db, async (transaction) => {
-        const dieselRef = collection(db, 'dieselLogs');
-        const ledgerRef = collection(db, 'ledger');
+      const mode = newDiesel.paymentMode;
+      const accountName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : 'Shrinath Petrol Pump';
+      
+      const [fuelAccSnap, paymentAccSnap, assetsGrpSnap, expGrpSnap, liabGrpSnap] = await Promise.all([
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Fuel Expense'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', accountName))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')))
+      ]);
+      
+      let fuelAccId = fuelAccSnap.docs[0]?.id;
+      let paymentAccId = paymentAccSnap.docs[0]?.id;
+      let assetsGrpId = assetsGrpSnap.docs[0]?.id;
+      let expGrpId = expGrpSnap.docs[0]?.id;
+      let liabGrpId = liabGrpSnap.docs[0]?.id;
 
-        transaction.set(doc(dieselRef), {
+      await runTransaction(db, async (transaction) => {
+        const fuelAccRef = fuelAccId ? doc(db, 'accounts', fuelAccId) : null;
+        const paymentAccRef = paymentAccId ? doc(db, 'accounts', paymentAccId) : null;
+
+        // --- 1. READS FIRST ---
+        const [fuelAccDoc, paymentAccDoc] = await Promise.all([
+          fuelAccRef ? transaction.get(fuelAccRef) : Promise.resolve(null),
+          paymentAccRef ? transaction.get(paymentAccRef) : Promise.resolve(null)
+        ]);
+
+        // --- VALIDATION: Prevent Negative Cash/Bank ---
+        if (mode !== 'Udhaar') {
+          const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
+          if (currentBal < Number(newDiesel.amount)) {
+            throw new Error(`INSUFFICIENT_FUNDS:${accountName}:${currentBal}`);
+          }
+        }
+
+        // --- 2. WRITES SECOND ---
+        // Ensure Groups & Accounts
+        if (!expGrpId) {
+          const newGrp = doc(collection(db, 'accountGroups'));
+          transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense' });
+          expGrpId = newGrp.id;
+        }
+
+        let finalFuelAccId = fuelAccId;
+        if (!fuelAccId) {
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { 
+            name: 'Fuel Expense', 
+            groupId: expGrpId, 
+            openingBalance: 0, 
+            balanceType: 'Dr', 
+            currentBalance: Number(newDiesel.amount), 
+            createdAt: serverTimestamp() 
+          });
+          finalFuelAccId = newAcc.id;
+        } else if (fuelAccDoc?.exists()) {
+          transaction.update(fuelAccRef!, {
+            currentBalance: (fuelAccDoc.data().currentBalance || 0) + Number(newDiesel.amount)
+          });
+        }
+
+        let finalPaymentAccId = paymentAccId;
+        if (mode === 'Udhaar') {
+          if (!liabGrpId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability' });
+            liabGrpId = newGrp.id;
+          }
+          if (!paymentAccId) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, {
+              name: 'Shrinath Petrol Pump',
+              groupId: liabGrpId,
+              openingBalance: 0,
+              balanceType: 'Cr',
+              currentBalance: Number(newDiesel.amount),
+              createdAt: serverTimestamp()
+            });
+            finalPaymentAccId = newAcc.id;
+          } else if (paymentAccDoc?.exists()) {
+            transaction.update(paymentAccRef!, {
+              currentBalance: (paymentAccDoc.data().currentBalance || 0) + Number(newDiesel.amount)
+            });
+          }
+        } else {
+          if (!assetsGrpId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+            assetsGrpId = newGrp.id;
+          }
+          if (!paymentAccId) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, {
+              name: accountName,
+              groupId: assetsGrpId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: -Number(newDiesel.amount),
+              createdAt: serverTimestamp()
+            });
+            finalPaymentAccId = newAcc.id;
+          } else if (paymentAccDoc?.exists()) {
+            transaction.update(paymentAccRef!, {
+              currentBalance: (paymentAccDoc.data().currentBalance || 0) - Number(newDiesel.amount)
+            });
+          }
+        }
+
+        // --- 3. LOG & VOUCHER ---
+        const dieselRef = doc(collection(db, 'dieselLogs'));
+        transaction.set(dieselRef, {
           tractorId: tractor.id!,
           tractorName: tractor.name,
           date: newDiesel.date,
           liters: Number(newDiesel.liters),
           amount: Number(newDiesel.amount),
           description: newDiesel.description,
+          paymentMode: mode,
+          paymentAccountId: finalPaymentAccId,
           createdAt: serverTimestamp()
         });
 
-        transaction.set(doc(ledgerRef), {
-          date: newDiesel.date,
-          type: 'Expense',
-          category: 'Fuel',
-          description: `Diesel for ${tractor.name}: ${newDiesel.description || 'Fuel tank'}`,
-          amount: Number(newDiesel.amount),
-          paymentMode: 'Cash',
+        const voucherRef = doc(collection(db, 'vouchers'));
+        transaction.set(voucherRef, {
+          date: new Date(newDiesel.date),
+          type: mode === 'Udhaar' ? 'Journal' : 'Payment',
+          voucherNumber: `FL-${Math.floor(Date.now()/1000)}`,
+          items: [
+            { accountId: finalFuelAccId, accountName: 'Fuel Expense', amount: Number(newDiesel.amount), type: 'Dr' },
+            { accountId: finalPaymentAccId, accountName: accountName, amount: Number(newDiesel.amount), type: 'Cr' }
+          ],
+          narration: `Diesel for ${tractor.name} (${newDiesel.liters}L): ${newDiesel.description} [${mode}]`,
+          totalAmount: Number(newDiesel.amount),
           createdAt: serverTimestamp()
         });
       });
 
       setIsAddingDiesel(false);
-      setNewDiesel({ date: new Date().toISOString().split('T')[0], tractorId: '', liters: 0, amount: 0, description: '' });
+      setNewDiesel({ date: new Date().toISOString().split('T')[0], tractorId: '', liters: 0, amount: 0, description: '', paymentMode: 'Cash' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'transaction');
+      if (error instanceof Error && error.message.startsWith('INSUFFICIENT_FUNDS:')) {
+        const [_, acc, bal] = error.message.split(':');
+        alert(`Failed: Insufficient balance in ${acc}. \nAvailable: ₹${Number(bal).toLocaleString()}`);
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, 'transaction');
+      }
     }
   };
 
@@ -152,34 +275,151 @@ export function TractorDiesel() {
     if (!tractor) return;
 
     try {
-      await runTransaction(db, async (transaction) => {
-        const maintRef = collection(db, 'maintenanceLogs');
-        const ledgerRef = collection(db, 'ledger');
+      const mode = newMaintenance.paymentMode;
+      const accountName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : 'Shrinath Petrol Pump';
+      
+      const [maintAccSnap, paymentAccSnap, assetsGrpSnap, expGrpSnap, liabGrpSnap] = await Promise.all([
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Maintenance'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', accountName))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')))
+      ]);
+      
+      let maintAccId = maintAccSnap.docs[0]?.id;
+      let paymentAccId = paymentAccSnap.docs[0]?.id;
+      let assetsGrpId = assetsGrpSnap.docs[0]?.id;
+      let expGrpId = expGrpSnap.docs[0]?.id;
+      let liabGrpId = liabGrpSnap.docs[0]?.id;
 
-        transaction.set(doc(maintRef), {
+      await runTransaction(db, async (transaction) => {
+        const maintAccRef = maintAccId ? doc(db, 'accounts', maintAccId) : null;
+        const paymentAccRef = paymentAccId ? doc(db, 'accounts', paymentAccId) : null;
+
+        // --- 1. READS FIRST ---
+        const [maintAccDoc, paymentAccDoc] = await Promise.all([
+          maintAccRef ? transaction.get(maintAccRef) : Promise.resolve(null),
+          paymentAccRef ? transaction.get(paymentAccRef) : Promise.resolve(null)
+        ]);
+
+        // --- VALIDATION: Prevent Negative Cash/Bank ---
+        if (mode !== 'Udhaar') {
+          const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
+          if (currentBal < Number(newMaintenance.amount)) {
+            throw new Error(`INSUFFICIENT_FUNDS:${accountName}:${currentBal}`);
+          }
+        }
+
+        // --- 2. WRITES SECOND ---
+        // Ensure Groups & Accounts
+        if (!expGrpId) {
+          const newGrp = doc(collection(db, 'accountGroups'));
+          transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense' });
+          expGrpId = newGrp.id;
+        }
+
+        let finalMaintAccId = maintAccId;
+        if (!maintAccId) {
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { 
+            name: 'Maintenance', 
+            groupId: expGrpId, 
+            openingBalance: 0, 
+            balanceType: 'Dr', 
+            currentBalance: Number(newMaintenance.amount), 
+            createdAt: serverTimestamp() 
+          });
+          finalMaintAccId = newAcc.id;
+        } else if (maintAccDoc?.exists()) {
+          transaction.update(maintAccRef!, {
+            currentBalance: (maintAccDoc.data().currentBalance || 0) + Number(newMaintenance.amount)
+          });
+        }
+
+        let finalPaymentAccId = paymentAccId;
+        if (mode === 'Udhaar') {
+          if (!liabGrpId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability' });
+            liabGrpId = newGrp.id;
+          }
+          if (!paymentAccId) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, {
+              name: 'Shrinath Petrol Pump',
+              groupId: liabGrpId,
+              openingBalance: 0,
+              balanceType: 'Cr',
+              currentBalance: Number(newMaintenance.amount),
+              createdAt: serverTimestamp()
+            });
+            finalPaymentAccId = newAcc.id;
+          } else if (paymentAccDoc?.exists()) {
+            transaction.update(paymentAccRef!, {
+              currentBalance: (paymentAccDoc.data().currentBalance || 0) + Number(newMaintenance.amount)
+            });
+          }
+        } else {
+          if (!assetsGrpId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+            assetsGrpId = newGrp.id;
+          }
+          if (!paymentAccId) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, {
+              name: accountName,
+              groupId: assetsGrpId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: -Number(newMaintenance.amount),
+              createdAt: serverTimestamp()
+            });
+            finalPaymentAccId = newAcc.id;
+          } else if (paymentAccDoc?.exists()) {
+            transaction.update(paymentAccRef!, {
+              currentBalance: (paymentAccDoc.data().currentBalance || 0) - Number(newMaintenance.amount)
+            });
+          }
+        }
+
+        // --- 3. LOG & VOUCHER ---
+        const maintRef = doc(collection(db, 'maintenanceLogs'));
+        transaction.set(maintRef, {
           tractorId: tractor.id!,
           tractorName: tractor.name,
           date: newMaintenance.date,
           amount: Number(newMaintenance.amount),
           description: newMaintenance.description,
+          paymentMode: mode,
+          paymentAccountId: finalPaymentAccId,
           createdAt: serverTimestamp()
         });
 
-        transaction.set(doc(ledgerRef), {
-          date: newMaintenance.date,
-          type: 'Expense',
-          category: 'Maintenance',
-          description: `Maintenance for ${tractor.name}: ${newMaintenance.description}`,
-          amount: Number(newMaintenance.amount),
-          paymentMode: 'Cash',
+        const voucherRef = doc(collection(db, 'vouchers'));
+        transaction.set(voucherRef, {
+          date: new Date(newMaintenance.date),
+          type: mode === 'Udhaar' ? 'Journal' : 'Payment',
+          voucherNumber: `MT-${Math.floor(Date.now()/1000)}`,
+          items: [
+            { accountId: finalMaintAccId, accountName: 'Maintenance', amount: Number(newMaintenance.amount), type: 'Dr' },
+            { accountId: finalPaymentAccId, accountName: accountName, amount: Number(newMaintenance.amount), type: 'Cr' }
+          ],
+          narration: `Maintenance for ${tractor.name}: ${newMaintenance.description} [${mode}]`,
+          totalAmount: Number(newMaintenance.amount),
           createdAt: serverTimestamp()
         });
       });
 
       setIsAddingMaintenance(false);
-      setNewMaintenance({ date: new Date().toISOString().split('T')[0], tractorId: '', amount: 0, description: '' });
+      setNewMaintenance({ date: new Date().toISOString().split('T')[0], tractorId: '', amount: 0, description: '', paymentMode: 'Cash' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'transaction');
+      if (error instanceof Error && error.message.startsWith('INSUFFICIENT_FUNDS:')) {
+        const [_, acc, bal] = error.message.split(':');
+        alert(`Failed: Insufficient balance in ${acc}. \nAvailable: ₹${Number(bal).toLocaleString()}`);
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, 'transaction');
+      }
     }
   };
 
@@ -498,6 +738,14 @@ export function TractorDiesel() {
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
                     <span>{log.liters}L</span>
                     <span>•</span>
+                    <span className={`px-1.5 py-0.5 rounded-md text-[9px] uppercase tracking-wider ${
+                      log.paymentMode === 'Udhaar' ? 'bg-orange-50 text-orange-600' : 
+                      log.paymentMode === 'Bank' ? 'bg-blue-50 text-blue-600' : 
+                      'bg-green-50 text-green-600'
+                    }`}>
+                      {log.paymentMode || 'Cash'}
+                    </span>
+                    <span>•</span>
                     <span>{new Date(log.date).toLocaleDateString()}</span>
                   </div>
                 </div>
@@ -529,6 +777,14 @@ export function TractorDiesel() {
                   <h4 className="font-bold text-slate-900">{log.tractorName}</h4>
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
                     <span className="truncate max-w-[150px]">{log.description}</span>
+                    <span>•</span>
+                    <span className={`px-1.5 py-0.5 rounded-md text-[9px] uppercase tracking-wider ${
+                      log.paymentMode === 'Udhaar' ? 'bg-orange-50 text-orange-600' : 
+                      log.paymentMode === 'Bank' ? 'bg-blue-50 text-blue-600' : 
+                      'bg-green-50 text-green-600'
+                    }`}>
+                      {log.paymentMode || 'Cash'}
+                    </span>
                     <span>•</span>
                     <span>{new Date(log.date).toLocaleDateString()}</span>
                   </div>
@@ -625,6 +881,36 @@ export function TractorDiesel() {
                 </div>
 
                 <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 block ml-1">Payment Mode</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'Cash', label: 'Cash', icon: Banknote, color: 'text-green-600', bg: 'bg-green-50' },
+                      { id: 'Bank', label: 'Bank', icon: Smartphone, color: 'text-blue-600', bg: 'bg-blue-50' },
+                      { id: 'Udhaar', label: 'Udhaar', icon: History, color: 'text-orange-600', bg: 'bg-orange-50' }
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setNewDiesel({ ...newDiesel, paymentMode: m.id as any })}
+                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${
+                          newDiesel.paymentMode === m.id 
+                            ? `border-slate-900 ${m.bg}` 
+                            : 'border-slate-50 text-slate-400 opacity-60'
+                        }`}
+                      >
+                        <m.icon size={20} className={newDiesel.paymentMode === m.id ? m.color : ''} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {newDiesel.paymentMode === 'Udhaar' && (
+                    <p className="mt-2 text-[10px] text-orange-600 font-bold flex items-center gap-1">
+                      <AlertCircle size={10} /> Will be added to Shrinath Petrol Pump account
+                    </p>
+                  )}
+                </div>
+
+                <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Short Note</label>
                   <input
                     className="material-input h-14 bg-slate-50"
@@ -699,6 +985,36 @@ export function TractorDiesel() {
                     value={newMaintenance.amount || ''}
                     onChange={e => setNewMaintenance({...newMaintenance, amount: parseFloat(e.target.value)})}
                   />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 block ml-1">Payment Mode</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'Cash', label: 'Cash', icon: Banknote, color: 'text-green-600', bg: 'bg-green-50' },
+                      { id: 'Bank', label: 'Bank', icon: Smartphone, color: 'text-blue-600', bg: 'bg-blue-50' },
+                      { id: 'Udhaar', label: 'Udhaar', icon: History, color: 'text-orange-600', bg: 'bg-orange-50' }
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setNewMaintenance({ ...newMaintenance, paymentMode: m.id as any })}
+                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${
+                          newMaintenance.paymentMode === m.id 
+                            ? `border-slate-900 ${m.bg}` 
+                            : 'border-slate-50 text-slate-400 opacity-60'
+                        }`}
+                      >
+                        <m.icon size={20} className={newMaintenance.paymentMode === m.id ? m.color : ''} />
+                        <span className="text-[10px] font-black uppercase tracking-wider">{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {newMaintenance.paymentMode === 'Udhaar' && (
+                    <p className="mt-2 text-[10px] text-orange-600 font-bold flex items-center gap-1">
+                      <AlertCircle size={10} /> Will be added to Shrinath Petrol Pump account
+                    </p>
+                  )}
                 </div>
 
                 <div>

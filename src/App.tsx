@@ -189,7 +189,6 @@ export default function App() {
           <SidebarButton icon={<Users size={20} />} label="Customers" active={activeTab === 'customers'} onClick={() => { setActiveTab('customers'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Ticket size={20} />} label="Create Token" active={activeTab === 'billing'} onClick={() => { setActiveTab('billing'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Truck size={20} />} label="Drivers" active={activeTab === 'drivers'} onClick={() => { setActiveTab('drivers'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<LineChart size={20} />} label="Reports" active={activeTab === 'reports'} onClick={() => { setActiveTab('reports'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<ClipboardList size={20} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => { setActiveTab('ledger'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Fuel size={20} />} label="Fleet & Fuel" active={activeTab === 'tractors'} onClick={() => { setActiveTab('tractors'); setIsSidebarOpen(false); }} />
         </nav>
@@ -252,7 +251,6 @@ export default function App() {
         <NavButton icon={<LayoutDashboard size={24} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
         <NavButton icon={<Users size={24} />} label="Customers" active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} />
         <div className="w-16" />
-        <NavButton icon={<History size={24} />} label="History" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />
         <NavButton icon={<BookOpen size={24} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => setActiveTab('ledger')} />
       </nav>
     </div>

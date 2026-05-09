@@ -15,7 +15,8 @@ import {
   limit,
   updateDoc,
   increment,
-  Timestamp
+  Timestamp,
+  runTransaction
 } from 'firebase/firestore';
 import { Account, AccountGroup, Voucher, VoucherType, VoucherItem } from '../types';
 import { 
@@ -60,6 +61,8 @@ const DEFAULT_GROUPS: Partial<AccountGroup>[] = [
   { name: 'Sundry Creditors', parentGroupId: 'Liabilities', type: 'Liability' },
   { name: 'Indirect Expenses', parentGroupId: 'Expenses', type: 'Expense' },
   { name: 'Direct Income', parentGroupId: 'Income', type: 'Income' },
+  { name: 'Current Liabilities', parentGroupId: 'Liabilities', type: 'Liability' },
+  { name: 'Direct Expenses', parentGroupId: 'Expenses', type: 'Expense' },
 ];
 
 export function Ledger() {
@@ -100,11 +103,27 @@ export function Ledger() {
     // 3. Fetch Vouchers
     const vouchersUnsub = onSnapshot(query(collection(db, 'vouchers'), orderBy('date', 'desc'), limit(500)), 
       (snapshot) => {
-        setVouchers(snapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data(),
-          date: doc.data().date instanceof Timestamp ? doc.data().date.toDate() : new Date(doc.data().date)
-        } as Voucher)));
+        const docs = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return { 
+            id: doc.id, 
+            ...data,
+            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+          } as Voucher;
+        });
+
+        // Sort in-memory: Primary by date desc, Secondary by createdAt desc (latest first)
+        docs.sort((a, b) => {
+          const dateDiff = b.date.getTime() - a.date.getTime();
+          if (dateDiff !== 0) return dateDiff;
+          
+          const timeA = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+          const timeB = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+          return timeB - timeA;
+        });
+
+        setVouchers(docs);
         setLoading(false);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'vouchers')
@@ -137,6 +156,7 @@ export function Ledger() {
         { name: 'Fuel Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
         { name: 'Maintenance', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
         { name: 'Salary Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
+        { name: 'Salary Payable', group: 'Current Liabilities', opening: 0, type: 'Cr' },
         { name: 'Service Income', group: 'Direct Income', opening: 0, type: 'Cr' },
       ];
 
@@ -312,6 +332,7 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
               <tr key={v.id} className="hover:bg-slate-50/80 transition-colors group">
                 <td className="p-4 pl-8">
                   <p className="text-sm font-bold text-slate-700">{format(v.date, 'dd MMM yyyy')}</p>
+                  <p className="text-[10px] font-bold text-slate-400">{format(v.date, 'hh:mm a')}</p>
                 </td>
                 <td className="p-4">
                   <p className="text-xs font-mono font-bold text-slate-400">{v.voucherNumber}</p>
@@ -321,6 +342,9 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
                     v.type === 'Payment' ? 'bg-red-50 text-red-600' :
                     v.type === 'Receipt' ? 'bg-green-50 text-green-600' :
                     v.type === 'Contra' ? 'bg-blue-50 text-blue-600' :
+                    v.type === 'Sales' ? 'bg-indigo-50 text-indigo-600' :
+                    v.type === 'Purchase' ? 'bg-orange-50 text-orange-600' :
+                    v.type === 'Journal' ? 'bg-purple-50 text-purple-600' :
                     'bg-slate-100 text-slate-600'
                   }`}>
                     {v.type}
@@ -329,7 +353,8 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
                 <td className="p-4">
                   <div className="max-w-md">
                     <p className="text-sm font-bold text-slate-900 line-clamp-1">
-                      {v.items[0]?.accountName} {v.items.length > 1 && `& others`}
+                      {v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName}
+                      {v.items.length > 2 && ` & others`}
                     </p>
                     <p className="text-[10px] text-slate-400 font-medium truncate">{v.narration}</p>
                   </div>
@@ -380,18 +405,54 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
 
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'vouchers'), {
-        date: new Date(date),
-        type: vchType,
-        voucherNumber: vchNo,
-        items,
-        narration,
-        totalAmount: totals.dr,
-        createdAt: serverTimestamp()
+      await runTransaction(db, async (transaction) => {
+        // --- 1. CALCULATE & UPDATE BALANCES ---
+        for (const item of items) {
+          const accRef = doc(db, 'accounts', item.accountId);
+          const accDoc = await transaction.get(accRef);
+          
+          if (accDoc.exists()) {
+            const accData = accDoc.data();
+            let newBalance = accData.currentBalance || 0;
+            
+            if (item.type === 'Dr') {
+              newBalance += (accData.balanceType === 'Dr' ? item.amount : -item.amount);
+            } else {
+              newBalance += (accData.balanceType === 'Cr' ? item.amount : -item.amount);
+            }
+
+            // Validation: Cash/Bank should not go negative
+            if (accData.balanceType === 'Dr' && (accData.name === 'Cash' || accData.name === 'Bank Account' || accData.name === 'Petrol Pump')) {
+              if (newBalance < 0) {
+                throw new Error(`INSUFFICIENT_FUNDS:${accData.name}:${accData.currentBalance || 0}`);
+              }
+            }
+
+            transaction.update(accRef, { currentBalance: newBalance });
+          }
+        }
+
+        // --- 2. SAVE VOUCHER ---
+        const vchRef = doc(collection(db, 'vouchers'));
+        transaction.set(vchRef, {
+          date: new Date(date),
+          type: vchType,
+          voucherNumber: vchNo,
+          items,
+          narration,
+          totalAmount: totals.dr,
+          createdAt: serverTimestamp()
+        });
       });
+
       onClose();
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'vouchers');
+      if (error instanceof Error && error.message.startsWith('INSUFFICIENT_FUNDS:')) {
+        const [_, acc, bal] = error.message.split(':');
+        alert(`Failed: Insufficient balance in ${acc}. \nAvailable: ₹${Number(bal).toLocaleString()}`);
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, 'vouchers');
+      }
     } finally {
       setSubmitting(false);
     }

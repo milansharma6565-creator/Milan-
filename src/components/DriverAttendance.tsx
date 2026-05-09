@@ -96,6 +96,98 @@ export function DriverAttendance() {
         status,
         createdAt: serverTimestamp()
       });
+
+      // --- AUTOMATED SALARY ACCRUAL ---
+      if (status !== 'Absent' && driver.monthlySalary > 0) {
+        const factor = status === 'Full Day' ? 1 : 0.5;
+        const dailyAmt = Math.round((driver.monthlySalary / 30) * factor);
+
+        // 1. Find or Create Salary Expense account
+        const expSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', 'Salary Expense')));
+        let expId = expSnap.docs[0]?.id;
+
+        if (!expId) {
+          // Find/Create Indirect Expenses group
+          const groupSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Indirect Expenses')));
+          let groupId = groupSnap.docs[0]?.id;
+          
+          if (!groupId) {
+             const liabilitiesSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Expenses')));
+             const liabilitiesId = liabilitiesSnap.docs[0]?.id;
+             const newGroup = await addDoc(collection(db, 'accountGroups'), {
+               name: 'Indirect Expenses',
+               parentGroupId: liabilitiesId || '',
+               type: 'Expense'
+             });
+             groupId = newGroup.id;
+          }
+
+          const newAcc = await addDoc(collection(db, 'accounts'), {
+            name: 'Salary Expense',
+            groupId: groupId,
+            openingBalance: 0,
+            balanceType: 'Dr',
+            currentBalance: 0,
+            createdAt: serverTimestamp()
+          });
+          expId = newAcc.id;
+        }
+
+        // 2. Find or Create specific Driver Account
+        const driverAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', driver.name)));
+        let driverAccId = driverAccSnap.docs[0]?.id;
+
+        if (!driverAccId) {
+           // Find/Create Current Liabilities group
+           const groupSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')));
+           let groupId = groupSnap.docs[0]?.id;
+
+           if (!groupId) {
+             const parentSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Liabilities')));
+             let parentId = parentSnap.docs[0]?.id;
+             if (!parentId) {
+               const newParent = await addDoc(collection(db, 'accountGroups'), { name: 'Liabilities', type: 'Liability' });
+               parentId = newParent.id;
+             }
+             const newGroup = await addDoc(collection(db, 'accountGroups'), { name: 'Current Liabilities', parentGroupId: parentId, type: 'Liability' });
+             groupId = newGroup.id;
+           }
+
+           const newAcc = await addDoc(collection(db, 'accounts'), {
+             name: driver.name,
+             groupId: groupId,
+             openingBalance: 0,
+             balanceType: 'Cr',
+             currentBalance: 0,
+             createdAt: serverTimestamp(),
+             driverId: driver.id
+           });
+           driverAccId = newAcc.id;
+        }
+
+        if (expId && driverAccId) {
+          // Unique voucher number to prevent duplicates for same day/driver
+          const vchNo = `ATT-${driver.id.slice(0,4)}-${format(selectedDate, 'ddMMyy')}`;
+          
+          // Check if already accrued for this specific ID (prevents double entry on re-clicks)
+          const existingVch = await getDocs(query(collection(db, 'vouchers'), where('voucherNumber', '==', vchNo)));
+          
+          if (existingVch.empty) {
+            await addDoc(collection(db, 'vouchers'), {
+              date: selectedDate,
+              type: 'Journal',
+              voucherNumber: vchNo,
+              items: [
+                { accountId: expId, accountName: 'Salary Expense', amount: dailyAmt, type: 'Dr' }, // Expense Inc
+                { accountId: driverAccId, accountName: driver.name, amount: dailyAmt, type: 'Cr' } // Liability Inc (Driver's Balance)
+              ],
+              narration: `Daily Salary Accrued: ${driver.name} - ${status} (${format(selectedDate, 'dd MMM')})`,
+              totalAmount: dailyAmt,
+              createdAt: serverTimestamp()
+            });
+          }
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'attendance');
     }
@@ -160,14 +252,14 @@ export function DriverAttendance() {
     setSaving(true);
     try {
       // Find Salary Account
-      const accSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', 'Salary Expense')));
-      const salaryAccId = accSnap.docs[0]?.id;
+      const accSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', 'Salary Payable')));
+      const payId = accSnap.docs[0]?.id;
 
       const cashSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash')));
       const cashAccId = cashSnap.docs[0]?.id;
 
-      if (!salaryAccId || !cashAccId) {
-        alert("Accounting accounts (Salary/Cash) not found. Check Setup.");
+      if (!payId || !cashAccId) {
+        alert("Accounting accounts (Salary Payable/Cash) not found. Check Setup.");
         return;
       }
 
@@ -176,10 +268,10 @@ export function DriverAttendance() {
         type: 'Payment',
         voucherNumber: `SLY-${format(new Date(), 'HHmm')}`,
         items: [
-          { accountId: salaryAccId, accountName: 'Salary Expense', amount: salary, type: 'Dr' },
+          { accountId: payId, accountName: 'Salary Payable', amount: salary, type: 'Dr' },
           { accountId: cashAccId, accountName: 'Cash', amount: salary, type: 'Cr' }
         ],
-        narration: `Salary for ${driver.name} - ${format(selectedDate, 'MMM yyyy')} (${stats.totalDays} days)`,
+        narration: `Salary payout for ${driver.name} - ${format(selectedDate, 'MMM yyyy')} (${stats.totalDays} days)`,
         totalAmount: salary,
         createdAt: serverTimestamp()
       });

@@ -56,9 +56,8 @@ service cloud.firestore {
 
     function isValidDriver(data) {
       return data.keys().hasAll(['name', 'mobile']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             data.mobile is string && data.mobile.size() >= 10 && data.mobile.size() <= 15 &&
-             (data.get('monthlySalary', 0) is number);
+             data.name is string &&
+             data.mobile is string;
     }
 
     function isValidAttendance(data) {
@@ -110,18 +109,16 @@ service cloud.firestore {
 
     function isValidAccountGroup(data) {
       return data.keys().hasAll(['name', 'type']) &&
-             data.name is string && data.name.size() > 0 &&
-             data.type in ['Asset', 'Liability', 'Income', 'Expense', 'Equity'] &&
-             (data.get('parentGroupId', '') is string);
+             data.name is string &&
+             data.type in ['Asset', 'Liability', 'Income', 'Expense', 'Equity'];
     }
 
     function isValidAccount(data) {
       return data.keys().hasAll(['name', 'groupId', 'openingBalance', 'balanceType']) &&
-             data.name is string && data.name.size() > 0 &&
+             data.name is string &&
              data.groupId is string &&
              data.openingBalance is number &&
-             data.balanceType in ['Dr', 'Cr'] &&
-             (data.get('createdAt', request.time) == request.time);
+             data.balanceType in ['Dr', 'Cr'];
     }
 
     function isValidVoucher(data) {
@@ -180,11 +177,7 @@ service cloud.firestore {
     }
 
     match /drivers/{driverId} {
-      allow get: if isValidId(driverId);
-      allow list: if isSignedIn();
-      allow create: if isAdmin() && isValidId(driverId) && isValidDriver(incoming());
-      allow update: if isAdmin() && isValidId(driverId) && isValidDriver(incoming());
-      allow delete: if isAdmin() && isValidId(driverId);
+      allow read, write: if isSignedIn();
     }
 
     match /tractors/{tractorId} {
@@ -218,19 +211,15 @@ service cloud.firestore {
     }
 
     match /accountGroups/{groupId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() && isValidAccountGroup(incoming());
+      allow read, write: if isSignedIn();
     }
 
     match /accounts/{accountId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() && isValidAccount(incoming());
+      allow read, write: if isSignedIn();
     }
 
     match /vouchers/{voucherId} {
-      allow read: if isSignedIn();
-      allow create: if isAdmin() && isValidVoucher(incoming());
-      allow update, delete: if isAdmin();
+      allow read, write: if isSignedIn();
     }
 
     match /attendance/{atId} {

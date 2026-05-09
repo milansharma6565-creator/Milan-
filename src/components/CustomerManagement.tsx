@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, where, orderBy, runTransaction, getDocs, deleteDoc } from 'firebase/firestore';
-import { Customer, Bill, LedgerEntry } from '../types';
-import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare } from 'lucide-react';
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, where, orderBy, runTransaction, getDocs, deleteDoc, getDoc } from 'firebase/firestore';
+import { Customer, Bill, LedgerEntry, Account } from '../types';
+import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { useReactToPrint } from 'react-to-print';
@@ -27,6 +27,17 @@ export function CustomerManagement() {
   });
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [quickReceiptCustomer, setQuickReceiptCustomer] = useState<Customer | null>(null);
+  const [isSavingQuickReceipt, setIsSavingQuickReceipt] = useState(false);
+  const [receiptForm, setReceiptForm] = useState({
+    amount: '',
+    paymentMethod: 'Cash' as 'Cash' | 'Bank',
+    date: new Date().toISOString().split('T')[0],
+    description: ''
+  });
+  const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
+  
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
   const [shareLedgerCustomer, setShareLedgerCustomer] = useState<Customer | null>(null);
   
@@ -89,7 +100,7 @@ export function CustomerManagement() {
 
   useEffect(() => {
     const q = query(collection(db, 'customers'), orderBy('name'));
-    return onSnapshot(q, 
+    const unsubCustomers = onSnapshot(q, 
       (snapshot) => {
         const all = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
         if (!searchTerm) {
@@ -106,6 +117,16 @@ export function CustomerManagement() {
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'customers')
     );
+
+    const unsubAccounts = onSnapshot(collection(db, 'accounts'), 
+      (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'accounts-customers')
+    );
+
+    return () => {
+      unsubCustomers();
+      unsubAccounts();
+    };
   }, [searchTerm]);
 
   const handleAddCustomer = async (e: React.FormEvent) => {
@@ -223,6 +244,120 @@ export function CustomerManagement() {
     doc.save(fileName);
   };
 
+  const handleQuickReceiptSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickReceiptCustomer || !receiptForm.amount) return;
+
+    setIsSavingQuickReceipt(true);
+    try {
+      const amount = Number(receiptForm.amount);
+      const paymentAccName = receiptForm.paymentMethod === 'Cash' ? 'Cash' : 'Bank Account';
+      
+      let customerAccount = accounts.find(acc => acc.customerId === quickReceiptCustomer.id);
+      if (!customerAccount) {
+        customerAccount = accounts.find(acc => acc.name === quickReceiptCustomer.name);
+      }
+
+      const paymentAccount = accounts.find(acc => acc.name === paymentAccName);
+      if (!paymentAccount) throw new Error(`${paymentAccName} account not found`);
+
+      const entryDate = new Date(receiptForm.date);
+      const now = new Date();
+      entryDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+
+      await runTransaction(db, async (transaction) => {
+        const payAccRef = doc(db, 'accounts', paymentAccount.id);
+        let custAccRef: any;
+        let isCreatingNewAccount = !customerAccount;
+
+        if (customerAccount) {
+          custAccRef = doc(db, 'accounts', customerAccount.id);
+        } else {
+          custAccRef = doc(collection(db, 'accounts'));
+        }
+
+        const payDoc = await transaction.get(payAccRef);
+        let custDocSnapshot = null;
+        if (!isCreatingNewAccount) {
+          custDocSnapshot = await transaction.get(custAccRef);
+        }
+
+        const payBal = payDoc.data()?.currentBalance || 0;
+
+        let custAccountToUseId = custAccRef.id;
+        let custAccountToUseName = isCreatingNewAccount ? quickReceiptCustomer.name : customerAccount!.name;
+
+        if (isCreatingNewAccount) {
+          const newAccData = {
+            name: quickReceiptCustomer.name,
+            group: 'Sundry Debtors',
+            openingBalance: 0,
+            currentBalance: amount, // For receipt, Dr means we owe them or they paid? Wait.
+            // Sundry Debtors are Dr. Receipt means we Credit them.
+            // So if they pay ₹100, their balance goes from 0 back to -100 (Cr).
+            // Actually, usually users have Dr balance. 
+            balanceType: 'Dr',
+            customerId: quickReceiptCustomer.id,
+            createdAt: serverTimestamp()
+          };
+          transaction.set(custAccRef, {
+            ...newAccData,
+            currentBalance: -amount // Correct for first receipt
+          });
+        } else {
+          const curCustBal = custDocSnapshot?.data()?.currentBalance || 0;
+          const balType = custDocSnapshot?.data()?.balanceType || 'Dr';
+          transaction.update(custAccRef, { 
+            currentBalance: curCustBal + (balType === 'Cr' ? amount : -amount) 
+          });
+        }
+
+        transaction.update(payAccRef, { currentBalance: payBal + amount });
+
+        const vchRef = doc(collection(db, 'vouchers'));
+        transaction.set(vchRef, {
+          date: entryDate,
+          type: 'Receipt',
+          voucherNumber: `CUST-R-${Math.floor(Date.now()/1000)}`,
+          items: [
+            { accountId: paymentAccount.id, accountName: paymentAccount.name, amount, type: 'Dr' },
+            { accountId: custAccountToUseId, accountName: custAccountToUseName, amount, type: 'Cr' }
+          ],
+          narration: receiptForm.description.trim() || `Quick receipt from ${quickReceiptCustomer.name} via ${receiptForm.paymentMethod}`,
+          totalAmount: amount,
+          createdAt: serverTimestamp()
+        });
+      });
+
+      setQuickReceiptCustomer(null);
+      setReceiptForm({
+        amount: '',
+        paymentMethod: 'Cash',
+        date: new Date().toISOString().split('T')[0],
+        description: ''
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'customer-quick-receipt');
+    } finally {
+      setIsSavingQuickReceipt(false);
+    }
+  };
+
+  const handleStartPress = (customer: Customer) => {
+    const timer = setTimeout(() => {
+      setQuickReceiptCustomer(customer);
+      if (navigator.vibrate) navigator.vibrate(50);
+    }, 1000);
+    setLongPressTimer(timer);
+  };
+
+  const handleEndPress = () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      setLongPressTimer(null);
+    }
+  };
+
   const shareCurrentBalance = (c: Customer) => {
     const phone = c.mobile.startsWith('91') ? c.mobile : `91${c.mobile}`;
     const message = `*Account Summary - Rajhans steel and Water* 🚛\n\n` +
@@ -278,108 +413,126 @@ export function CustomerManagement() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          {customers?.map((customer) => (
-            <motion.div
-              key={customer.id}
-              layout
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              onClick={() => setSelectedHistoryCustomer(customer)}
-              className="material-card group hover:border-blue-100 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 cursor-pointer"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xl font-bold text-slate-800">{customer.name}</h3>
-                    <div className="flex gap-1.5 ml-1">
-                      <a 
-                        href={`tel:${customer.mobile}`}
-                        className="p-1 px-2.5 bg-green-50 text-green-600 hover:bg-green-100 rounded-lg transition-all"
-                        onClick={(e) => e.stopPropagation()}
-                        title="Call Customer"
-                      >
-                        <Phone size={14} />
-                      </a>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          shareCurrentBalance(customer);
-                        }}
-                        className="p-1 px-2.5 bg-[#25D366] text-white hover:bg-green-600 rounded-lg transition-all"
-                        title="Direct Balance Hisab"
-                      >
-                        <IndianRupee size={14} />
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShareLedgerCustomer(customer);
-                        }}
-                        className="p-1 px-2.5 bg-green-600 text-white hover:bg-green-700 rounded-lg transition-all"
-                        title="Detailed Ledger PDF"
-                      >
-                        <MessageSquare size={14} />
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingCustomer(customer);
-                        }}
-                        className="p-1 px-2.5 bg-slate-100 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                        title="Edit Customer"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (customer.id) setDeleteConfirm({ id: customer.id, name: customer.name });
-                        }}
-                        className="p-1 px-2.5 bg-slate-100 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                        title="Delete Customer"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+          {customers?.map((customer) => {
+            const customerAccount = accounts.find(acc => acc.customerId === customer.id || acc.name === customer.name);
+            const currentPending = customerAccount ? (customerAccount.balanceType === 'Dr' ? customerAccount.currentBalance : -customerAccount.currentBalance) : 0;
+            
+            return (
+              <motion.div
+                key={customer.id}
+                layout
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                onMouseDown={() => handleStartPress(customer)}
+                onMouseUp={handleEndPress}
+                onMouseLeave={handleEndPress}
+                onTouchStart={() => handleStartPress(customer)}
+                onTouchEnd={handleEndPress}
+                onClick={() => setSelectedHistoryCustomer(customer)}
+                className="material-card group relative overflow-hidden hover:border-blue-100 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 cursor-pointer active:scale-[0.98]"
+              >
+                {longPressTimer && quickReceiptCustomer?.id !== customer.id && (
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: "100%" }}
+                    transition={{ duration: 1, ease: "linear" }}
+                    className="absolute top-0 left-0 h-1 bg-blue-500 z-10"
+                  />
+                )}
+                <div className="flex justify-between items-start mb-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xl font-bold text-slate-800">{customer.name}</h3>
+                      <div className="flex gap-1.5 ml-1">
+                        <a 
+                          href={`tel:${customer.mobile}`}
+                          className="p-1 px-2.5 bg-green-50 text-green-600 hover:bg-green-100 rounded-lg transition-all"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Call Customer"
+                        >
+                          <Phone size={14} />
+                        </a>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            shareCurrentBalance({ ...customer, pendingAmount: currentPending });
+                          }}
+                          className="p-1 px-2.5 bg-[#25D366] text-white hover:bg-green-600 rounded-lg transition-all"
+                          title="Direct Balance Hisab"
+                        >
+                          <IndianRupee size={14} />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShareLedgerCustomer(customer);
+                          }}
+                          className="p-1 px-2.5 bg-green-600 text-white hover:bg-green-700 rounded-lg transition-all"
+                          title="Detailed Ledger PDF"
+                        >
+                          <MessageSquare size={14} />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingCustomer(customer);
+                          }}
+                          className="p-1 px-2.5 bg-slate-100 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                          title="Edit Customer"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (customer.id) setDeleteConfirm({ id: customer.id, name: customer.name });
+                          }}
+                          className="p-1 px-2.5 bg-slate-100 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                          title="Delete Customer"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <a 
+                      href={`tel:${customer.mobile}`}
+                      className="flex items-center gap-2 text-blue-600 font-medium text-sm mt-1 hover:underline"
+                    >
+                      <Phone size={14} />
+                      <span>+91 {customer.mobile}</span>
+                    </a>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total Pending</div>
+                    <div className={`text-lg font-display font-bold ${currentPending > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                      {formatCurrency(currentPending)}
                     </div>
                   </div>
-                  <a 
-                    href={`tel:${customer.mobile}`}
-                    className="flex items-center gap-2 text-blue-600 font-medium text-sm mt-1 hover:underline"
-                  >
-                    <Phone size={14} />
-                    <span>+91 {customer.mobile}</span>
-                  </a>
                 </div>
-                <div className="text-right">
-                  <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Pending</div>
-                  <div className={`text-lg font-display font-bold ${customer.pendingAmount > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                    {formatCurrency(customer.pendingAmount)}
-                  </div>
+                
+                <div className="flex items-start gap-2 text-slate-500 text-sm bg-slate-50 p-3 rounded-2xl">
+                  <MapPin size={16} className="mt-0.5 shrink-0 text-slate-400" />
+                  <p className="leading-relaxed">{customer.address || "No address provided"}</p>
                 </div>
-              </div>
-              
-              <div className="flex items-start gap-2 text-slate-500 text-sm bg-slate-50 p-3 rounded-2xl">
-                <MapPin size={16} className="mt-0.5 shrink-0 text-slate-400" />
-                <p className="leading-relaxed">{customer.address || "No address provided"}</p>
-              </div>
 
-              {(customer.vehicleNumber || customer.notes) && (
-                <div className="mt-4 pt-4 border-t border-slate-50 flex flex-wrap gap-2">
-                  {customer.vehicleNumber && (
-                    <div className="flex items-center gap-1.5 text-[10px] font-bold bg-slate-100 px-2.5 py-1 rounded-full text-slate-600">
-                      <Building2 size={12} />
-                      {customer.vehicleNumber}
-                    </div>
-                  )}
-                  {customer.notes && (
-                    <div className="text-[10px] font-medium text-slate-400 italic">
-                      Note: {customer.notes}
-                    </div>
-                  )}
-                </div>
-              )}
-            </motion.div>
-          ))}
+                {(customer.vehicleNumber || customer.notes) && (
+                  <div className="mt-4 pt-4 border-t border-slate-50 flex flex-wrap gap-2">
+                    {customer.vehicleNumber && (
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold bg-slate-100 px-2.5 py-1 rounded-full text-slate-600">
+                        <Building2 size={12} />
+                        {customer.vehicleNumber}
+                      </div>
+                    )}
+                    {customer.notes && (
+                      <div className="text-[10px] font-medium text-slate-400 italic">
+                        Note: {customer.notes}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            );
+          })}
           
           {customers?.length === 0 && (
             <div className="md:col-span-2 py-20 text-center flex flex-col items-center gap-4">
@@ -599,6 +752,121 @@ export function CustomerManagement() {
               </form>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {quickReceiptCustomer && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => setQuickReceiptCustomer(null)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" 
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 pb-4 flex justify-between items-center border-b border-slate-50">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-green-50 text-green-600 flex items-center justify-center">
+                    <Plus size={28} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-display font-bold text-slate-900 leading-tight">
+                      Receipt - {quickReceiptCustomer.name}
+                    </h2>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      Quick Customer Receipt
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setQuickReceiptCustomer(null)}
+                  className="w-10 h-10 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-slate-100"
+                >
+                  <XCircle size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleQuickReceiptSubmit} className="p-8 pt-6 flex flex-col gap-6">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block ml-1">Payment Method</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['Cash', 'Bank'] as const).map(m => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setReceiptForm({ ...receiptForm, paymentMethod: m })}
+                        className={`h-12 rounded-xl font-bold text-sm transition-all border-2 ${
+                          receiptForm.paymentMethod === m 
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200' 
+                            : 'bg-slate-50 border-transparent text-slate-500 hover:bg-slate-100'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block ml-1">Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-black text-slate-300">₹</span>
+                      <input
+                        required
+                        type="number"
+                        placeholder="0"
+                        value={receiptForm.amount}
+                        onChange={e => setReceiptForm({ ...receiptForm, amount: e.target.value })}
+                        className="w-full h-14 bg-slate-50 rounded-[1.25rem] pl-8 pr-4 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-black text-lg"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block ml-1">Date</label>
+                    <input
+                      type="date"
+                      value={receiptForm.date}
+                      onChange={e => setReceiptForm({ ...receiptForm, date: e.target.value })}
+                      className="w-full h-14 bg-slate-50 rounded-[1.25rem] px-4 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block ml-1">Description</label>
+                  <input
+                    placeholder="Regular Payment / Advance..."
+                    value={receiptForm.description}
+                    onChange={e => setReceiptForm({ ...receiptForm, description: e.target.value })}
+                    className="w-full h-14 bg-slate-50 rounded-[1.25rem] px-5 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSavingQuickReceipt}
+                  className="w-full h-16 bg-blue-600 text-white rounded-[1.25rem] font-display font-black text-lg shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50 mt-2"
+                >
+                  {isSavingQuickReceipt ? (
+                    <div className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <CheckCircle2 size={24} />
+                      Confirm Receipt
+                    </>
+                  )}
+                </button>
+              </form>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

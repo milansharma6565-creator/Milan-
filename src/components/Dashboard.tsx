@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc, where } from 'firebase/firestore';
-import { Customer, Driver, Bill, Tractor, LedgerEntry } from '../types';
+import { Customer, Driver, Bill, Tractor, Account } from '../types';
 import { 
   TrendingUp, 
   Clock, 
@@ -20,7 +20,10 @@ import {
   Trash2,
   MessageSquare,
   Truck,
-  RefreshCw
+  RefreshCw,
+  Plus,
+  Minus,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -39,6 +42,20 @@ export function Dashboard() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [tractors, setTractors] = useState<Tractor[]>([]);
+  const [cashBalance, setCashBalance] = useState(0);
+  const [bankBalance, setBankBalance] = useState(0);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [quickVoucher, setQuickVoucher] = useState<{
+    type: 'Receipt' | 'Payment';
+    paymentMethod: 'Cash' | 'Bank';
+  } | null>(null);
+  const [quickVchForm, setQuickVchForm] = useState({
+    accountId: '',
+    amount: '',
+    description: '',
+    date: new Date().toISOString().split('T')[0]
+  });
+  const [isSavingQuickVch, setIsSavingQuickVch] = useState(false);
   const [stats, setStats] = useState<any>(null);
   const [smileyMood, setSmileyMood] = useState<'normal' | 'happy' | 'sad'>('normal');
   const [eatingState, setEatingState] = useState<'walking' | 'sitting' | 'eating' | 'idle'>('idle');
@@ -110,12 +127,36 @@ export function Dashboard() {
       (error) => handleFirestoreError(error, OperationType.LIST, 'tractors-dashboard')
     );
 
+    const unsubCashAcc = onSnapshot(query(collection(db, 'accounts'), where('name', '==', 'Cash')), 
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setCashBalance(snapshot.docs[0].data().currentBalance || 0);
+        }
+      }
+    );
+
+    const unsubBankAcc = onSnapshot(query(collection(db, 'accounts'), where('name', '==', 'Bank Account')), 
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setBankBalance(snapshot.docs[0].data().currentBalance || 0);
+        }
+      }
+    );
+
+    const unsubAccounts = onSnapshot(collection(db, 'accounts'), 
+      (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'accounts-dashboard')
+    );
+
     return () => {
       unsubBills();
       unsubRequests();
       unsubCustomers();
       unsubDrivers();
       unsubTractors();
+      unsubCashAcc();
+      unsubBankAcc();
+      unsubAccounts();
     };
   }, []);
 
@@ -132,7 +173,16 @@ export function Dashboard() {
       .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
       .reduce((sum, b) => sum + b.grandTotal, 0);
       
-    const totalPending = customers.reduce((sum, c) => sum + (c.pendingAmount || 0), 0);
+    const totalPending = accounts
+      .filter(acc => acc.group === 'Sundry Debtors' || acc.group === 'Duty Assignment' || customers.some(c => c.id === acc.customerId || c.name === acc.name))
+      .reduce((sum, acc) => {
+        // For Sundry Debtors (Customers), Dr balance is positive pending
+        const bal = acc.balanceType === 'Dr' ? acc.currentBalance : -acc.currentBalance;
+        // Only include if it's a customer-linked account
+        const isCustomer = customers.some(c => c.id === acc.customerId || c.name === acc.name);
+        return isCustomer ? sum + bal : sum;
+      }, 0);
+
     const deliveredCount = bills.filter(b => b.status === 'Delivered').length;
     const unsettledCount = bills.filter(b => !b.isSettled).length;
     
@@ -175,6 +225,8 @@ export function Dashboard() {
     setStats({
       todayCollection,
       totalPending,
+      cashBalance,
+      bankBalance,
       deliveredCount,
       unsettledCount,
       customerCount: customers.length,
@@ -183,154 +235,578 @@ export function Dashboard() {
       driverStats,
       recentBills: allBillsSorted.slice(0, 10)
     });
-  }, [bills, customers, drivers, tractors]);
+  }, [bills, customers, drivers, tractors, cashBalance, bankBalance]);
+
+  const handleQuickVchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickVchForm.accountId || !quickVchForm.amount || !quickVoucher) return;
+
+    setIsSavingQuickVch(true);
+    try {
+      const amount = Number(quickVchForm.amount);
+      const isPayment = quickVoucher.type === 'Payment';
+      const paymentAccName = quickVoucher.paymentMethod === 'Cash' ? 'Cash' : 'Bank Account';
+      
+      // Add current time to the selected date
+      const entryDate = new Date(quickVchForm.date);
+      const now = new Date();
+      entryDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+
+      const [paymentAccSnap, otherAccSnap] = await Promise.all([
+        getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName))),
+        getDoc(doc(db, 'accounts', quickVchForm.accountId))
+      ]);
+
+      const paymentAccId = paymentAccSnap.docs[0]?.id;
+      if (!paymentAccId) throw new Error("Payment account not found");
+      if (!otherAccSnap.exists()) throw new Error("Selected account not found");
+
+      await runTransaction(db, async (transaction) => {
+        const paymentAccRef = doc(db, 'accounts', paymentAccId);
+        const otherAccRef = doc(db, 'accounts', quickVchForm.accountId);
+        
+        const [payDoc, otherDoc] = await Promise.all([
+          transaction.get(paymentAccRef),
+          transaction.get(otherAccRef)
+        ]);
+
+        const payBal = payDoc.data()?.currentBalance || 0;
+        const otherBal = otherDoc.data()?.currentBalance || 0;
+
+        // Validation for Payments: Cash/Bank should not go negative
+        if (isPayment && payBal < amount) {
+          throw new Error(`INSUFFICIENT_FUNDS:${paymentAccName}:${payBal}`);
+        }
+
+        // Update Balances
+        if (isPayment) {
+          transaction.update(paymentAccRef, { currentBalance: payBal - amount });
+          transaction.update(otherAccRef, { 
+            currentBalance: otherBal + (otherDoc.data()?.balanceType === 'Dr' ? amount : -amount) 
+          });
+        } else {
+          transaction.update(paymentAccRef, { currentBalance: payBal + amount });
+          transaction.update(otherAccRef, { 
+            currentBalance: otherBal + (otherDoc.data()?.balanceType === 'Cr' ? amount : -amount) 
+          });
+        }
+
+        // Record Voucher
+        const vchRef = doc(collection(db, 'vouchers'));
+        const sourceAccName = isPayment ? otherDoc.data()?.name : paymentAccName;
+        const targetAccName = isPayment ? paymentAccName : otherDoc.data()?.name;
+        
+        // For Receipts, we want the "Other" account to be particulars in Daybook
+        // So we put the Other account as index 0 if it's a receipt? 
+        // Actually Daybook particulars logic in Ledger.tsx uses items[0]
+        
+        transaction.set(vchRef, {
+          date: entryDate,
+          type: quickVoucher.type,
+          voucherNumber: `QV-${Math.floor(Date.now()/1000)}`,
+          items: [
+            { 
+              accountId: isPayment ? quickVchForm.accountId : quickVchForm.accountId, // Wait, I need to be careful
+              accountName: isPayment ? otherDoc.data()?.name : otherDoc.data()?.name,
+              amount, 
+              type: isPayment ? 'Dr' : 'Cr' 
+            },
+            { 
+              accountId: paymentAccId, 
+              accountName: paymentAccName, 
+              amount, 
+              type: isPayment ? 'Cr' : 'Dr' 
+            }
+          ],
+          narration: quickVchForm.description.trim() || `Quick ${quickVoucher.type} tracking via ${quickVoucher.paymentMethod}`,
+          totalAmount: amount,
+          createdAt: serverTimestamp()
+        });
+      });
+
+      setQuickVoucher(null);
+      setQuickVchForm({ accountId: '', amount: '', description: '', date: new Date().toISOString().split('T')[0] });
+      triggerSmiley('happy');
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('INSUFFICIENT_FUNDS:')) {
+        const [_, acc, bal] = error.message.split(':');
+        alert(`Failed: Insufficient balance in ${acc}. \nAvailable: ₹${Number(bal).toLocaleString()}`);
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, 'quick_voucher');
+      }
+    } finally {
+      setIsSavingQuickVch(false);
+    }
+  };
 
   const [editingBill, setEditingBill] = React.useState<any>(null);
   const [showPaymentSelection, setShowPaymentSelection] = React.useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, number: string } | null>(null);
 
   const handleStatusUpdate = async (status: 'Delivered' | 'Pending' | 'Cancelled') => {
-    if (editingBill?.id) {
-      if (status === 'Delivered') {
-        setShowPaymentSelection(true);
-        return;
-      }
-      try {
-        await updateDoc(doc(db, 'bills', editingBill.id), { 
+    if (!editingBill?.id) return;
+
+    if (status === 'Delivered') {
+      setShowPaymentSelection(true);
+      return;
+    }
+
+    try {
+      // Fetch required data outside transaction
+      const [incomeSnap, cashSnap, bankSnap, customerSnap] = await Promise.all([
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName)))
+      ]);
+
+      let incomeAccId = incomeSnap.docs[0]?.id;
+      let cashAccId = cashSnap.docs[0]?.id;
+      let bankAccId = bankSnap.docs[0]?.id;
+      let customerAccId = customerSnap.docs[0]?.id;
+
+      await runTransaction(db, async (transaction) => {
+        const billRef = doc(db, 'bills', editingBill.id);
+        const customerRef = doc(db, 'customers', editingBill.customerId);
+        
+        // --- 1. READS FIRST ---
+        const [billDoc, custDoc] = await Promise.all([
+          transaction.get(billRef),
+          transaction.get(customerRef)
+        ]);
+
+        if (!billDoc.exists()) throw new Error("Bill not found");
+        const oldBill = billDoc.data();
+        const wasDelivered = oldBill.status === 'Delivered';
+        const amount = oldBill.grandTotal;
+        const oldPaymentMode = oldBill.paymentMode;
+
+        const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
+        const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
+        const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
+        const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
+
+        const [incomeAccDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
+          incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
+          cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
+          bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
+          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null)
+        ]);
+
+        // --- 2. WRITES SECOND ---
+        if (wasDelivered && (status === 'Pending' || status === 'Cancelled')) {
+          // REVERSE ACCOUNTING
+          
+          // Reverse Income
+          if (incomeAccDoc?.exists()) {
+            transaction.update(incomeAccRef!, { currentBalance: (incomeAccDoc.data().currentBalance || 0) - amount });
+          }
+
+          // Reverse Payment
+          if (oldPaymentMode === 'Cash' && cashAccDoc?.exists()) {
+            transaction.update(cashAccRef!, { currentBalance: (cashAccDoc.data().currentBalance || 0) - amount });
+          } else if ((oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') && bankAccDoc?.exists()) {
+            transaction.update(bankAccRef!, { currentBalance: (bankAccDoc.data().currentBalance || 0) - amount });
+          } else if (oldPaymentMode === 'Pending' && customerAccDoc?.exists()) {
+            transaction.update(customerAccRef!, { currentBalance: (customerAccDoc.data().currentBalance || 0) - amount });
+          }
+
+          // Reverse Customer pendingAmount if it was Credit
+          if (oldPaymentMode === 'Pending' && custDoc.exists()) {
+             transaction.update(customerRef, {
+               pendingAmount: Math.max(0, (custDoc.data().pendingAmount || 0) - amount),
+               updatedAt: serverTimestamp()
+             });
+          }
+
+          // DELETE VOUCHERS
+          transaction.delete(doc(db, 'vouchers', `VCH-${editingBill.id}-SALE`));
+          transaction.delete(doc(db, 'vouchers', `VCH-${editingBill.id}-RECPT`));
+        }
+
+        // Update Bill
+        transaction.update(billRef, { 
           status,
+          isSettled: false,
           updatedAt: serverTimestamp()
         });
-        const updated = await getDoc(doc(db, 'bills', editingBill.id));
-        setEditingBill({ id: updated.id, ...updated.data() });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `bills/${editingBill.id}`);
-      }
+      });
+
+      const updated = await getDoc(doc(db, 'bills', editingBill.id));
+      setEditingBill({ id: updated.id, ...updated.data() });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bills/${editingBill.id}`);
     }
   };
 
-  const handleSettleOrder = async (mode: 'Cash' | 'UPI' | 'Credit') => {
-    if (!editingBill?.id) return;
+  const [isSettling, setIsSettling] = useState<string | null>(null);
 
+  const handleSettleOrder = async (mode: 'Cash' | 'UPI' | 'Credit' | 'Bank') => {
+    if (!editingBill?.id || isSettling) return;
+
+    setIsSettling(mode);
     const isCredit = mode === 'Credit';
     const finalPaymentMode = isCredit ? 'Pending' : mode;
 
-      try {
-        await runTransaction(db, async (transaction) => {
-          const billRef = doc(db, 'bills', editingBill.id);
-          const customerRef = doc(db, 'customers', editingBill.customerId);
-          
-          // READS FIRST
-          const billDoc = await transaction.get(billRef);
-          if (!billDoc.exists()) {
-            throw new Error("Bill does not exist anymore.");
-          }
+    try {
+      // 1. Fetch required data outside transaction
+      const [incomeSnap, cashSnap, bankSnap, debtorsGroupSnap, customerSnap, assetsGroupSnap, incomeGroupSnap] = await Promise.all([
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Sundry Debtors'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Incomes')))
+      ]);
 
-          let currentPending = 0;
-          const custDoc = await transaction.get(customerRef);
-          if (custDoc.exists()) {
-            currentPending = custDoc.data().pendingAmount || 0;
-          }
+      let incomeAccId = incomeSnap.docs[0]?.id;
+      let cashAccId = cashSnap.docs[0]?.id;
+      let bankAccId = bankSnap.docs[0]?.id;
+      let debtorsGroupId = debtorsGroupSnap.docs[0]?.id;
+      let customerAccId = customerSnap.docs[0]?.id;
+      let assetsGroupId = assetsGroupSnap.docs[0]?.id;
+      let incomeGroupId = incomeGroupSnap.docs[0]?.id;
 
-          // WRITES SECOND
-          transaction.update(billRef, { 
-            status: 'Delivered', 
-            paymentMode: finalPaymentMode,
-            isSettled: !isCredit,
-            updatedAt: serverTimestamp()
-          });
+      await runTransaction(db, async (transaction) => {
+        const billRef = doc(db, 'bills', editingBill.id);
+        const customerRef = doc(db, 'customers', editingBill.customerId);
+        
+        // --- 1. READS FIRST ---
+        const [billDoc, custDoc] = await Promise.all([
+          transaction.get(billRef),
+          transaction.get(customerRef)
+        ]);
 
-          if (isCredit && custDoc.exists()) {
-            transaction.update(customerRef, {
-              pendingAmount: currentPending + editingBill.grandTotal,
-              updatedAt: serverTimestamp()
+        if (!billDoc.exists()) throw new Error("Bill not found");
+        const oldBill = billDoc.data();
+        const wasDelivered = oldBill.status === 'Delivered';
+        const oldPaymentMode = oldBill.paymentMode;
+        const amount = oldBill.grandTotal;
+
+        // Fetch account balances inside transaction
+        const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
+        const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
+        const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
+        const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
+
+        const [incomeAccDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
+          incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
+          cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
+          bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
+          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null)
+        ]);
+
+        // --- 2. WRITES SECOND ---
+
+        // A. REVERSE OLD IMPACT (If it was previously delivered)
+        if (wasDelivered) {
+          // Reverse Service Income (Cr -> Dr)
+          if (incomeAccDoc?.exists()) {
+            transaction.update(incomeAccRef!, {
+              currentBalance: (incomeAccDoc.data().currentBalance || 0) - amount
             });
-          } else if (!isCredit) {
-            const ledgerRef = collection(db, 'ledger');
-            const newLedgerDoc = {
-              date: new Date().toISOString(),
-              type: 'Income',
-              category: 'Customer Collection',
-              partyName: editingBill.customerName,
-              partyId: editingBill.customerId,
-              description: `Payment for Token #${editingBill.billNumber} via ${mode}`,
-              amount: editingBill.grandTotal,
-              paymentMode: mode === 'UPI' ? 'UPI' : 'Cash',
-              createdAt: serverTimestamp()
-            };
-            transaction.set(doc(ledgerRef), newLedgerDoc);
           }
+          // Reverse Cash/Bank/Customer impacts
+          if (oldPaymentMode === 'Cash' && cashAccDoc?.exists()) {
+            transaction.update(cashAccRef!, { currentBalance: (cashAccDoc.data().currentBalance || 0) - amount });
+          } else if ((oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank') && bankAccDoc?.exists()) {
+            transaction.update(bankAccRef!, { currentBalance: (bankAccDoc.data().currentBalance || 0) - amount });
+          } else if (oldPaymentMode === 'Pending' && customerAccDoc?.exists()) {
+            // It was a credit sale, reverse Dr impact on customer
+            transaction.update(customerAccRef!, { currentBalance: (customerAccDoc.data().currentBalance || 0) - amount });
+          }
+        }
+
+        // B. APPLY NEW IMPACT
+        // Handle Missing Groups & Accounts
+        if (!incomeGroupId) {
+          const newGrp = doc(collection(db, 'accountGroups'));
+          transaction.set(newGrp, { name: 'Direct Incomes', type: 'Income' });
+          incomeGroupId = newGrp.id;
+        }
+        
+        let finalIncomeAccId = incomeAccId;
+        if (!incomeAccId) {
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { 
+            name: 'Service Income', 
+            groupId: incomeGroupId, 
+            openingBalance: 0, 
+            balanceType: 'Cr', 
+            currentBalance: amount,
+            createdAt: serverTimestamp() 
+          });
+          finalIncomeAccId = newAcc.id;
+        } else {
+            // Re-read current check: we already decremented if wasDelivered.
+            // But we need the UPDATED balance from our transaction buffer or just use the doc we have and adjust relative.
+            // Firestone transactions handle this.
+            const baseBal = incomeAccDoc?.exists() ? incomeAccDoc.data().currentBalance || 0 : 0;
+            const adjustedBase = wasDelivered ? baseBal - amount : baseBal;
+            transaction.update(incomeAccRef!, { currentBalance: adjustedBase + amount });
+        }
+
+        if (!assetsGroupId) {
+          const newGrp = doc(collection(db, 'accountGroups'));
+          transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+          assetsGroupId = newGrp.id;
+        }
+        
+        let finalCashAccId = cashAccId;
+        if (!cashAccId) {
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { name: 'Cash', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: mode === 'Cash' ? amount : 0, createdAt: serverTimestamp() });
+          finalCashAccId = newAcc.id;
+        } else if (cashAccDoc?.exists()) {
+            const base = cashAccDoc.data().currentBalance || 0;
+            const adjusted = (wasDelivered && oldPaymentMode === 'Cash') ? base - amount : base;
+            transaction.update(cashAccRef!, { currentBalance: adjusted + (mode === 'Cash' ? amount : 0) });
+        }
+
+        let finalBankAccId = bankAccId;
+        if (!bankAccId) {
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { name: 'Bank Account', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: (mode === 'UPI' || mode === 'Bank') ? amount : 0, createdAt: serverTimestamp() });
+          finalBankAccId = newAcc.id;
+        } else if (bankAccDoc?.exists()) {
+            const base = bankAccDoc.data().currentBalance || 0;
+            const adjusted = (wasDelivered && (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank')) ? base - amount : base;
+            transaction.update(bankAccRef!, { currentBalance: adjusted + ((mode === 'UPI' || mode === 'Bank') ? amount : 0) });
+        }
+
+        if (!debtorsGroupId) {
+          const newGrp = doc(collection(db, 'accountGroups'));
+          transaction.set(newGrp, { name: 'Sundry Debtors', parentGroupId: assetsGroupId, type: 'Asset' });
+          debtorsGroupId = newGrp.id;
+        }
+        
+        let finalCustomerAccId = customerAccId;
+        if (!customerAccId) {
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { name: oldBill.customerName, groupId: debtorsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: isCredit ? amount : 0, createdAt: serverTimestamp() });
+          finalCustomerAccId = newAcc.id;
+        } else if (customerAccDoc?.exists()) {
+            const base = customerAccDoc.data().currentBalance || 0;
+            const adjusted = (wasDelivered && oldPaymentMode === 'Pending') ? base - amount : base;
+            transaction.update(customerAccRef!, { currentBalance: adjusted + (isCredit ? amount : 0) });
+        }
+
+        // Update Bill
+        transaction.update(billRef, { 
+          status: 'Delivered', 
+          paymentMode: finalPaymentMode,
+          isSettled: !isCredit,
+          updatedAt: serverTimestamp()
         });
 
-      setShowPaymentSelection(false);
-      setEditingBill(null);
+        // Update Customer Ledger (pendingAmount field)
+        const currentPending = custDoc.exists() ? (custDoc.data().pendingAmount || 0) : 0;
+        const adjustedPending = (wasDelivered && oldPaymentMode === 'Pending') ? currentPending - amount : currentPending;
+        transaction.update(customerRef, {
+          pendingAmount: adjustedPending + (isCredit ? amount : 0),
+          updatedAt: serverTimestamp()
+        });
+
+        // --- 3. UPSERT VOUCHERS ---
+        // Sales Voucher
+        const salesVchId = `VCH-${editingBill.id}-SALE`;
+        transaction.set(doc(db, 'vouchers', salesVchId), {
+          date: new Date(),
+          type: 'Sales',
+          voucherNumber: `TRP-${oldBill.billNumber}`,
+          items: [
+            { accountId: finalCustomerAccId, accountName: oldBill.customerName, amount: amount, type: 'Dr' },
+            { accountId: finalIncomeAccId, accountName: 'Service Income', amount: amount, type: 'Cr' }
+          ],
+          narration: `Trip #${oldBill.billNumber} - ${oldBill.customerName} (${oldBill.tankerSize})`,
+          totalAmount: amount,
+          createdAt: oldBill.createdAt || serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+
+        // Receipt Voucher (if not credit)
+        const receiptVchId = `VCH-${editingBill.id}-RECPT`;
+        if (!isCredit) {
+          const debitAccId = (mode === 'UPI' || mode === 'Bank') ? finalBankAccId : finalCashAccId;
+          const debitAccName = (mode === 'UPI' || mode === 'Bank') ? 'Bank Account' : 'Cash';
+          
+          transaction.set(doc(db, 'vouchers', receiptVchId), {
+            date: new Date(),
+            type: 'Receipt',
+            voucherNumber: `REC-${oldBill.billNumber}`,
+            items: [
+              { accountId: debitAccId, accountName: debitAccName, amount: amount, type: 'Dr' },
+              { accountId: finalCustomerAccId, accountName: oldBill.customerName, amount: amount, type: 'Cr' }
+            ],
+            narration: `Payment for Token #${oldBill.billNumber} via ${mode}`,
+            totalAmount: amount,
+            createdAt: serverTimestamp()
+          });
+        } else {
+          // If it was previously receipted but now changed to credit, delete receipt voucher
+          transaction.delete(doc(db, 'vouchers', receiptVchId));
+        }
+      });
+
+      // Show "Done" state for 1 second
+      setIsSettling('DONE');
       triggerSmiley(mode === 'Credit' ? 'sad' : 'happy');
-    } catch (error) {
+      
+      setTimeout(() => {
+        setIsSettling(null);
+        setShowPaymentSelection(false);
+        setEditingBill(null);
+      }, 1000);
+
+    } catch (error: any) {
+      setIsSettling(null);
       handleFirestoreError(error, OperationType.WRITE, 'transaction');
     }
   };
 
   const handlePaymentUpdate = async (mode: typeof PAYMENT_MODES[number]) => {
-    if (editingBill?.id) {
-      const oldMode = editingBill.paymentMode;
-      
-      try {
-        if (oldMode === 'Pending' && mode !== 'Pending') {
-          await runTransaction(db, async (transaction) => {
-            const billRef = doc(db, 'bills', editingBill.id);
-            const customerRef = doc(db, 'customers', editingBill.customerId);
-            const ledgerRef = collection(db, 'ledger');
+    if (!editingBill?.id || isSettling) return;
+    
+    setIsSettling(mode);
+    const oldMode = editingBill.paymentMode;
+    const isCredit = mode === 'Pending';
+    
+    try {
+      // 1. Fetch required data outside transaction
+      const [cashSnap, bankSnap, customerSnap, assetsGroupSnap] = await Promise.all([
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets')))
+      ]);
 
-            // READS FIRST
-            const billDoc = await transaction.get(billRef);
-            if (!billDoc.exists()) {
-              throw new Error("Bill does not exist.");
-            }
+      let cashAccId = cashSnap.docs[0]?.id;
+      let bankAccId = bankSnap.docs[0]?.id;
+      let customerAccId = customerSnap.docs[0]?.id;
+      let assetsGroupId = assetsGroupSnap.docs[0]?.id;
 
-            let currentPending = 0;
-            const custDoc = await transaction.get(customerRef);
-            if (custDoc.exists()) {
-              currentPending = custDoc.data().pendingAmount || 0;
-            }
+      await runTransaction(db, async (transaction) => {
+        const billRef = doc(db, 'bills', editingBill.id);
+        const customerRef = doc(db, 'customers', editingBill.customerId);
+        
+        const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
+        const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
+        const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
 
-            // WRITES SECOND
-            transaction.update(billRef, { 
-              paymentMode: mode,
+        // --- 1. READS FIRST ---
+        const [billDoc, custDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
+          transaction.get(billRef),
+          transaction.get(customerRef),
+          cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
+          bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
+          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null)
+        ]);
+        
+        if (!billDoc.exists()) throw new Error("Bill not found");
+        const billData = billDoc.data();
+        const amount = billData.grandTotal;
+        const wasDelivered = billData.status === 'Delivered';
+
+        // --- 2. WRITES SECOND ---
+
+        if (wasDelivered) {
+          // A. REVERSE OLD PAYMENT IMPACT
+          if (oldMode === 'Cash' && cashAccDoc?.exists()) {
+            transaction.update(cashAccRef!, { currentBalance: (cashAccDoc.data().currentBalance || 0) - amount });
+          } else if ((oldMode === 'UPI' || oldMode === 'Bank Transfer' || oldMode === 'Bank') && bankAccDoc?.exists()) {
+            transaction.update(bankAccRef!, { currentBalance: (bankAccDoc.data().currentBalance || 0) - amount });
+          } else if (oldMode === 'Pending' && customerAccDoc?.exists()) {
+            transaction.update(customerAccRef!, { currentBalance: (customerAccDoc.data().currentBalance || 0) - amount });
+          }
+
+          // B. APPLY NEW PAYMENT IMPACT
+          if (!assetsGroupId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+            assetsGroupId = newGrp.id;
+          }
+          
+          let finalCashAccId = cashAccId;
+          const isNewCash = mode === 'Cash';
+          if (!cashAccId && isNewCash) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, { name: 'Cash', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: amount, createdAt: serverTimestamp() });
+            finalCashAccId = newAcc.id;
+          } else if (cashAccDoc?.exists()) {
+            const base = (cashAccDoc.data().currentBalance || 0);
+            const adjusted = (oldMode === 'Cash') ? base - amount : base;
+            transaction.update(cashAccRef!, { currentBalance: adjusted + (isNewCash ? amount : 0) });
+          }
+
+          let finalBankAccId = bankAccId;
+          const isNewBank = mode === 'UPI' || mode === 'Bank Transfer';
+          if (!bankAccId && isNewBank) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, { name: 'Bank Account', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: amount, createdAt: serverTimestamp() });
+            finalBankAccId = newAcc.id;
+          } else if (bankAccDoc?.exists()) {
+            const base = (bankAccDoc.data().currentBalance || 0);
+            const adjusted = (oldMode === 'UPI' || oldMode === 'Bank Transfer') ? base - amount : base;
+            transaction.update(bankAccRef!, { currentBalance: adjusted + (isNewBank ? amount : 0) });
+          }
+
+          if (customerAccDoc?.exists()) {
+            const base = (customerAccDoc.data().currentBalance || 0);
+            const adjusted = (oldMode === 'Pending') ? base - amount : base;
+            transaction.update(customerAccRef!, { currentBalance: adjusted + (isCredit ? amount : 0) });
+          }
+
+          // Update Customer pendingAmount field
+          if (custDoc.exists()) {
+            const currentPending = custDoc.data().pendingAmount || 0;
+            const adjustedPending = (oldMode === 'Pending') ? currentPending - amount : currentPending;
+            transaction.update(customerRef, {
+              pendingAmount: Math.max(0, adjustedPending + (isCredit ? amount : 0)),
               updatedAt: serverTimestamp()
             });
+          }
 
-            const newLedgerDoc = {
-              date: new Date().toISOString(),
-              type: 'Income',
-              category: 'Customer Collection',
-              partyName: editingBill.customerName,
-              partyId: editingBill.customerId,
-              description: `Payment for Token #${editingBill.billNumber}`,
-              amount: editingBill.grandTotal,
-              paymentMode: mode === 'Split' ? 'Cash' : (mode as any),
+          // C. UPSERT VOUCHERS
+          const receiptVchId = `VCH-${editingBill.id}-RECPT`;
+          if (!isCredit) {
+            const debitAccId = isNewBank ? finalBankAccId! : finalCashAccId!;
+            const debitAccName = isNewBank ? 'Bank Account' : 'Cash';
+            
+            transaction.set(doc(db, 'vouchers', receiptVchId), {
+              date: new Date(),
+              type: 'Receipt',
+              voucherNumber: `REC-${billData.billNumber}`,
+              items: [
+                { accountId: debitAccId, accountName: debitAccName, amount: amount, type: 'Dr' },
+                { accountId: customerAccId, accountName: billData.customerName, amount: amount, type: 'Cr' }
+              ],
+              narration: `Payment mode update for Token #${billData.billNumber} to ${mode}`,
+              totalAmount: amount,
               createdAt: serverTimestamp()
-            };
-            transaction.set(doc(ledgerRef), newLedgerDoc);
-
-            if (custDoc.exists()) {
-              transaction.update(customerRef, {
-                pendingAmount: Math.max(0, currentPending - editingBill.grandTotal),
-                updatedAt: serverTimestamp()
-              });
-            }
-          });
-        } else {
-          await updateDoc(doc(db, 'bills', editingBill.id), { 
-            paymentMode: mode,
-            updatedAt: serverTimestamp()
-          });
+            });
+          } else {
+            transaction.delete(doc(db, 'vouchers', receiptVchId));
+          }
         }
-        
-        const updated = await getDoc(doc(db, 'bills', editingBill.id));
-        setEditingBill({ id: updated.id, ...updated.data() });
-        triggerSmiley(mode === 'Pending' ? 'sad' : 'happy');
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, 'transaction');
-      }
+
+        // Bill Update
+        transaction.update(billRef, { 
+          paymentMode: mode, 
+          isSettled: !isCredit,
+          updatedAt: serverTimestamp()
+        });
+      });
+      
+      setIsSettling('DONE');
+      triggerSmiley('happy');
+      setTimeout(() => {
+        setIsSettling(null);
+        setEditingBill(null);
+      }, 1000);
+    } catch (error) {
+      setIsSettling(null);
+      handleFirestoreError(error, OperationType.UPDATE, `bills/${editingBill?.id}`);
     }
   };
 
@@ -419,8 +895,79 @@ export function Dashboard() {
 
   const handleDeleteToken = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'bills', id));
+      // 1. Fetch data outside transition
+      const [billSnap, incomeSnap, cashSnap, bankSnap] = await Promise.all([
+        getDoc(doc(db, 'bills', id)),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account')))
+      ]);
+
+      if (!billSnap.exists()) return;
+      const billData = billSnap.data();
+      const customerAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', billData.customerName)));
+
+      let incomeAccId = incomeSnap.docs[0]?.id;
+      let cashAccId = cashSnap.docs[0]?.id;
+      let bankAccId = bankSnap.docs[0]?.id;
+      let customerAccId = customerAccSnap.docs[0]?.id;
+
+      await runTransaction(db, async (transaction) => {
+        const billRef = doc(db, 'bills', id);
+        const customerRef = doc(db, 'customers', billData.customerId);
+        
+        // --- READS ---
+        const custDoc = await transaction.get(customerRef);
+        const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
+        const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
+        const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
+        const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
+
+        const [incomeAccDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
+          incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
+          cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
+          bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
+          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null)
+        ]);
+
+        // --- WRITES ---
+        if (billData.status === 'Delivered') {
+          const amount = billData.grandTotal;
+          const oldPaymentMode = billData.paymentMode;
+
+          // Reverse Income
+          if (incomeAccDoc?.exists()) {
+            transaction.update(incomeAccRef!, { currentBalance: (incomeAccDoc.data().currentBalance || 0) - amount });
+          }
+
+          // Reverse Payment
+          if (oldPaymentMode === 'Cash' && cashAccDoc?.exists()) {
+            transaction.update(cashAccRef!, { currentBalance: (cashAccDoc.data().currentBalance || 0) - amount });
+          } else if ((oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') && bankAccDoc?.exists()) {
+            transaction.update(bankAccRef!, { currentBalance: (bankAccDoc.data().currentBalance || 0) - amount });
+          } else if (oldPaymentMode === 'Pending' && customerAccDoc?.exists()) {
+            transaction.update(customerAccRef!, { currentBalance: (customerAccDoc.data().currentBalance || 0) - amount });
+          }
+
+          // Reverse Customer pendingAmount
+          if (oldPaymentMode === 'Pending' && custDoc.exists()) {
+             transaction.update(customerRef, {
+               pendingAmount: Math.max(0, (custDoc.data().pendingAmount || 0) - amount),
+               updatedAt: serverTimestamp()
+             });
+          }
+
+          // Delete Vouchers
+          transaction.delete(doc(db, 'vouchers', `VCH-${id}-SALE`));
+          transaction.delete(doc(db, 'vouchers', `VCH-${id}-RECPT`));
+        }
+
+        // Delete the bill
+        transaction.delete(billRef);
+      });
+
       setEditingBill(null);
+      setDeleteConfirm(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `bills/${id}`);
     }
@@ -554,44 +1101,130 @@ export function Dashboard() {
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
-          className="bg-blue-600 p-5 rounded-[2.5rem] text-white shadow-xl shadow-blue-200"
+          className="relative bg-white p-5 rounded-[2.5rem] text-slate-900 shadow-2xl border border-white/80 overflow-hidden group ring-1 ring-white/50"
+          style={{
+            background: "linear-gradient(135deg, rgba(255,255,255,1) 0%, rgba(248,250,255,0.95) 100%)",
+            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.05), inset 0 2px 4px 0 rgba(255, 255, 255, 0.5)"
+          }}
         >
-          <div className="bg-blue-500/50 w-10 h-10 rounded-xl flex items-center justify-center mb-4">
-            <TrendingUp size={20} />
+          {/* Mirror Shine Effect */}
+          <motion.div 
+            animate={{ x: ['150%', '-150%'] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent skew-x-20 pointer-events-none z-20"
+          />
+
+          {/* Dynamic Hourly Cash Animation Layer */}
+          <div className="absolute inset-0 pointer-events-none opacity-80 overflow-hidden">
+            {(() => {
+              const hour = new Date().getHours();
+              const theme = hour % 3;
+              if (theme === 0) {
+                return [...Array(25)].map((_, i) => (
+                  <motion.div
+                    key={`cash-wind-${i}`}
+                    initial={{ x: -80, y: Math.random() * 200, rotateZ: Math.random() * 360, scale: 0.6 + Math.random() * 0.6, opacity: 0 }}
+                    animate={{ x: 450, y: (Math.random() - 0.5) * 180 + (i * 6), rotateX: [0, 360, 720], rotateY: [0, 180, 0], rotateZ: [0, 180, 360, 540, 720], opacity: [0, 1, 1, 0] }}
+                    transition={{ duration: 0.5 + Math.random() * 0.4, repeat: Infinity, delay: Math.random() * 4, ease: "linear" }}
+                    className="absolute flex items-center justify-center"
+                  >
+                    <div className="w-12 h-6 bg-green-100 border border-green-200 rounded-sm flex items-center justify-center shadow-lg relative overflow-hidden">
+                      <div className="absolute inset-0 bg-green-500/10 mix-blend-multiply" />
+                      <span className="text-[10px] font-black text-green-600 leading-none">₹</span>
+                    </div>
+                  </motion.div>
+                ));
+              } else if (theme === 1) {
+                return [...Array(15)].map((_, i) => (
+                  <motion.div
+                    key={`cash-coins-${i}`}
+                    initial={{ x: Math.random() * 300, y: -20, opacity: 0, scale: 0.5 }}
+                    animate={{ y: 220, opacity: [0, 1, 1, 0], rotateY: 360, scale: [0.5, 1, 1, 0.5] }}
+                    transition={{ duration: 1.5 + Math.random() * 1, repeat: Infinity, delay: Math.random() * 5 }}
+                    className="absolute w-6 h-6 rounded-full bg-gradient-to-tr from-yellow-400 to-yellow-200 shadow-inner flex items-center justify-center border border-yellow-500/30"
+                  >
+                    <span className="text-[10px] font-black text-yellow-700">₹</span>
+                  </motion.div>
+                ));
+              } else {
+                return [...Array(12)].map((_, i) => (
+                  <motion.div
+                    key={`cash-bubble-${i}`}
+                    initial={{ x: Math.random() * 300, y: 180, opacity: 0, scale: 0 }}
+                    animate={{ y: -50, opacity: [0, 0.6, 0], scale: [0.5, 1.5, 0.5], x: (Math.random() * 300) + (Math.sin(i) * 50) }}
+                    transition={{ duration: 3 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 5 }}
+                    className="absolute w-8 h-8 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center backdrop-blur-[2px]"
+                  >
+                    <span className="text-sm font-black text-green-600/40">₹</span>
+                  </motion.div>
+                ));
+              }
+            })()}
           </div>
-          <div className="flex items-center gap-3 mb-1">
-            <div className="text-[10px] uppercase font-bold tracking-wider opacity-70">Today's Collection</div>
-            <motion.div
-              key={smileyMood}
-              initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
-              animate={{ 
-                scale: 1, 
-                opacity: 1, 
-                rotate: 0,
-                y: smileyMood === 'sad' ? [0, 5, 0] : [0, -5, 0]
-              }}
-              transition={{ 
-                scale: { type: "spring", stiffness: 260, damping: 20 },
-                opacity: { duration: 0.2 },
-                rotate: { type: "spring", stiffness: 260, damping: 20 },
-                y: { duration: 0.5, times: [0, 0.5, 1], ease: "easeInOut" }
-              }}
-              className="relative w-10 h-10 -mt-1"
-            >
-              <img 
-                src={
-                  smileyMood === 'happy' 
-                    ? "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Smiling%20Face%20with%20Sunglasses.png" 
-                    : smileyMood === 'sad' 
-                      ? "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Crying%20Face.png"
-                      : "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Slightly%20Smiling%20Face.png"
-                } 
-                alt="mood sticker"
-                className="w-full h-full object-contain drop-shadow-md"
-              />
-            </motion.div>
+
+          <div className="relative z-10">
+            <div className="bg-slate-900/5 w-10 h-10 rounded-xl flex items-center justify-center mb-4 border border-white/20">
+              <Banknote size={20} className="text-slate-700" />
+            </div>
+            <div className="flex items-center gap-3 mb-1 justify-between">
+              <div className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Cash in Hand</div>
+              <div className="flex gap-1">
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setQuickVoucher({ type: 'Receipt', paymentMethod: 'Cash' });
+                  }}
+                  className="w-6 h-6 rounded-lg bg-green-500 text-white shadow-sm flex items-center justify-center hover:bg-green-600 transition-colors"
+                  title="Add Cash"
+                >
+                  <Plus size={14} />
+                </button>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setQuickVoucher({ type: 'Payment', paymentMethod: 'Cash' });
+                  }}
+                  className="w-6 h-6 rounded-lg bg-red-500 text-white shadow-sm flex items-center justify-center hover:bg-red-600 transition-colors"
+                  title="Spend Cash"
+                >
+                  <Minus size={14} />
+                </button>
+              </div>
+              <motion.div
+                key={smileyMood}
+                initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
+                animate={{ 
+                  scale: 1.2, 
+                  opacity: 1, 
+                  rotate: 0,
+                  y: smileyMood === 'sad' ? [0, 5, 0] : [0, -5, 0]
+                }}
+                transition={{ 
+                  scale: { type: "spring", stiffness: 260, damping: 20 },
+                  opacity: { duration: 0.2 },
+                  rotate: { type: "spring", stiffness: 260, damping: 20 },
+                  y: { duration: 0.5, times: [0, 0.5, 1], ease: "easeInOut" }
+                }}
+                className="relative w-10 h-10 -mt-1"
+              >
+                <img 
+                  src={
+                    smileyMood === 'happy' 
+                      ? "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Smiling%20Face%20with%20Sunglasses.png" 
+                      : smileyMood === 'sad' 
+                        ? "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Crying%20Face.png"
+                        : "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Slightly%20Smiling%20Face.png"
+                  } 
+                  alt="mood sticker"
+                  className="w-full h-full object-contain drop-shadow-md"
+                />
+              </motion.div>
+            </div>
+            <div className="text-3xl font-display font-black text-slate-900 tracking-tight">
+              <span className="text-xl mr-1 text-slate-400">₹</span>
+              {Number(stats.cashBalance).toLocaleString()}
+            </div>
           </div>
-          <div className="text-2xl font-display font-bold">{formatCurrency(stats.todayCollection)}</div>
         </motion.div>
 
         <motion.div 
@@ -600,15 +1233,83 @@ export function Dashboard() {
           transition={{ delay: 0.1 }}
           className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden h-[180px] group"
         >
+          {/* Dynamic Hourly Bank Animation Layer */}
+          <div className="absolute inset-0 pointer-events-none opacity-40 overflow-hidden">
+            {(() => {
+              const hour = new Date().getHours();
+              const theme = (hour + 1) % 3;
+              if (theme === 0) {
+                return [...Array(6)].map((_, i) => (
+                  <motion.div
+                    key={`bank-pulse-${i}`}
+                    initial={{ scale: 0, opacity: 0.8 }}
+                    animate={{ scale: 4, opacity: 0 }}
+                    transition={{ duration: 3, repeat: Infinity, delay: i * 0.5, ease: "easeOut" }}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border border-blue-400/20 rounded-full"
+                  />
+                ));
+              } else if (theme === 1) {
+                return [...Array(8)].map((_, i) => (
+                  <motion.div
+                    key={`bank-cards-${i}`}
+                    initial={{ x: 400, y: Math.random() * 150, opacity: 0, rotate: -20 }}
+                    animate={{ x: -100, opacity: [0, 0.4, 0.4, 0], rotate: 10 }}
+                    transition={{ duration: 4 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 4 }}
+                    className="absolute w-14 h-9 bg-gradient-to-br from-blue-400/20 to-indigo-500/20 border border-white/10 rounded-md backdrop-blur-[1px]"
+                  >
+                    <div className="absolute top-2 left-2 w-3 h-2 bg-yellow-400/20 rounded-sm" />
+                  </motion.div>
+                ));
+              } else {
+                return [...Array(20)].map((_, i) => (
+                  <motion.div
+                    key={`bank-matrix-${i}`}
+                    initial={{ y: -20, opacity: 0 }}
+                    animate={{ y: 200, opacity: [0, 0.8, 0] }}
+                    transition={{ duration: 1 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
+                    className="absolute text-[8px] font-mono text-blue-400/40"
+                    style={{ left: `${i * 5}%` }}
+                  >
+                    {Math.random() > 0.5 ? '1' : '0'}
+                  </motion.div>
+                ));
+              }
+            })()}
+          </div>
+
           <div className="bg-orange-100 text-orange-600 w-10 h-10 rounded-xl flex items-center justify-center mb-4 relative z-20">
-            <Clock size={20} />
+            <Smartphone size={20} />
           </div>
           
-          <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-1 relative z-20">Total Pending</div>
+          <div className="flex items-center justify-between mb-1 relative z-20">
+            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Bank Balance</div>
+            <div className="flex gap-1">
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank' });
+                }}
+                className="w-6 h-6 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 flex items-center justify-center transition-colors"
+                title="Add to Bank"
+              >
+                <Plus size={14} />
+              </button>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank' });
+                }}
+                className="w-6 h-6 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors"
+                title="Spend from Bank"
+              >
+                <Minus size={14} />
+              </button>
+            </div>
+          </div>
           
           <div className="text-4xl font-display font-black text-slate-800 flex items-baseline relative z-20">
             <span className="text-xl mr-1 text-orange-500">₹</span>
-            {Math.floor(stats.totalPending).toString().split('').map((digit, i) => {
+            {Math.floor(stats.bankBalance).toString().split('').map((digit, i) => {
               const isEaten = removedDigits.includes(i);
               return (
                 <motion.span
@@ -929,45 +1630,96 @@ export function Dashboard() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-1 gap-3 relative">
                 <button 
                   onClick={() => handleSettleOrder('Cash')}
-                  className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-slate-900 text-left transition-all group"
+                  disabled={isSettling !== null}
+                  className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all group overflow-hidden relative ${
+                    isSettling === 'Cash' ? 'border-green-600 bg-green-50' : 
+                    isSettling === 'DONE' ? 'opacity-50 border-slate-100' : 'border-slate-100 hover:border-slate-900'
+                  }`}
                 >
-                  <div className="w-12 h-12 bg-green-50 text-green-600 rounded-xl flex items-center justify-center group-hover:bg-green-600 group-hover:text-white transition-all">
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
+                    isSettling === 'Cash' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-600 group-hover:bg-green-600 group-hover:text-white'
+                  }`}>
                     <Banknote size={24} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <div className="font-bold text-slate-900">Cash Received</div>
                     <div className="text-[10px] text-slate-400 font-bold uppercase">Deposited to Cash Account</div>
                   </div>
+                  {isSettling === 'Cash' && (
+                    <div className="absolute inset-0 bg-green-600/5 flex items-center justify-center">
+                      <div className="animate-spin h-5 w-5 border-2 border-green-600 border-t-transparent rounded-full" />
+                    </div>
+                  )}
                 </button>
 
                 <button 
                   onClick={() => handleSettleOrder('UPI')}
-                  className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-slate-900 text-left transition-all group"
+                  disabled={isSettling !== null}
+                  className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all group overflow-hidden relative ${
+                    isSettling === 'UPI' ? 'border-blue-600 bg-blue-50' : 
+                    isSettling === 'DONE' ? 'opacity-50 border-slate-100' : 'border-slate-100 hover:border-slate-900'
+                  }`}
                 >
-                  <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all">
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
+                    isSettling === 'UPI' ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white'
+                  }`}>
                     <Smartphone size={24} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <div className="font-bold text-slate-900">UPI / Bank Transfer</div>
                     <div className="text-[10px] text-slate-400 font-bold uppercase">Deposited to Bank Account</div>
                   </div>
+                  {isSettling === 'UPI' && (
+                    <div className="absolute inset-0 bg-blue-600/5 flex items-center justify-center">
+                      <div className="animate-spin h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full" />
+                    </div>
+                  )}
                 </button>
 
                 <button 
                   onClick={() => handleSettleOrder('Credit')}
-                  className="flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-100 hover:border-slate-900 text-left transition-all group"
+                  disabled={isSettling !== null}
+                  className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all group overflow-hidden relative ${
+                    isSettling === 'Credit' ? 'border-orange-600 bg-orange-50' : 
+                    isSettling === 'DONE' ? 'opacity-50 border-slate-100' : 'border-slate-100 hover:border-slate-900'
+                  }`}
                 >
-                  <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-xl flex items-center justify-center group-hover:bg-orange-600 group-hover:text-white transition-all">
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
+                    isSettling === 'Credit' ? 'bg-orange-600 text-white' : 'bg-orange-50 text-orange-600 group-hover:bg-orange-600 group-hover:text-white'
+                  }`}>
                     <History size={24} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <div className="font-bold text-slate-900">Credit (Udhaar)</div>
                     <div className="text-[10px] text-slate-400 font-bold uppercase">Added to Customer Due Account</div>
                   </div>
+                  {isSettling === 'Credit' && (
+                    <div className="absolute inset-0 bg-orange-600/5 flex items-center justify-center">
+                      <div className="animate-spin h-5 w-5 border-2 border-orange-600 border-t-transparent rounded-full" />
+                    </div>
+                  )}
                 </button>
+
+                {isSettling === 'DONE' && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.8 }} 
+                    animate={{ opacity: 1, scale: 1 }} 
+                    className="absolute inset-0 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-50 rounded-[2rem] border-4 border-green-500 shadow-2xl shadow-green-100"
+                  >
+                    <motion.div 
+                      initial={{ scale: 0 }} 
+                      animate={{ scale: [0, 1.2, 1] }} 
+                      transition={{ duration: 0.4 }}
+                      className="w-16 h-16 bg-green-500 text-white rounded-full flex items-center justify-center shadow-lg"
+                    >
+                      <CheckCircle2 size={40} />
+                    </motion.div>
+                    <span className="font-display font-black text-2xl text-green-600 uppercase tracking-widest">Done!</span>
+                  </motion.div>
+                )}
               </div>
 
               <button 
@@ -1043,15 +1795,47 @@ export function Dashboard() {
 
                 {/* Show payment status but not editable here */}
                 {editingBill.status === 'Delivered' && (
-                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-                    <div>
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Payment Mode</div>
-                      <div className="font-bold text-slate-900">{editingBill.paymentMode}</div>
+                  <div className="space-y-3">
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Payment Mode</div>
+                        <div className="font-bold text-slate-900">{editingBill.paymentMode}</div>
+                      </div>
+                      {editingBill.paymentMode === 'Pending' ? (
+                        <div className="bg-orange-100 text-orange-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Balance Due</div>
+                      ) : (
+                        <div className="bg-green-100 text-green-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Paid</div>
+                      )}
                     </div>
-                    {editingBill.paymentMode === 'Pending' ? (
-                      <div className="bg-orange-100 text-orange-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Balance Due</div>
-                    ) : (
-                      <div className="bg-green-100 text-green-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Paid</div>
+
+                    {editingBill.paymentMode === 'Pending' && (
+                      <div className="grid grid-cols-2 gap-2 relative">
+                        <button 
+                          onClick={() => handlePaymentUpdate('Cash')}
+                          disabled={isSettling !== null}
+                          className="flex items-center justify-center gap-2 py-3 bg-green-50 text-green-600 rounded-xl font-bold border border-green-100 hover:bg-green-600 hover:text-white transition-all disabled:opacity-50"
+                        >
+                          <Banknote size={16} /> Cash
+                        </button>
+                        <button 
+                          onClick={() => handlePaymentUpdate('UPI')}
+                          disabled={isSettling !== null}
+                          className="flex items-center justify-center gap-2 py-3 bg-blue-50 text-blue-600 rounded-xl font-bold border border-blue-100 hover:bg-blue-600 hover:text-white transition-all disabled:opacity-50"
+                        >
+                          <Smartphone size={16} /> UPI
+                        </button>
+
+                        {isSettling === 'DONE' && (
+                          <motion.div 
+                            initial={{ opacity: 0, scale: 0.9 }} 
+                            animate={{ opacity: 1, scale: 1 }} 
+                            className="absolute inset-0 bg-white flex items-center justify-center gap-2 z-50 rounded-xl border-2 border-green-500"
+                          >
+                            <CheckCircle2 size={20} className="text-green-500" />
+                            <span className="font-bold text-green-600">Done!</span>
+                          </motion.div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1136,6 +1920,136 @@ export function Dashboard() {
         title="Delete Trip Token?"
         message={`Are you sure you want to delete Token #${deleteConfirm?.number}? This will remove the record from history, but will NOT reverse manual payments or existing customer balance changes.`}
       />
+
+      {/* Quick Voucher Modal */}
+      <AnimatePresence>
+        {quickVoucher && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => setQuickVoucher(null)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" 
+            />
+            <motion.div
+              layoutId="quick-voucher"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 pb-4 flex justify-between items-center border-b border-slate-50">
+                <div className="flex items-center gap-4">
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${
+                    quickVoucher.type === 'Payment' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'
+                  }`}>
+                    {quickVoucher.type === 'Payment' ? <Minus size={28} /> : <Plus size={28} />}
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-display font-black text-slate-900 leading-tight">
+                      Quick {quickVoucher.type}
+                    </h2>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                      Via {quickVoucher.paymentMethod} • {new Date(quickVchForm.date).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setQuickVoucher(null)}
+                  className="w-12 h-12 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-slate-100 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleQuickVchSubmit} className="p-8 pt-6 flex flex-col gap-6">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 block ml-1">Select Account</label>
+                  <select 
+                    required
+                    value={quickVchForm.accountId}
+                    onChange={e => setQuickVchForm({ ...quickVchForm, accountId: e.target.value })}
+                    className="w-full h-16 bg-slate-50 rounded-2xl px-5 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none transition-all font-bold appearance-none"
+                  >
+                    <option value="">-- Choose Account --</option>
+                    {accounts
+                      .filter(acc => {
+                         if (acc.name === 'Cash' || acc.name === 'Bank Account') return false;
+                         return true;
+                      })
+                      .sort((a,b) => a.name.localeCompare(b.name))
+                      .map(acc => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({acc.balanceType})
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 block ml-1">Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-slate-300">₹</span>
+                      <input
+                        required
+                        type="number"
+                        placeholder="0.00"
+                        value={quickVchForm.amount}
+                        onChange={e => setQuickVchForm({ ...quickVchForm, amount: e.target.value })}
+                        className="w-full h-16 bg-slate-50 rounded-2xl pl-10 pr-5 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none transition-all font-black text-xl"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 block ml-1">Date</label>
+                    <input
+                      type="date"
+                      value={quickVchForm.date}
+                      onChange={e => setQuickVchForm({ ...quickVchForm, date: e.target.value })}
+                      className="w-full h-16 bg-slate-50 rounded-2xl px-5 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none transition-all font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 block ml-1">Narration / Remarks</label>
+                  <input
+                    placeholder="Enter short description..."
+                    value={quickVchForm.description}
+                    onChange={e => setQuickVchForm({ ...quickVchForm, description: e.target.value })}
+                    className="w-full h-16 bg-slate-50 rounded-2xl px-5 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none transition-all font-bold"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSavingQuickVch}
+                  className={`w-full h-16 rounded-[1.25rem] font-display font-black text-lg tracking-wide shadow-lg transition-all flex items-center justify-center gap-3 ${
+                    quickVoucher.type === 'Payment' 
+                      ? 'bg-red-600 text-white hover:bg-red-700 shadow-red-200' 
+                      : 'bg-green-600 text-white hover:bg-green-700 shadow-green-200'
+                  } disabled:opacity-50`}
+                >
+                  {isSavingQuickVch ? (
+                    <>
+                      <div className="w-5 h-5 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={24} />
+                      Save Quick {quickVoucher.type}
+                    </>
+                  )}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
