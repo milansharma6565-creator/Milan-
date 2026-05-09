@@ -47,6 +47,7 @@ export interface Tractor {
   id?: string;
   name: string;
   vehicleNumber: string;
+  insuranceExpiry: any;
   createdAt: any;
 }
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc, getDocs, where } from 'firebase/firestore';
-import { Tractor, DieselLog, MaintenanceLog, Bill } from '../types';
+import { Tractor, DieselLog, MaintenanceLog, Bill, Account } from '../types';
 import { 
   Plus, 
   Truck, 
@@ -20,7 +20,8 @@ import {
   CheckCircle2,
   Smartphone,
   Banknote,
-  History
+  History,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
@@ -41,6 +42,19 @@ export function TractorDiesel() {
   const [dieselLogs, setDieselLogs] = useState<DieselLog[]>([]);
   const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [quickPayment, setQuickPayment] = useState<{
+    tractor: Tractor;
+    type: 'Diesel' | 'Maintenance';
+    amount: string;
+    liters: string;
+    paymentMode: 'Cash' | 'Bank' | 'Udhaar';
+    selectedAccountId: string;
+    accountName: string;
+    description: string;
+  } | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  const pressTimer = React.useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const unsubTractors = onSnapshot(collection(db, 'tractors'), 
@@ -59,12 +73,17 @@ export function TractorDiesel() {
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'bills')
     );
+    const unsubAcc = onSnapshot(collection(db, 'accounts'),
+      (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'accounts')
+    );
 
     return () => {
       unsubTractors();
       unsubDiesel();
       unsubMaint();
       unsubBills();
+      unsubAcc();
     };
   }, []);
 
@@ -93,7 +112,8 @@ export function TractorDiesel() {
 
   const [newTractor, setNewTractor] = useState({
     name: '',
-    vehicleNumber: ''
+    vehicleNumber: '',
+    insuranceExpiry: ''
   });
 
   const tractorStats = React.useMemo(() => {
@@ -423,6 +443,183 @@ export function TractorDiesel() {
     }
   };
 
+  const handleQuickPaymentSubmit = async () => {
+    if (!quickPayment || !quickPayment.amount) return;
+
+    try {
+      const { tractor, type, amount, liters, paymentMode, selectedAccountId, accountName, description } = quickPayment;
+      const amountNum = Number(amount);
+      const litersNum = Number(liters || 0);
+
+      const mode = paymentMode;
+      const finalAccountName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : accountName;
+      
+      const [expAccName, expAccGroup] = type === 'Diesel' ? ['Fuel Expense', 'Direct Expenses'] : ['Maintenance', 'Direct Expenses'];
+
+      const [expenseAccSnap, paymentAccSnap, assetsGrpSnap, expGrpSnap, liabGrpSnap] = await Promise.all([
+        getDocs(query(collection(db, 'accounts'), where('name', '==', expAccName))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', finalAccountName))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', expAccGroup))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')))
+      ]);
+      
+      let expenseAccId = expenseAccSnap.docs[0]?.id;
+      let paymentAccId = paymentAccSnap.docs[0]?.id;
+      let assetsGrpId = assetsGrpSnap.docs[0]?.id;
+      let expGrpId = expGrpSnap.docs[0]?.id;
+      let liabGrpId = liabGrpSnap.docs[0]?.id;
+
+      await runTransaction(db, async (transaction) => {
+        const expAccRef = expenseAccId ? doc(db, 'accounts', expenseAccId) : null;
+        const paymentAccRef = paymentAccId ? doc(db, 'accounts', paymentAccId) : null;
+
+        const [expAccDoc, paymentAccDoc] = await Promise.all([
+          expAccRef ? transaction.get(expAccRef) : Promise.resolve(null),
+          paymentAccRef ? transaction.get(paymentAccRef) : Promise.resolve(null)
+        ]);
+
+        if (mode !== 'Udhaar') {
+          const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
+          if (currentBal < amountNum) {
+            throw new Error(`INSUFFICIENT_FUNDS:${finalAccountName}:${currentBal}`);
+          }
+        }
+
+        if (!expGrpId) {
+          const newGrp = doc(collection(db, 'accountGroups'));
+          transaction.set(newGrp, { name: expAccGroup, type: 'Expense' });
+          expGrpId = newGrp.id;
+        }
+
+        let finalExpAccId = expenseAccId;
+        if (!expenseAccId) {
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { 
+            name: expAccName, 
+            groupId: expGrpId, 
+            openingBalance: 0, 
+            balanceType: 'Dr', 
+            currentBalance: amountNum, 
+            createdAt: serverTimestamp() 
+          });
+          finalExpAccId = newAcc.id;
+        } else if (expAccDoc?.exists()) {
+          transaction.update(expAccRef!, {
+            currentBalance: (expAccDoc.data().currentBalance || 0) + amountNum
+          });
+        }
+
+        let finalPaymentAccId = paymentAccId;
+        if (mode === 'Udhaar') {
+          // If udhaar, we use the selected account (already fetched above or provided by user)
+          if (!liabGrpId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability' });
+            liabGrpId = newGrp.id;
+          }
+          if (!paymentAccId) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, {
+              name: finalAccountName,
+              groupId: liabGrpId,
+              openingBalance: 0,
+              balanceType: 'Cr',
+              currentBalance: amountNum,
+              createdAt: serverTimestamp()
+            });
+            finalPaymentAccId = newAcc.id;
+          } else if (paymentAccDoc?.exists()) {
+            transaction.update(paymentAccRef!, {
+              currentBalance: (paymentAccDoc.data().currentBalance || 0) + amountNum
+            });
+          }
+        } else {
+          if (!assetsGrpId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+            assetsGrpId = newGrp.id;
+          }
+          if (!paymentAccId) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, {
+              name: finalAccountName,
+              groupId: assetsGrpId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: -amountNum,
+              createdAt: serverTimestamp()
+            });
+            finalPaymentAccId = newAcc.id;
+          } else if (paymentAccDoc?.exists()) {
+            transaction.update(paymentAccRef!, {
+              currentBalance: (paymentAccDoc.data().currentBalance || 0) - amountNum
+            });
+          }
+        }
+
+        // LOG
+        const logRef = doc(collection(db, type === 'Diesel' ? 'dieselLogs' : 'maintenanceLogs'));
+        transaction.set(logRef, {
+          tractorId: tractor.id!,
+          tractorName: tractor.name,
+          date: new Date().toISOString().split('T')[0],
+          ...(type === 'Diesel' ? { liters: litersNum } : {}),
+          amount: amountNum,
+          description: description || `Quick ${type}`,
+          paymentMode: mode,
+          paymentAccountId: finalPaymentAccId,
+          createdAt: serverTimestamp()
+        });
+
+        // VOUCHER
+        const voucherRef = doc(collection(db, 'vouchers'));
+        transaction.set(voucherRef, {
+          date: new Date(),
+          type: mode === 'Udhaar' ? 'Journal' : 'Payment',
+          voucherNumber: `${type === 'Diesel' ? 'FL' : 'MT'}-${Math.floor(Date.now()/1000)}`,
+          items: [
+            { accountId: finalExpAccId, accountName: expAccName, amount: amountNum, type: 'Dr' },
+            { accountId: finalPaymentAccId, accountName: finalAccountName, amount: amountNum, type: 'Cr' }
+          ],
+          narration: `Quick ${type} for ${tractor.name}: ${description} [${mode}]`,
+          totalAmount: amountNum,
+          createdAt: serverTimestamp()
+        });
+      });
+
+      setQuickPayment(null);
+      setShowDone(true);
+      setTimeout(() => setShowDone(false), 3000);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('INSUFFICIENT_FUNDS:')) {
+        const [_, acc, bal] = error.message.split(':');
+        alert(`Failed: Insufficient balance in ${acc}. \nAvailable: ₹${Number(bal).toLocaleString()}`);
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, 'quick-payment');
+      }
+    }
+  };
+
+  const handlePressStart = (tractor: Tractor) => {
+    pressTimer.current = setTimeout(() => {
+      setQuickPayment({
+        tractor,
+        type: 'Diesel',
+        amount: '',
+        liters: '',
+        paymentMode: 'Cash',
+        selectedAccountId: '',
+        accountName: '',
+        description: 'Quick log'
+      });
+    }, 500);
+  };
+
+  const handlePressEnd = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+  };
+
   const generateReport = async () => {
     if (!tractors) return;
 
@@ -565,7 +762,7 @@ export function TractorDiesel() {
 
   const handleAddTractor = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTractor.name || !newTractor.vehicleNumber) return;
+    if (!newTractor.name || !newTractor.vehicleNumber || !newTractor.insuranceExpiry) return;
 
     try {
       await addDoc(collection(db, 'tractors'), {
@@ -573,7 +770,7 @@ export function TractorDiesel() {
         createdAt: serverTimestamp()
       });
       setShowTractorModal(false);
-      setNewTractor({ name: '', vehicleNumber: '' });
+      setNewTractor({ name: '', vehicleNumber: '', insuranceExpiry: '' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'tractors');
     }
@@ -648,7 +845,12 @@ export function TractorDiesel() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               key={tractor.id} 
-              className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden relative"
+              onMouseDown={() => handlePressStart(tractor)}
+              onMouseUp={handlePressEnd}
+              onMouseLeave={handlePressEnd}
+              onTouchStart={() => handlePressStart(tractor)}
+              onTouchEnd={handlePressEnd}
+              className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden relative cursor-pointer active:scale-95 transition-all select-none"
             >
               <div className="absolute top-0 right-0 p-8 opacity-[0.03] scale-[2.5] pointer-events-none">
                 <Truck size={48} />
@@ -1155,6 +1357,16 @@ export function TractorDiesel() {
                     onChange={e => setNewTractor({...newTractor, vehicleNumber: e.target.value})}
                   />
                 </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Insurance Expiry Date</label>
+                  <input
+                    required
+                    type="date"
+                    className="material-input h-14 bg-slate-50"
+                    value={newTractor.insuranceExpiry}
+                    onChange={e => setNewTractor({...newTractor, insuranceExpiry: e.target.value})}
+                  />
+                </div>
                 <button type="submit" className="w-full material-btn material-btn-primary h-14 mt-4 shadow-lg shadow-blue-100">
                   Add Tractor
                 </button>
@@ -1179,6 +1391,150 @@ export function TractorDiesel() {
             : `Are you sure you want to delete this ${deleteConfirm?.type === 'diesel' ? 'diesel' : 'maintenance'} log? Ledger entries created with this log will not be deleted.`
         }
       />
+
+      {/* Quick Payment Modal */}
+      <AnimatePresence>
+        {quickPayment && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative overflow-hidden"
+            >
+               <div className="absolute top-0 right-0 p-8 opacity-[0.03] scale-[2] pointer-events-none">
+                {quickPayment.type === 'Diesel' ? <Fuel size={48} /> : <Wrench size={48} />}
+              </div>
+
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-display font-black text-slate-900">Quick {quickPayment.type}</h2>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">{quickPayment.tractor.name}</p>
+                </div>
+                <button onClick={() => setQuickPayment(null)} className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                 {/* Type Selector */}
+                 <div className="flex bg-slate-50 p-1 rounded-xl">
+                  {['Diesel', 'Maintenance'].map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setQuickPayment({...quickPayment, type: t as any})}
+                      className={`flex-1 py-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${quickPayment.type === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Amount Input */}
+                <div className="grid grid-cols-1 gap-3">
+                   {quickPayment.type === 'Diesel' && (
+                     <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Liters</label>
+                        <input
+                          type="number" step="0.01"
+                          placeholder="0.00"
+                          className="material-input h-14 bg-slate-50 font-black"
+                          value={quickPayment.liters}
+                          onChange={e => setQuickPayment({...quickPayment, liters: e.target.value})}
+                        />
+                     </div>
+                   )}
+                   <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Total Amount (₹)</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        className="material-input h-16 text-2xl font-black bg-slate-50"
+                        value={quickPayment.amount}
+                        onChange={e => setQuickPayment({...quickPayment, amount: e.target.value})}
+                        autoFocus
+                      />
+                   </div>
+                </div>
+
+                {/* Mode Selector */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block ml-1">Payment Mode</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'Cash', label: 'Cash', icon: Banknote },
+                      { id: 'Bank', label: 'Bank', icon: Smartphone },
+                      { id: 'Udhaar', label: 'Udhaar', icon: History }
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setQuickPayment({ 
+                          ...quickPayment, 
+                          paymentMode: m.id as any,
+                          accountName: m.id === 'Udhaar' ? 'Shrinath Petrol Pump' : '' 
+                        })}
+                        className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 transition-all ${
+                          quickPayment.paymentMode === m.id 
+                            ? 'border-slate-900 bg-slate-50 text-slate-900' 
+                            : 'border-slate-50 text-slate-300'
+                        }`}
+                      >
+                        <m.icon size={18} />
+                        <span className="text-[9px] font-black uppercase">{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Udhaar Account Selector */}
+                {quickPayment.paymentMode === 'Udhaar' && (
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Select Credit Account</label>
+                    <select
+                      className="material-input h-14 bg-slate-50 appearance-none text-sm font-bold"
+                      value={quickPayment.accountName}
+                      onChange={e => setQuickPayment({...quickPayment, accountName: e.target.value})}
+                    >
+                      <option value="Shrinath Petrol Pump">Shrinath Petrol Pump (Default)</option>
+                      {accounts
+                        .filter(a => a.name !== 'Cash' && a.name !== 'Bank Account' && a.name !== 'Fuel Expense' && a.name !== 'Maintenance')
+                        .sort((a,b) => a.name.localeCompare(b.name))
+                        .map(acc => (
+                          <option key={acc.id} value={acc.name}>{acc.name}</option>
+                        ))
+                      }
+                    </select>
+                  </div>
+                )}
+
+                <button 
+                  onClick={handleQuickPaymentSubmit}
+                  disabled={!quickPayment.amount}
+                  className="w-full h-16 bg-slate-900 text-white rounded-[1.5rem] font-display font-black text-lg shadow-xl shadow-slate-200 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100"
+                >
+                  Pay Now
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Success Notification */}
+      <AnimatePresence>
+        {showDone && (
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[300] bg-green-600 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3"
+          >
+            <CheckCircle2 size={24} />
+            <span className="font-display font-black">Entry Saved Successfully!</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

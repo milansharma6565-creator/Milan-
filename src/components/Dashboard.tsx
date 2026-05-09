@@ -3,32 +3,34 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc, where } from 'firebase/firestore';
 import { Customer, Driver, Bill, Tractor, Account } from '../types';
 import { 
-  TrendingUp, 
+  ArrowUpRight, 
+  ArrowDownLeft, 
+  Plus, 
+  MessageSquare, 
+  Trash2, 
+  AlertCircle, 
+  Printer, 
   Clock, 
   CheckCircle2, 
-  IndianRupee, 
-  ArrowRight,
-  TrendingDown,
-  Droplets,
-  Users,
-  AlertCircle,
-  Printer,
-  Smartphone,
+  Users, 
+  Truck, 
   Banknote,
+  Smartphone,
   History,
+  X,
   Share2,
-  Trash2,
-  MessageSquare,
-  Truck,
-  RefreshCw,
-  Plus,
   Minus,
-  X
+  RefreshCw,
+  Droplets,
+  ArrowRight,
+  ShieldCheck,
+  BellRing,
+  Coins
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { formatCurrency, PAYMENT_MODES, generateBillNumber } from '../constants';
-import { startOfDay, endOfDay, subDays, format } from 'date-fns';
+import { startOfDay, endOfDay, subDays, format, differenceInDays } from 'date-fns';
 import { useReactToPrint } from 'react-to-print';
 import { ThermalInvoice } from './ThermalInvoice';
 import { toJpeg } from 'html-to-image';
@@ -49,7 +51,32 @@ export function Dashboard() {
     type: 'Receipt' | 'Payment';
     paymentMethod: 'Cash' | 'Bank';
     targetAccountName?: string;
+    customerId?: string;
   } | null>(null);
+  const [showInsuranceAlert, setShowInsuranceAlert] = useState(false);
+  const [insuranceAlerts, setInsuranceAlerts] = useState<Tractor[]>([]);
+
+  useEffect(() => {
+    if (tractors.length > 0) {
+      const today = startOfDay(new Date());
+      const alerts = tractors.filter(t => {
+        if (!t.insuranceExpiry) return false;
+        const expiryDate = new Date(t.insuranceExpiry);
+        const daysToExpiry = differenceInDays(expiryDate, today);
+        return daysToExpiry <= 10 && daysToExpiry >= 0;
+      });
+      
+      if (alerts.length > 0) {
+        setInsuranceAlerts(alerts);
+        const lastAlertDate = sessionStorage.getItem('lastInsuranceAlertDate');
+        const todayStr = today.toISOString().split('T')[0];
+        if (lastAlertDate !== todayStr) {
+          setShowInsuranceAlert(true);
+          sessionStorage.setItem('lastInsuranceAlertDate', todayStr);
+        }
+      }
+    }
+  }, [tractors]);
   const [quickVchForm, setQuickVchForm] = useState({
     accountId: '',
     amount: '',
@@ -248,12 +275,10 @@ export function Dashboard() {
       const isPayment = quickVoucher.type === 'Payment';
       let paymentAccName = quickVoucher.paymentMethod === 'Cash' ? 'Cash' : 'Bank Account';
       
-      // Override if specific account is targeted
       if (quickVoucher.targetAccountName) {
         paymentAccName = quickVoucher.targetAccountName;
       }
       
-      // Add current time to the selected date
       const entryDate = new Date(quickVchForm.date);
       const now = new Date();
       entryDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
@@ -278,42 +303,44 @@ export function Dashboard() {
 
         const payBal = payDoc.data()?.currentBalance || 0;
         const otherBal = otherDoc.data()?.currentBalance || 0;
+        const otherData = otherDoc.data();
 
-        // Validation for Payments: Cash/Bank should not go negative
         if (isPayment && payBal < amount) {
           throw new Error(`INSUFFICIENT_FUNDS:${paymentAccName}:${payBal}`);
         }
 
-        // Update Balances
         if (isPayment) {
           transaction.update(paymentAccRef, { currentBalance: payBal - amount });
           transaction.update(otherAccRef, { 
-            currentBalance: otherBal + (otherDoc.data()?.balanceType === 'Dr' ? amount : -amount) 
+            currentBalance: otherBal + (otherData?.balanceType === 'Dr' ? amount : -amount) 
           });
         } else {
           transaction.update(paymentAccRef, { currentBalance: payBal + amount });
           transaction.update(otherAccRef, { 
-            currentBalance: otherBal + (otherDoc.data()?.balanceType === 'Cr' ? amount : -amount) 
+            currentBalance: otherBal + (otherData?.balanceType === 'Cr' ? amount : -amount) 
           });
+          
+          if (otherData?.customerId) {
+            const custRef = doc(db, 'customers', otherData.customerId);
+            const custDoc = await transaction.get(custRef);
+            if (custDoc.exists()) {
+              transaction.update(custRef, {
+                pendingAmount: Math.max(0, (custDoc.data().pendingAmount || 0) - amount),
+                updatedAt: serverTimestamp()
+              });
+            }
+          }
         }
 
-        // Record Voucher
         const vchRef = doc(collection(db, 'vouchers'));
-        const sourceAccName = isPayment ? otherDoc.data()?.name : paymentAccName;
-        const targetAccName = isPayment ? paymentAccName : otherDoc.data()?.name;
-        
-        // For Receipts, we want the "Other" account to be particulars in Daybook
-        // So we put the Other account as index 0 if it's a receipt? 
-        // Actually Daybook particulars logic in Ledger.tsx uses items[0]
-        
         transaction.set(vchRef, {
           date: entryDate,
           type: quickVoucher.type,
           voucherNumber: `QV-${Math.floor(Date.now()/1000)}`,
           items: [
             { 
-              accountId: isPayment ? quickVchForm.accountId : quickVchForm.accountId, // Wait, I need to be careful
-              accountName: isPayment ? otherDoc.data()?.name : otherDoc.data()?.name,
+              accountId: quickVchForm.accountId, 
+              accountName: otherData?.name,
               amount, 
               type: isPayment ? 'Dr' : 'Cr' 
             },
@@ -324,7 +351,7 @@ export function Dashboard() {
               type: isPayment ? 'Cr' : 'Dr' 
             }
           ],
-          narration: quickVchForm.description.trim() || `Quick ${quickVoucher.type} tracking via ${quickVoucher.paymentMethod}`,
+          narration: quickVchForm.description.trim() || `Quick ${quickVoucher.type} via ${quickVoucher.paymentMethod}`,
           totalAmount: amount,
           createdAt: serverTimestamp()
         });
@@ -1103,65 +1130,83 @@ export function Dashboard() {
       </header>
 
       {/* Hero Stats */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
-          className="relative bg-white p-5 rounded-[2.5rem] text-slate-900 shadow-2xl border border-white/80 overflow-hidden group ring-1 ring-white/50"
+          className="relative bg-white p-5 rounded-[2.5rem] text-slate-900 shadow-2xl border border-white/80 overflow-hidden group ring-1 ring-white/50 min-h-[200px]"
           style={{
-            background: "linear-gradient(135deg, rgba(255,255,255,1) 0%, rgba(248,250,255,0.95) 100%)",
-            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.05), inset 0 2px 4px 0 rgba(255, 255, 255, 0.5)"
+            background: "linear-gradient(135deg, #ffffff 0%, #f0f2f5 100%)",
+            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.08), inset 0 0 0 1px rgba(255,255,255,0.4)"
           }}
         >
           {/* Mirror Shine Effect */}
           <motion.div 
             animate={{ x: ['150%', '-150%'] }}
-            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent skew-x-20 pointer-events-none z-20"
+            transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/80 to-transparent skew-x-20 pointer-events-none z-20"
           />
 
-          {/* Dynamic Hourly Cash Animation Layer */}
-          <div className="absolute inset-0 pointer-events-none opacity-80 overflow-hidden">
+          {/* Dynamic Hourly Cash Animation: Blowing Money */}
+          <div className="absolute inset-0 pointer-events-none opacity-90 overflow-hidden">
             {(() => {
               const hour = new Date().getHours();
-              const theme = hour % 3;
+              const theme = hour % 4;
+              
               if (theme === 0) {
+                // Blowing 500/2000 notes style
                 return [...Array(25)].map((_, i) => (
                   <motion.div
-                    key={`cash-wind-${i}`}
-                    initial={{ x: -80, y: Math.random() * 200, rotateZ: Math.random() * 360, scale: 0.6 + Math.random() * 0.6, opacity: 0 }}
-                    animate={{ x: 450, y: (Math.random() - 0.5) * 180 + (i * 6), rotateX: [0, 360, 720], rotateY: [0, 180, 0], rotateZ: [0, 180, 360, 540, 720], opacity: [0, 1, 1, 0] }}
-                    transition={{ duration: 0.5 + Math.random() * 0.4, repeat: Infinity, delay: Math.random() * 4, ease: "linear" }}
-                    className="absolute flex items-center justify-center"
+                    key={`v-wind-${i}`}
+                    initial={{ x: -100, y: Math.random() * 250, rotateZ: Math.random() * 360, opacity: 0 }}
+                    animate={{ x: 500, y: (Math.random() - 0.5) * 150 + (i * 8), rotateZ: [0, 360, 720], opacity: [0, 1, 1, 0] }}
+                    transition={{ duration: 1 + Math.random() * 1.5, repeat: Infinity, delay: Math.random() * 5, ease: "linear" }}
+                    className="absolute"
                   >
-                    <div className="w-12 h-6 bg-green-100 border border-green-200 rounded-sm flex items-center justify-center shadow-lg relative overflow-hidden">
-                      <div className="absolute inset-0 bg-green-500/10 mix-blend-multiply" />
-                      <span className="text-[10px] font-black text-green-600 leading-none">₹</span>
+                    <div className={`w-14 h-7 border-2 rounded-[2px] flex items-center justify-center shadow-lg ${i % 2 === 0 ? 'bg-pink-100 border-pink-200' : 'bg-green-100 border-green-200'}`}>
+                      <div className={`text-[10px] font-black italic ${i % 2 === 0 ? 'text-pink-700' : 'text-green-700'}`}>₹{i % 2 === 0 ? '2000' : '500'}</div>
                     </div>
                   </motion.div>
                 ));
               } else if (theme === 1) {
-                return [...Array(15)].map((_, i) => (
+                // Falling Coins Rain
+                return [...Array(20)].map((_, i) => (
                   <motion.div
-                    key={`cash-coins-${i}`}
-                    initial={{ x: Math.random() * 300, y: -20, opacity: 0, scale: 0.5 }}
-                    animate={{ y: 220, opacity: [0, 1, 1, 0], rotateY: 360, scale: [0.5, 1, 1, 0.5] }}
-                    transition={{ duration: 1.5 + Math.random() * 1, repeat: Infinity, delay: Math.random() * 5 }}
-                    className="absolute w-6 h-6 rounded-full bg-gradient-to-tr from-yellow-400 to-yellow-200 shadow-inner flex items-center justify-center border border-yellow-500/30"
+                    key={`rain-${i}`}
+                    initial={{ y: -50, x: Math.random() * 350, opacity: 0 }}
+                    animate={{ y: 300, opacity: [0, 1, 1, 0], rotateY: 360 }}
+                    transition={{ duration: 1.5 + Math.random() * 1, repeat: Infinity, delay: Math.random() * 4 }}
+                    className="absolute w-6 h-6 bg-yellow-400 rounded-full border-2 border-yellow-500 flex items-center justify-center shadow-md shadow-yellow-900/20"
                   >
-                    <span className="text-[10px] font-black text-yellow-700">₹</span>
+                    <Coins size={12} className="text-yellow-700" />
+                  </motion.div>
+                ));
+              } else if (theme === 2) {
+                // Floating Bill Bundles
+                return [...Array(12)].map((_, i) => (
+                  <motion.div
+                    key={`bubble-${i}`}
+                    initial={{ scale: 0, x: Math.random() * 300, y: 220, opacity: 0 }}
+                    animate={{ scale: [1, 1.2, 1], y: -50, x: (Math.random() * 300) + Math.sin(i) * 50, opacity: [0, 0.8, 0] }}
+                    transition={{ duration: 3 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 5 }}
+                    className="absolute w-12 h-6 bg-green-500/10 border border-green-500/20 rounded shadow-sm backdrop-blur-[1px] flex items-center justify-center"
+                  >
+                    <Banknote size={14} className="text-green-600/30" />
                   </motion.div>
                 ));
               } else {
-                return [...Array(12)].map((_, i) => (
+                // Fast Blowing Dollars (User's specific request)
+                return [...Array(30)].map((_, i) => (
                   <motion.div
-                    key={`cash-bubble-${i}`}
-                    initial={{ x: Math.random() * 300, y: 180, opacity: 0, scale: 0 }}
-                    animate={{ y: -50, opacity: [0, 0.6, 0], scale: [0.5, 1.5, 0.5], x: (Math.random() * 300) + (Math.sin(i) * 50) }}
-                    transition={{ duration: 3 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 5 }}
-                    className="absolute w-8 h-8 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center backdrop-blur-[2px]"
+                    key={`dollar-fast-${i}`}
+                    initial={{ x: -100, y: Math.random() * 250, rotateZ: Math.random() * 360, scale: 0.5, opacity: 0 }}
+                    animate={{ x: 500, y: (Math.random() - 0.5) * 100 + (i * 6), rotateX: [0, 720], rotateZ: [0, 1080], opacity: [0, 1, 1, 0] }}
+                    transition={{ duration: 0.5 + Math.random() * 0.5, repeat: Infinity, delay: Math.random() * 3, ease: "linear" }}
+                    className="absolute"
                   >
-                    <span className="text-sm font-black text-green-600/40">₹</span>
+                    <div className="w-12 h-6 bg-green-100 border border-green-300 rounded-[1px] flex items-center justify-center shadow-sm">
+                      <span className="text-xs font-black text-green-700">$</span>
+                    </div>
                   </motion.div>
                 ));
               }
@@ -1169,65 +1214,34 @@ export function Dashboard() {
           </div>
 
           <div className="relative z-10">
-            <div className="bg-slate-900/5 w-10 h-10 rounded-xl flex items-center justify-center mb-4 border border-white/20">
-              <Banknote size={20} className="text-slate-700" />
+            <div className="bg-slate-900/10 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 border border-white/40 shadow-inner">
+              <Banknote size={24} className="text-slate-800" />
             </div>
             <div className="flex items-center gap-3 mb-1 justify-between">
-              <div className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Cash in Hand</div>
-              <div className="flex gap-1">
+              <div className="text-[11px] uppercase font-black tracking-widest text-slate-500">Cash in Hand</div>
+              <div className="flex gap-2 relative z-30">
                 <button 
                   onClick={(e) => {
                     e.stopPropagation();
                     setQuickVoucher({ type: 'Receipt', paymentMethod: 'Cash' });
                   }}
-                  className="w-6 h-6 rounded-lg bg-green-500 text-white shadow-sm flex items-center justify-center hover:bg-green-600 transition-colors"
-                  title="Add Cash"
+                  className="w-8 h-8 rounded-xl bg-green-600 text-white shadow-lg shadow-green-100 flex items-center justify-center hover:bg-green-700 transition-all active:scale-90"
                 >
-                  <Plus size={14} />
+                  <Plus size={18} />
                 </button>
                 <button 
                   onClick={(e) => {
                     e.stopPropagation();
                     setQuickVoucher({ type: 'Payment', paymentMethod: 'Cash' });
                   }}
-                  className="w-6 h-6 rounded-lg bg-red-500 text-white shadow-sm flex items-center justify-center hover:bg-red-600 transition-colors"
-                  title="Spend Cash"
+                  className="w-8 h-8 rounded-xl bg-red-600 text-white shadow-lg shadow-red-100 flex items-center justify-center hover:bg-red-700 transition-all active:scale-90"
                 >
-                  <Minus size={14} />
+                  <Minus size={18} />
                 </button>
               </div>
-              <motion.div
-                key={smileyMood}
-                initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
-                animate={{ 
-                  scale: 1.2, 
-                  opacity: 1, 
-                  rotate: 0,
-                  y: smileyMood === 'sad' ? [0, 5, 0] : [0, -5, 0]
-                }}
-                transition={{ 
-                  scale: { type: "spring", stiffness: 260, damping: 20 },
-                  opacity: { duration: 0.2 },
-                  rotate: { type: "spring", stiffness: 260, damping: 20 },
-                  y: { duration: 0.5, times: [0, 0.5, 1], ease: "easeInOut" }
-                }}
-                className="relative w-10 h-10 -mt-1"
-              >
-                <img 
-                  src={
-                    smileyMood === 'happy' 
-                      ? "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Smiling%20Face%20with%20Sunglasses.png" 
-                      : smileyMood === 'sad' 
-                        ? "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Crying%20Face.png"
-                        : "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Slightly%20Smiling%20Face.png"
-                  } 
-                  alt="mood sticker"
-                  className="w-full h-full object-contain drop-shadow-md"
-                />
-              </motion.div>
             </div>
-            <div className="text-3xl font-display font-black text-slate-900 tracking-tight">
-              <span className="text-xl mr-1 text-slate-400">₹</span>
+            <div className="text-4xl font-display font-black text-slate-900 tracking-tight flex items-baseline">
+              <span className="text-2xl mr-1 text-slate-400">₹</span>
               {Number(stats.cashBalance).toLocaleString()}
             </div>
           </div>
@@ -1237,173 +1251,210 @@ export function Dashboard() {
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1 }}
-          className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden h-[180px] group"
+          className="relative bg-white p-5 rounded-[2.5rem] border border-orange-100 shadow-xl overflow-hidden group min-h-[200px]"
         >
-          {/* Dynamic Hourly Bank Animation Layer */}
-          <div className="absolute inset-0 pointer-events-none opacity-40 overflow-hidden">
-            {(() => {
-              const hour = new Date().getHours();
-              const theme = hour % 3;
-              if (theme === 0) {
-                return [...Array(12)].map((_, i) => (
-                  <motion.div
-                    key={`bank1-pulse-${i}`}
-                    initial={{ scale: 0, opacity: 0.8 }}
-                    animate={{ scale: 4, opacity: 0 }}
-                    transition={{ duration: 3, repeat: Infinity, delay: i * 0.5, ease: "easeOut" }}
-                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border border-blue-400/20 rounded-full"
-                  />
-                ));
-              } else if (theme === 1) {
-                return [...Array(8)].map((_, i) => (
-                  <motion.div
-                    key={`bank1-cards-${i}`}
-                    initial={{ x: 400, y: Math.random() * 150, opacity: 0, rotate: -20 }}
-                    animate={{ x: -100, opacity: [0, 0.4, 0.4, 0], rotate: 10 }}
-                    transition={{ duration: 4 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 4 }}
-                    className="absolute w-14 h-9 bg-gradient-to-br from-blue-400/20 to-indigo-500/20 border border-white/10 rounded-md backdrop-blur-[1px]"
-                  >
-                    <div className="absolute top-2 left-2 w-3 h-2 bg-yellow-400/20 rounded-sm" />
-                  </motion.div>
-                ));
-              } else {
-                return [...Array(20)].map((_, i) => (
-                  <motion.div
-                    key={`bank1-matrix-${i}`}
-                    initial={{ y: -20, opacity: 0 }}
-                    animate={{ y: 200, opacity: [0, 0.8, 0] }}
-                    transition={{ duration: 1 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
-                    className="absolute text-[8px] font-mono text-blue-400/40"
-                    style={{ left: `${i * 5}%` }}
-                  >
-                    {Math.random() > 0.5 ? '1' : '0'}
-                  </motion.div>
-                ));
-              }
-            })()}
+          {/* Digits Eating Animation Layer */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
+             <motion.div 
+               animate={{ 
+                 x: eatingState === 'walking' ? [-100, 150] : 150,
+                 y: eatingState === 'idle' ? [200, 500] : 50,
+                 scale: eatingState === 'eating' ? [1, 1.2, 1] : 1
+               }}
+               className="absolute"
+             >
+               <Users size={120} />
+             </motion.div>
           </div>
 
-          <div className="bg-blue-100 text-blue-600 w-10 h-10 rounded-xl flex items-center justify-center mb-4 relative z-20">
-            <Smartphone size={20} />
-          </div>
-          
-          <div className="flex items-center justify-between mb-1 relative z-20">
-            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">BARODA 129</div>
-            <div className="flex gap-1">
+          <div className="relative z-10">
+            <div className="bg-orange-50 text-orange-600 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
+              <Users size={24} />
+            </div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[11px] uppercase font-black tracking-widest text-slate-400">Total Pending (Ledger)</div>
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
-                  setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: 'BARODA129' });
+                  setQuickVoucher({ type: 'Receipt', paymentMethod: 'Cash', customerId: 'ALL_CUSTOMERS' }); 
                 }}
-                className="w-6 h-6 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 flex items-center justify-center transition-colors shadow-sm"
-                title="Add to Bank"
+                className="w-10 h-10 rounded-xl bg-orange-600 text-white shadow-lg shadow-orange-100 flex items-center justify-center hover:bg-orange-700 transition-all"
               >
-                <Plus size={14} />
-              </button>
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: 'BARODA129' });
-                }}
-                className="w-6 h-6 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors shadow-sm"
-                title="Spend from Bank"
-              >
-                <Minus size={14} />
+                <Plus size={20} />
               </button>
             </div>
+            <div className="text-4xl font-display font-black text-slate-900 tracking-tight flex items-baseline">
+              <span className="text-2xl mr-1 text-orange-400">₹</span>
+              <div className="flex">
+                {Math.floor(stats.totalPending).toString().split('').map((digit, i) => (
+                  <motion.span
+                    key={i}
+                    animate={removedDigits.includes(i) ? { 
+                      y: -100, 
+                      opacity: 0, 
+                      scale: 0,
+                      rotate: 45 
+                    } : { y: 0, opacity: 1, scale: 1 }}
+                    className="inline-block"
+                  >
+                    {digit}
+                  </motion.span>
+                ))}
+              </div>
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Updates direct to ledger accounts</p>
           </div>
-          
-          <div className="text-3xl font-display font-black text-slate-800 flex items-baseline relative z-20">
-            <span className="text-lg mr-1 text-blue-500">₹</span>
-            {(() => {
-              const acc = accounts.find(a => a.name === 'BARODA129');
-              return formatCurrency(acc?.currentBalance || 0).replace('₹', '');
-            })()}
+        </motion.div>
+
+        {/* Bank Bubbles Row */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-white p-5 rounded-[2.5rem] border border-blue-50 shadow-xl overflow-hidden min-h-[180px] relative"
+        >
+          {/* Dynamic Hourly Bank Animation Layer */}
+          <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
+             {(() => {
+               const hour = new Date().getHours();
+               const theme = hour % 3;
+               if (theme === 0) {
+                 return [...Array(15)].map((_, i) => (
+                   <motion.div
+                     key={`bank1-dots-${i}`}
+                     initial={{ scale: 0, opacity: 0 }}
+                     animate={{ scale: [0, 1.5, 0], opacity: [0, 1, 0] }}
+                     transition={{ duration: 2, repeat: Infinity, delay: Math.random() * 5 }}
+                     className="absolute w-2 h-2 bg-blue-600 rounded-full"
+                     style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
+                   />
+                 ));
+               } else if (theme === 1) {
+                 return [...Array(10)].map((_, i) => (
+                   <motion.div
+                     key={`bank1-rings-${i}`}
+                     initial={{ scale: 0.5, opacity: 0.8 }}
+                     animate={{ scale: 3, opacity: 0 }}
+                     transition={{ duration: 3, repeat: Infinity, delay: i * 0.5 }}
+                     className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-blue-400 rounded-full"
+                   />
+                 ));
+               } else {
+                 return [...Array(12)].map((_, i) => (
+                   <motion.div
+                     key={`bank1-bars-${i}`}
+                     initial={{ height: 0 }}
+                     animate={{ height: [10, 40, 10] }}
+                     transition={{ duration: 1, repeat: Infinity, delay: Math.random() }}
+                     className="absolute bottom-0 w-2 bg-blue-400/40 rounded-t"
+                     style={{ left: `${i * 8 + 5}%` }}
+                   />
+                 ));
+               }
+             })()}
+          </div>
+
+          <div className="relative z-10">
+            <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-blue-100">
+              <Smartphone size={20} />
+            </div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Baroda 129</div>
+              <div className="flex gap-1">
+                <button 
+                  onClick={() => setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: 'BARODA129' })}
+                  className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                >
+                  <Plus size={16} />
+                </button>
+                <button 
+                  onClick={() => setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: 'BARODA129' })}
+                  className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                >
+                  <Minus size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="text-3xl font-display font-black text-slate-900 flex items-baseline">
+              <span className="text-xl mr-1 text-blue-600">₹</span>
+              {formatCurrency(accounts.find(a => a.name === 'BARODA129')?.currentBalance || 0).replace('₹', '')}
+            </div>
           </div>
         </motion.div>
 
         <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }} 
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.2 }}
-          className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden h-[180px] group"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-white p-5 rounded-[2.5rem] border border-blue-50 shadow-xl overflow-hidden min-h-[180px] relative"
         >
           {/* Dynamic Hourly Bank 2 Animation Layer */}
-          <div className="absolute inset-0 pointer-events-none opacity-40 overflow-hidden">
-            {(() => {
-              const hour = new Date().getHours();
-              const theme = (hour + 1) % 3;
-              if (theme === 0) {
-                return [...Array(6)].map((_, i) => (
-                  <motion.div
-                    key={`bank2-pulse-${i}`}
-                    initial={{ scale: 0, opacity: 0.8 }}
-                    animate={{ scale: 4, opacity: 0 }}
-                    transition={{ duration: 3, repeat: Infinity, delay: i * 0.5, ease: "easeOut" }}
-                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border border-orange-400/20 rounded-full"
-                  />
-                ));
-              } else if (theme === 1) {
-                return [...Array(15)].map((_, i) => (
-                  <motion.div
-                    key={`bank2-rings-${i}`}
-                    initial={{ x: Math.random() * 300, y: 180, opacity: 0 }}
-                    animate={{ y: -20, opacity: [0, 0.5, 0] }}
-                    transition={{ duration: 2 + Math.random() * 2, repeat: Infinity }}
-                    className="absolute w-4 h-4 rounded-full border-2 border-orange-500/20"
-                  />
-                ));
-              } else {
-                return [...Array(25)].map((_, i) => (
-                  <motion.div
-                    key={`bank2-dots-${i}`}
-                    initial={{ scale: 0 }}
-                    animate={{ scale: [0, 1.2, 0], opacity: [0, 1, 0], x: Math.random() * 10 - 5, y: Math.random() * 10 - 5 }}
-                    transition={{ duration: 2, repeat: Infinity, delay: Math.random() * 3 }}
-                    className="absolute w-1 h-1 bg-orange-500/30 rounded-full"
-                    style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
-                  />
-                ));
-              }
-            })()}
+          <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
+             {(() => {
+               const hour = new Date().getHours();
+               const theme = (hour + 1) % 3;
+               if (theme === 0) {
+                 return [...Array(20)].map((_, i) => (
+                   <motion.div
+                     key={`bank2-matrix-${i}`}
+                     initial={{ y: -20, opacity: 0 }}
+                     animate={{ y: 200, opacity: [0, 1, 0] }}
+                     transition={{ duration: 1 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
+                     className="absolute text-[8px] font-mono text-blue-600"
+                     style={{ left: `${i * 5}%` }}
+                   >
+                     {Math.random() > 0.5 ? '1' : '0'}
+                   </motion.div>
+                 ));
+               } else if (theme === 1) {
+                 return [...Array(10)].map((_, i) => (
+                   <motion.div
+                     key={`bank2-pulses-${i}`}
+                     initial={{ scale: 0, opacity: 0.8 }}
+                     animate={{ scale: 4, opacity: 0 }}
+                     transition={{ duration: 3, repeat: Infinity, delay: i * 0.5 }}
+                     className="absolute bottom-4 right-4 w-10 h-10 border-2 border-blue-400 rounded-full"
+                   />
+                 ));
+               } else {
+                 return [...Array(15)].map((_, i) => (
+                   <motion.div
+                     key={`bank2-waves-${i}`}
+                     animate={{ x: [0, 10, 0], y: [0, -10, 0] }}
+                     transition={{ duration: 2, repeat: Infinity, delay: i * 0.1 }}
+                     className="absolute w-3 h-3 bg-blue-300/30 rounded-full"
+                     style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
+                   />
+                 ));
+               }
+             })()}
           </div>
 
-          <div className="bg-orange-100 text-orange-600 w-10 h-10 rounded-xl flex items-center justify-center mb-4 relative z-20">
-            <Smartphone size={20} />
-          </div>
-          
-          <div className="flex items-center justify-between mb-1 relative z-20">
-            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">BARODA 934</div>
-            <div className="flex gap-1">
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: 'BARODA934' });
-                }}
-                className="w-6 h-6 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 flex items-center justify-center transition-colors shadow-sm"
-                title="Add to Bank"
-              >
-                <Plus size={14} />
-              </button>
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: 'BARODA934' });
-                }}
-                className="w-6 h-6 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors shadow-sm"
-                title="Spend from Bank"
-              >
-                <Minus size={14} />
-              </button>
+          <div className="relative z-10">
+            <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-blue-100">
+              <Smartphone size={20} />
             </div>
-          </div>
-          
-          <div className="text-3xl font-display font-black text-slate-800 flex items-baseline relative z-20">
-            <span className="text-lg mr-1 text-orange-500">₹</span>
-            {(() => {
-              const acc = accounts.find(a => a.name === 'BARODA934');
-              return formatCurrency(acc?.currentBalance || 0).replace('₹', '');
-            })()}
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Baroda 934</div>
+              <div className="flex gap-1">
+                <button 
+                  onClick={() => setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: 'BARODA934' })}
+                  className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                >
+                  <Plus size={16} />
+                </button>
+                <button 
+                  onClick={() => setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: 'BARODA934' })}
+                  className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                >
+                  <Minus size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="text-3xl font-display font-black text-slate-900 flex items-baseline">
+              <span className="text-xl mr-1 text-blue-600">₹</span>
+              {formatCurrency(accounts.find(a => a.name === 'BARODA934')?.currentBalance || 0).replace('₹', '')}
+            </div>
           </div>
         </motion.div>
       </div>
@@ -1428,6 +1479,64 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Quick Receipt Modal Check */}
+      <AnimatePresence>
+        {showInsuranceAlert && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6">
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.8, opacity: 0, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[3rem] p-8 shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-12 opacity-[0.03] scale-[3] pointer-events-none">
+                <ShieldCheck size={48} />
+              </div>
+              
+              <div className="text-center mb-8 relative">
+                <div className="w-20 h-20 bg-orange-100 text-orange-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-100">
+                  <BellRing size={40} className="animate-bounce" />
+                </div>
+                <h2 className="text-3xl font-display font-black text-slate-900 leading-tight">Insurance Renewal!</h2>
+                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+              </div>
+
+              <div className="space-y-4 max-h-[300px] overflow-y-auto mb-8 pr-2">
+                {insuranceAlerts.map(t => {
+                  const daysLeft = differenceInDays(new Date(t.insuranceExpiry), new Date());
+                  return (
+                    <div key={t.id} className="bg-slate-50 p-4 rounded-3xl border border-slate-100 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-slate-400">
+                          <Truck size={20} />
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-900">{t.name}</div>
+                          <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{t.vehicleNumber}</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`text-sm font-black ${daysLeft <= 3 ? 'text-red-500' : 'text-orange-500'}`}>
+                          {daysLeft === 0 ? 'Expires Today!' : `${daysLeft} Days Left`}
+                        </div>
+                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button 
+                onClick={() => setShowInsuranceAlert(false)}
+                className="w-full h-16 bg-slate-900 text-white rounded-2xl font-display font-black text-lg shadow-xl shadow-slate-200 active:scale-95 transition-all"
+              >
+                Okay, I'll Check
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Booking Requests */}
       <AnimatePresence>
@@ -1953,6 +2062,63 @@ export function Dashboard() {
         message={`Are you sure you want to delete Token #${deleteConfirm?.number}? This will remove the record from history, but will NOT reverse manual payments or existing customer balance changes.`}
       />
 
+      <AnimatePresence>
+        {showInsuranceAlert && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6">
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.8, opacity: 0, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[3rem] p-8 shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-12 opacity-[0.03] scale-[3] pointer-events-none">
+                <ShieldCheck size={48} />
+              </div>
+              
+              <div className="text-center mb-8 relative">
+                <div className="w-20 h-20 bg-orange-100 text-orange-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-100">
+                  <BellRing size={40} className="animate-bounce" />
+                </div>
+                <h2 className="text-3xl font-display font-black text-slate-900 leading-tight">Insurance Renewal!</h2>
+                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+              </div>
+
+              <div className="space-y-4 max-h-[300px] overflow-y-auto mb-8 pr-2">
+                {insuranceAlerts.map(t => {
+                  const daysLeft = differenceInDays(new Date(t.insuranceExpiry), new Date());
+                  return (
+                    <div key={t.id} className="bg-slate-50 p-4 rounded-3xl border border-slate-100 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-slate-400">
+                          <Truck size={20} />
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-900">{t.name}</div>
+                          <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{t.vehicleNumber}</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`text-sm font-black ${daysLeft <= 3 ? 'text-red-500' : 'text-orange-500'}`}>
+                          {daysLeft === 0 ? 'Expires Today!' : `${daysLeft} Days Left`}
+                        </div>
+                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button 
+                onClick={() => setShowInsuranceAlert(false)}
+                className="w-full h-16 bg-slate-900 text-white rounded-2xl font-display font-black text-lg shadow-xl shadow-slate-200 active:scale-95 transition-all"
+              >
+                Okay, I'll Check
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Quick Voucher Modal */}
       <AnimatePresence>
         {quickVoucher && (
@@ -2008,6 +2174,9 @@ export function Dashboard() {
                     {accounts
                       .filter(acc => {
                          if (acc.name === 'Cash' || acc.name === 'Bank Account') return false;
+                         if (quickVoucher.customerId === 'ALL_CUSTOMERS') {
+                           return acc.group === 'Sundry Debtors' || customers.some(c => c.name === acc.name || c.id === acc.customerId);
+                         }
                          return true;
                       })
                       .sort((a,b) => a.name.localeCompare(b.name))
