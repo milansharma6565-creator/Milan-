@@ -48,6 +48,7 @@ export function Dashboard() {
   const [quickVoucher, setQuickVoucher] = useState<{
     type: 'Receipt' | 'Payment';
     paymentMethod: 'Cash' | 'Bank';
+    targetAccountName?: string;
   } | null>(null);
   const [quickVchForm, setQuickVchForm] = useState({
     accountId: '',
@@ -245,7 +246,12 @@ export function Dashboard() {
     try {
       const amount = Number(quickVchForm.amount);
       const isPayment = quickVoucher.type === 'Payment';
-      const paymentAccName = quickVoucher.paymentMethod === 'Cash' ? 'Cash' : 'Bank Account';
+      let paymentAccName = quickVoucher.paymentMethod === 'Cash' ? 'Cash' : 'Bank Account';
+      
+      // Override if specific account is targeted
+      if (quickVoucher.targetAccountName) {
+        paymentAccName = quickVoucher.targetAccountName;
+      }
       
       // Add current time to the selected date
       const entryDate = new Date(quickVchForm.date);
@@ -1237,11 +1243,11 @@ export function Dashboard() {
           <div className="absolute inset-0 pointer-events-none opacity-40 overflow-hidden">
             {(() => {
               const hour = new Date().getHours();
-              const theme = (hour + 1) % 3;
+              const theme = hour % 3;
               if (theme === 0) {
-                return [...Array(6)].map((_, i) => (
+                return [...Array(12)].map((_, i) => (
                   <motion.div
-                    key={`bank-pulse-${i}`}
+                    key={`bank1-pulse-${i}`}
                     initial={{ scale: 0, opacity: 0.8 }}
                     animate={{ scale: 4, opacity: 0 }}
                     transition={{ duration: 3, repeat: Infinity, delay: i * 0.5, ease: "easeOut" }}
@@ -1251,7 +1257,7 @@ export function Dashboard() {
               } else if (theme === 1) {
                 return [...Array(8)].map((_, i) => (
                   <motion.div
-                    key={`bank-cards-${i}`}
+                    key={`bank1-cards-${i}`}
                     initial={{ x: 400, y: Math.random() * 150, opacity: 0, rotate: -20 }}
                     animate={{ x: -100, opacity: [0, 0.4, 0.4, 0], rotate: 10 }}
                     transition={{ duration: 4 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 4 }}
@@ -1263,7 +1269,7 @@ export function Dashboard() {
               } else {
                 return [...Array(20)].map((_, i) => (
                   <motion.div
-                    key={`bank-matrix-${i}`}
+                    key={`bank1-matrix-${i}`}
                     initial={{ y: -20, opacity: 0 }}
                     animate={{ y: 200, opacity: [0, 0.8, 0] }}
                     transition={{ duration: 1 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
@@ -1277,19 +1283,19 @@ export function Dashboard() {
             })()}
           </div>
 
-          <div className="bg-orange-100 text-orange-600 w-10 h-10 rounded-xl flex items-center justify-center mb-4 relative z-20">
+          <div className="bg-blue-100 text-blue-600 w-10 h-10 rounded-xl flex items-center justify-center mb-4 relative z-20">
             <Smartphone size={20} />
           </div>
           
           <div className="flex items-center justify-between mb-1 relative z-20">
-            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Bank Balance</div>
+            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">BARODA 129</div>
             <div className="flex gap-1">
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
-                  setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank' });
+                  setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: 'BARODA129' });
                 }}
-                className="w-6 h-6 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 flex items-center justify-center transition-colors"
+                className="w-6 h-6 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 flex items-center justify-center transition-colors shadow-sm"
                 title="Add to Bank"
               >
                 <Plus size={14} />
@@ -1297,9 +1303,9 @@ export function Dashboard() {
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
-                  setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank' });
+                  setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: 'BARODA129' });
                 }}
-                className="w-6 h-6 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors"
+                className="w-6 h-6 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors shadow-sm"
                 title="Spend from Bank"
               >
                 <Minus size={14} />
@@ -1307,72 +1313,98 @@ export function Dashboard() {
             </div>
           </div>
           
-          <div className="text-4xl font-display font-black text-slate-800 flex items-baseline relative z-20">
-            <span className="text-xl mr-1 text-orange-500">₹</span>
-            {Math.floor(stats.bankBalance).toString().split('').map((digit, i) => {
-              const isEaten = removedDigits.includes(i);
-              return (
-                <motion.span
-                  key={i}
-                  initial={{ opacity: 1, y: 0 }}
-                  animate={{ 
-                    opacity: isEaten ? 0 : 1,
-                    y: isEaten ? -40 : 0,
-                    scale: isEaten ? 0 : 1,
-                    rotate: isEaten ? [0, 10, -10, 0] : 0
-                  }}
-                  transition={{ 
-                    duration: 0.8, 
-                    type: 'spring',
-                    rotate: { type: 'keyframes' }
-                  }}
-                  className="inline-block"
-                >
-                  {digit}
-                </motion.span>
-              );
-            })}
+          <div className="text-3xl font-display font-black text-slate-800 flex items-baseline relative z-20">
+            <span className="text-lg mr-1 text-blue-500">₹</span>
+            {(() => {
+              const acc = accounts.find(a => a.name === 'BARODA129');
+              return formatCurrency(acc?.currentBalance || 0).replace('₹', '');
+            })()}
+          </div>
+        </motion.div>
+
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }} 
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.2 }}
+          className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden h-[180px] group"
+        >
+          {/* Dynamic Hourly Bank 2 Animation Layer */}
+          <div className="absolute inset-0 pointer-events-none opacity-40 overflow-hidden">
+            {(() => {
+              const hour = new Date().getHours();
+              const theme = (hour + 1) % 3;
+              if (theme === 0) {
+                return [...Array(6)].map((_, i) => (
+                  <motion.div
+                    key={`bank2-pulse-${i}`}
+                    initial={{ scale: 0, opacity: 0.8 }}
+                    animate={{ scale: 4, opacity: 0 }}
+                    transition={{ duration: 3, repeat: Infinity, delay: i * 0.5, ease: "easeOut" }}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border border-orange-400/20 rounded-full"
+                  />
+                ));
+              } else if (theme === 1) {
+                return [...Array(15)].map((_, i) => (
+                  <motion.div
+                    key={`bank2-rings-${i}`}
+                    initial={{ x: Math.random() * 300, y: 180, opacity: 0 }}
+                    animate={{ y: -20, opacity: [0, 0.5, 0] }}
+                    transition={{ duration: 2 + Math.random() * 2, repeat: Infinity }}
+                    className="absolute w-4 h-4 rounded-full border-2 border-orange-500/20"
+                  />
+                ));
+              } else {
+                return [...Array(25)].map((_, i) => (
+                  <motion.div
+                    key={`bank2-dots-${i}`}
+                    initial={{ scale: 0 }}
+                    animate={{ scale: [0, 1.2, 0], opacity: [0, 1, 0], x: Math.random() * 10 - 5, y: Math.random() * 10 - 5 }}
+                    transition={{ duration: 2, repeat: Infinity, delay: Math.random() * 3 }}
+                    className="absolute w-1 h-1 bg-orange-500/30 rounded-full"
+                    style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
+                  />
+                ));
+              }
+            })()}
           </div>
 
-          {/* Baal Hanuman Animation - Sticker Style */}
-          <motion.div
-            initial={{ x: 280, y: 40, opacity: 0 }}
-            animate={{ 
-              x: eatingState === 'walking' ? 120 : eatingState === 'idle' ? 280 : 80,
-              y: eatingState === 'sitting' || eatingState === 'eating' ? 50 : 30,
-              opacity: 1,
-              scale: eatingState === 'eating' ? [1.4, 1.55, 1.4] : 1.4,
-            }}
-            transition={{ 
-              x: { duration: eatingState === 'walking' ? 3 : 1, ease: "easeOut" },
-              scale: { type: 'keyframes', duration: 0.5, repeat: eatingState === 'eating' ? Infinity : 0 }
-            }}
-            className="absolute bottom-4 right-0 w-28 h-28 pointer-events-none z-10"
-          >
-            <div className="relative w-full h-full">
-              <img 
-                src="https://raw.githubusercontent.com/msharma6565/assets/main/hanuman_kid_hd.png" 
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/People/Child.png";
+          <div className="bg-orange-100 text-orange-600 w-10 h-10 rounded-xl flex items-center justify-center mb-4 relative z-20">
+            <Smartphone size={20} />
+          </div>
+          
+          <div className="flex items-center justify-between mb-1 relative z-20">
+            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">BARODA 934</div>
+            <div className="flex gap-1">
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: 'BARODA934' });
                 }}
-                className="w-full h-full object-contain filter drop-shadow-[0_0_8px_rgba(255,255,255,0.8)] drop-shadow-[2px_4px_12px_rgba(0,0,0,0.15)]"
-                alt="Baal Hanuman Sticker"
-              />
-              
-              <AnimatePresence>
-                {eatingState === 'eating' && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0, y: 0 }}
-                    animate={{ opacity: 1, scale: 1.1, y: -25 }}
-                    exit={{ opacity: 0, scale: 0 }}
-                    className="absolute -top-4 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg border-2 border-white/50 whitespace-nowrap z-30"
-                  >
-                    CHOMP!
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                className="w-6 h-6 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-600 flex items-center justify-center transition-colors shadow-sm"
+                title="Add to Bank"
+              >
+                <Plus size={14} />
+              </button>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: 'BARODA934' });
+                }}
+                className="w-6 h-6 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 flex items-center justify-center transition-colors shadow-sm"
+                title="Spend from Bank"
+              >
+                <Minus size={14} />
+              </button>
             </div>
-          </motion.div>
+          </div>
+          
+          <div className="text-3xl font-display font-black text-slate-800 flex items-baseline relative z-20">
+            <span className="text-lg mr-1 text-orange-500">₹</span>
+            {(() => {
+              const acc = accounts.find(a => a.name === 'BARODA934');
+              return formatCurrency(acc?.currentBalance || 0).replace('₹', '');
+            })()}
+          </div>
         </motion.div>
       </div>
 
