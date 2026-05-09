@@ -1,0 +1,816 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc, getDocs, where } from 'firebase/firestore';
+import { HydrantFilling as HydrantFillingType, Account, AccountGroup } from '../types';
+import { 
+  Plus, 
+  Search, 
+  Printer, 
+  Trash2, 
+  Filter, 
+  Download,
+  Calendar,
+  X,
+  CheckCircle2,
+  AlertCircle,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Droplets,
+  History,
+  Smartphone,
+  Banknote,
+  Stamp
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { formatCurrency } from '../constants';
+import { format, startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval } from 'date-fns';
+import { ConfirmationModal } from './ConfirmationModal';
+
+export function HydrantFilling() {
+  const [fillings, setFillings] = useState<HydrantFillingType[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [tractors, setTractors] = useState<any[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState<'All' | 'Inward' | 'Outward'>('All');
+  const [timeFilter, setTimeFilter] = useState<'Monthly' | 'Yearly' | 'All'>('Monthly');
+  const [printingFilling, setPrintingFilling] = useState<HydrantFillingType | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<HydrantFillingType | null>(null);
+  
+  const [partySuggestions, setPartySuggestions] = useState<string[]>([]);
+  const [vehicleSuggestions, setVehicleSuggestions] = useState<string[]>([]);
+  const [showPartySuggestions, setShowPartySuggestions] = useState(false);
+  const [showVehicleSuggestions, setShowVehicleSuggestions] = useState(false);
+
+  const printRef = useRef<HTMLDivElement>(null);
+  const printThermal = () => {
+    if (!printRef.current || !printingFilling) return;
+    
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+      
+      const content = printRef.current.innerHTML;
+      const style = `
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+          body { font-family: 'Inter', sans-serif; margin: 0; padding: 20px; width: 80mm; }
+          .text-center { text-align: center; }
+          .font-black { font-weight: 900; }
+          .font-bold { font-weight: 700; }
+          .uppercase { text-transform: uppercase; }
+          .text-lg { font-size: 18px; }
+          .text-sm { font-size: 14px; }
+          .text-xs { font-size: 11px; }
+          .border-b-2 { border-bottom: 2px solid; }
+          .border-t-2 { border-top: 2px solid; }
+          .border-t { border-top: 1px solid; }
+          .border-dashed { border-style: dashed; }
+          .border-slate-300 { border-color: #cbd5e1; }
+          .border-slate-200 { border-color: #e2e8f0; }
+          .pb-4 { padding-bottom: 16px; }
+          .pt-4 { padding-top: 16px; }
+          .pt-2 { padding-top: 8px; }
+          .mb-4 { margin-bottom: 16px; }
+          .mb-6 { margin-bottom: 24px; }
+          .my-8 { margin-top: 32px; margin-bottom: 32px; }
+          .space-y-3 > * + * { margin-top: 12px; }
+          .flex { display: flex; }
+          .justify-between { justify-content: space-between; }
+          .justify-center { justify-content: center; }
+          .items-center { align-items: center; }
+          .italic { font-style: italic; }
+          .text-slate-400 { color: #94a3b8; }
+          .text-blue-800 { color: #1e40af; }
+          .text-blue-900\\/10 { color: rgba(30, 58, 138, 0.1); }
+          .relative { position: relative; }
+          .absolute { position: absolute; }
+          .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+          .rounded-full { border-radius: 9999px; }
+          .border-\\[5px\\] { border-width: 5px; }
+          .border-blue-700\\/40 { border-color: rgba(29, 78, 216, 0.4); }
+          .border-blue-700\\/20 { border-color: rgba(29, 78, 216, 0.2); }
+          .w-28 { width: 112px; }
+          .h-28 { height: 112px; }
+          .p-3 { padding: 12px; }
+          .m-1 { margin: 4px; }
+          .text-\\[9px\\] { font-size: 9px; }
+          .text-\\[10px\\] { font-size: 10px; }
+          .text-\\[14px\\] { font-size: 14px; }
+          .text-3xl { font-size: 30px; }
+          .rotate-\\[-5deg\\] { transform: rotate(-5deg); }
+          .-rotate-12 { transform: rotate(-12deg); }
+          .top-1/2 { top: 50%; }
+          .left-1/2 { left: 50%; }
+          .-translate-x-1/2 { transform: translateX(-50%); }
+          .-translate-y-1/2 { transform: translateY(-50%); }
+          .select-none { user-select: none; }
+          .pointer-events-none { pointer-events: none; }
+          @media print {
+            @page { size: 80mm; margin: 0; }
+            body { width: 80mm; padding: 10px; }
+          }
+        </style>
+      `;
+      
+      const doc = iframe.contentWindow?.document;
+      if (doc) {
+        doc.open();
+        doc.write(`<!DOCTYPE html><html><head>${style}</head><body>${content}</body></html>`);
+        doc.close();
+        
+        // Use a timeout as a reliable fallback for styles and potential assets
+        setTimeout(() => {
+          if (iframe.contentWindow) {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+            setTimeout(() => {
+              if (document.body.contains(iframe)) {
+                document.body.removeChild(iframe);
+              }
+            }, 1000);
+          }
+        }, 1000);
+      }
+    } catch (e) {
+      console.error('Print Error:', e);
+      alert('Printing failed. Please ensure popups are allowed or try again.');
+    }
+  };
+
+  useEffect(() => {
+    if (printingFilling) {
+      setTimeout(() => {
+        printThermal();
+        setPrintingFilling(null);
+      }, 500);
+    }
+  }, [printingFilling]);
+
+  const [formData, setFormData] = useState({
+    type: 'Inward' as 'Inward' | 'Outward',
+    partyName: 'Rajhans Steel and Water',
+    vehicleNumber: '',
+    rate: '100',
+    quantity: '1',
+    paymentMode: 'Cash' as 'Cash' | 'Bank' | 'Udhaar',
+    paymentAccountId: '',
+    remarks: ''
+  });
+
+  useEffect(() => {
+    const unsubFillings = onSnapshot(query(collection(db, 'hydrantFillings'), orderBy('date', 'desc')), 
+      (snapshot) => setFillings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HydrantFillingType))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'hydrantFillings')
+    );
+    const unsubAcc = onSnapshot(collection(db, 'accounts'),
+      (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'accounts')
+    );
+    const unsubTractors = onSnapshot(collection(db, 'tractors'),
+      (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (error) => handleFirestoreError(error, OperationType.LIST, 'tractors')
+    );
+    return () => { unsubFillings(); unsubAcc(); unsubTractors(); };
+  }, []);
+
+  useEffect(() => {
+    // Generate suggestions based on mode and history
+    if (formData.paymentMode === 'Udhaar') {
+      const partyType = formData.type === 'Inward' ? 'Sundry Debtors' : 'Sundry Creditors';
+      // Find group ID first (approximate)
+      const suggestions = accounts.map(a => a.name);
+      setPartySuggestions([...new Set(suggestions)]);
+    } else {
+      const history = fillings.filter(f => f.type === formData.type).map(f => f.partyName);
+      setPartySuggestions([...new Set(history)]);
+    }
+
+    if (formData.type === 'Outward') {
+      const tSuggestions = tractors.map(t => `${t.name} (${t.vehicleNumber})`);
+      setVehicleSuggestions(tSuggestions);
+    } else {
+      setVehicleSuggestions([...new Set(fillings.filter(f => f.type === 'Inward').map(f => f.vehicleNumber || ''))]);
+    }
+  }, [formData.paymentMode, formData.type, accounts, fillings, tractors]);
+
+  const [showDone, setShowDone] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
+
+    try {
+      const amount = Number(formData.rate) * Number(formData.quantity);
+      const tokenNumber = formData.type === 'Inward' ? `IN-${Date.now().toString().slice(-6)}` : `OUT-${Date.now().toString().slice(-6)}`;
+      
+      await runTransaction(db, async (transaction) => {
+        const fillingRef = doc(collection(db, 'hydrantFillings'));
+        const voucherRef = doc(collection(db, 'vouchers'));
+        
+        const incomeAccName = 'Hydrant Filling Income';
+        const expenseAccName = 'Tanker Filling Expense';
+        
+        const [incomeAccSnap, expenseAccSnap, assetsGrpSnap, incGrpSnap, expGrpSnap] = await Promise.all([
+          getDocs(query(collection(db, 'accounts'), where('name', '==', incomeAccName))),
+          getDocs(query(collection(db, 'accounts'), where('name', '==', expenseAccName))),
+          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
+          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Indirect Incomes'))),
+          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses')))
+        ]);
+
+        let incomeAccId = incomeAccSnap.docs[0]?.id;
+        let expenseAccId = expenseAccSnap.docs[0]?.id;
+        let incGrpId = incGrpSnap.docs[0]?.id;
+        let expGrpId = expGrpSnap.docs[0]?.id;
+        
+        const mode = formData.paymentMode;
+        let paymentAccName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : formData.partyName;
+        const paymentAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName)));
+        let paymentAccId = paymentAccSnap.docs[0]?.id;
+
+        // Perform all TRANSACTIONAL READS first
+        const paymentAccRef = paymentAccId ? doc(db, 'accounts', paymentAccId) : null;
+        const incAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
+        const expAccRef = expenseAccId ? doc(db, 'accounts', expenseAccId) : null;
+
+        const [paymentAccDoc, incAccDoc, expAccDoc] = await Promise.all([
+          paymentAccRef ? transaction.get(paymentAccRef) : Promise.resolve(null),
+          incAccRef ? transaction.get(incAccRef) : Promise.resolve(null),
+          expAccRef ? transaction.get(expAccRef) : Promise.resolve(null)
+        ]);
+
+        // NOW PERFORM ALL WRITES
+        
+        // Auto-create category accounts if missing
+        if (!incomeAccId) {
+          if (!incGrpId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Indirect Incomes', type: 'Income' });
+            incGrpId = newGrp.id;
+          }
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { name: incomeAccName, groupId: incGrpId, openingBalance: 0, balanceType: 'Cr', currentBalance: incomeAccId ? (incAccDoc?.data()?.currentBalance || 0) : 0, createdAt: serverTimestamp() });
+          incomeAccId = newAcc.id;
+        }
+
+        if (!expenseAccId) {
+          if (!expGrpId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense' });
+            expGrpId = newGrp.id;
+          }
+          const newAcc = doc(collection(db, 'accounts'));
+          transaction.set(newAcc, { name: expenseAccName, groupId: expGrpId, openingBalance: 0, balanceType: 'Dr', currentBalance: expenseAccId ? (expAccDoc?.data()?.currentBalance || 0) : 0, createdAt: serverTimestamp() });
+          expenseAccId = newAcc.id;
+        }
+
+        if (!paymentAccId && mode === 'Udhaar') {
+           const grpName = formData.type === 'Inward' ? 'Sundry Debtors' : 'Sundry Creditors';
+           const grpSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', grpName)));
+           let grpId = grpSnap.docs[0]?.id;
+           if (!grpId) {
+             const newG = doc(collection(db, 'accountGroups'));
+             transaction.set(newG, { name: grpName, type: formData.type === 'Inward' ? 'Asset' : 'Liability' });
+             grpId = newG.id;
+           }
+           const newA = doc(collection(db, 'accounts'));
+           transaction.set(newA, { 
+             name: paymentAccName, 
+             groupId: grpId, 
+             openingBalance: 0, 
+             balanceType: formData.type === 'Inward' ? 'Dr' : 'Cr', 
+             currentBalance: 0, 
+             createdAt: serverTimestamp() 
+           });
+           paymentAccId = newA.id;
+        }
+
+        const fillingData: any = {
+          tokenNumber,
+          date: new Date().toISOString(),
+          type: formData.type,
+          partyName: formData.partyName,
+          vehicleNumber: formData.vehicleNumber,
+          rate: Number(formData.rate),
+          quantity: Number(formData.quantity),
+          totalAmount: amount,
+          paymentMode: mode,
+          paymentAccountId: paymentAccId || 'CASH_FALLBACK',
+          status: 'Completed',
+          remarks: formData.remarks,
+          createdAt: serverTimestamp()
+        };
+
+        transaction.set(fillingRef, fillingData);
+
+        if (formData.type === 'Inward') {
+          transaction.set(voucherRef, {
+            voucherNumber: `VCH-${tokenNumber}`,
+            date: new Date(),
+            type: mode === 'Udhaar' ? 'Sales' : 'Receipt',
+            items: [
+              { accountId: paymentAccId || 'CASH_FALLBACK', accountName: paymentAccName, amount: amount, type: 'Dr' },
+              { accountId: incomeAccId, accountName: incomeAccName, amount: amount, type: 'Cr' }
+            ],
+            narration: `Hydrant filling for ${formData.partyName} (${formData.vehicleNumber}) [Token: ${tokenNumber}]`,
+            totalAmount: amount,
+            createdAt: serverTimestamp()
+          });
+          
+          if (paymentAccId && paymentAccRef) {
+            const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
+            transaction.update(paymentAccRef, { 
+              currentBalance: (paymentAccDoc?.exists() && paymentAccDoc.data().balanceType === 'Cr') ? currentBal - amount : currentBal + amount 
+            });
+          }
+          // Update income account
+          if (incomeAccId && incAccRef) {
+            transaction.update(incAccRef, { currentBalance: (incAccDoc?.data()?.currentBalance || 0) + amount });
+          }
+        } else {
+          transaction.set(voucherRef, {
+            voucherNumber: `VCH-${tokenNumber}`,
+            date: new Date(),
+            type: mode === 'Udhaar' ? 'Purchase' : 'Payment',
+            items: [
+              { accountId: expenseAccId, accountName: expenseAccName, amount: amount, type: 'Dr' },
+              { accountId: paymentAccId || 'CASH_FALLBACK', accountName: paymentAccName, amount: amount, type: 'Cr' }
+            ],
+            narration: `Self tanker filling @ ${formData.partyName} (${formData.vehicleNumber}) [Token: ${tokenNumber}]`,
+            totalAmount: amount,
+            createdAt: serverTimestamp()
+          });
+
+          if (paymentAccId && paymentAccRef) {
+            const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
+            transaction.update(paymentAccRef, { 
+              currentBalance: (paymentAccDoc?.exists() && paymentAccDoc.data().balanceType === 'Dr') ? currentBal - amount : currentBal + amount 
+            });
+          }
+          // Update expense account
+          if (expenseAccId && expAccRef) {
+            transaction.update(expAccRef, { currentBalance: (expAccDoc?.data()?.currentBalance || 0) + amount });
+          }
+        }
+      });
+
+      setShowAddForm(false);
+      setShowDone(true);
+      setTimeout(() => setShowDone(false), 3000);
+      setFormData({
+        type: 'Inward',
+        partyName: '',
+        vehicleNumber: '',
+        rate: '100',
+        quantity: '1',
+        paymentMode: 'Cash',
+        paymentAccountId: '',
+        remarks: ''
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'hydrantFillings');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteConfirm) return;
+    try {
+      await deleteDoc(doc(db, 'hydrantFillings', deleteConfirm.id!));
+      setDeleteConfirm(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'hydrantFillings');
+    }
+  };
+
+  const filteredFillings = fillings.filter(f => {
+    const matchesSearch = f.partyName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         f.vehicleNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         f.tokenNumber.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = filterType === 'All' || f.type === filterType;
+    
+    let matchesTime = true;
+    const fillingDate = new Date(f.date);
+    const now = new Date();
+    
+    if (timeFilter === 'Monthly') {
+      matchesTime = isWithinInterval(fillingDate, { start: startOfMonth(now), end: endOfMonth(now) });
+    } else if (timeFilter === 'Yearly') {
+      matchesTime = isWithinInterval(fillingDate, { start: startOfYear(now), end: endOfYear(now) });
+    }
+    
+    return matchesSearch && matchesType && matchesTime;
+  });
+
+  const stats = {
+    totalInward: filteredFillings.filter(f => f.type === 'Inward').reduce((sum, f) => sum + f.totalAmount, 0),
+    totalOutward: filteredFillings.filter(f => f.type === 'Outward').reduce((sum, f) => sum + f.totalAmount, 0),
+    countInward: filteredFillings.filter(f => f.type === 'Inward').length,
+    countOutward: filteredFillings.filter(f => f.type === 'Outward').length,
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 pb-32">
+       {/* Header */}
+       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-display font-black text-slate-900 tracking-tight">Hydrant Filling</h1>
+          <p className="text-slate-500 font-medium">Manage filling station tokens and accounting</p>
+        </div>
+        <button 
+          onClick={() => setShowAddForm(true)}
+          className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 shadow-xl shadow-slate-200 hover:scale-[1.02] active:scale-95 transition-all"
+        >
+          <Plus size={20} />
+          New Filling
+        </button>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="w-12 h-12 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center mb-4">
+            <ArrowUpRight size={24} />
+          </div>
+          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Filling Income</div>
+          <div className="text-3xl font-display font-black text-slate-900">{formatCurrency(stats.totalInward)}</div>
+          <div className="text-xs font-bold text-green-600 mt-1">{stats.countInward} Inward Fillings</div>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mb-4">
+            <ArrowDownLeft size={24} />
+          </div>
+          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Filling Expense</div>
+          <div className="text-3xl font-display font-black text-slate-900">{formatCurrency(stats.totalOutward)}</div>
+          <div className="text-xs font-bold text-red-600 mt-1">{stats.countOutward} Outward Fillings</div>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm lg:col-span-2">
+          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
+            <Droplets size={24} />
+          </div>
+          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Total Throughput</div>
+          <div className="text-3xl font-display font-black text-slate-900">{stats.countInward + stats.countOutward} Tankers</div>
+          <p className="text-xs text-slate-400 font-bold mt-1 uppercase">Tracking {timeFilter.toLowerCase()} activity</p>
+        </motion.div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4 items-center">
+        <div className="flex-1 w-full relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+          <input 
+            type="text" 
+            placeholder="Search party, vehicle or token..."
+            className="material-input pl-12 h-12 w-full"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        
+        <div className="flex gap-2 w-full md:w-auto">
+          <div className="flex bg-slate-50 p-1 rounded-xl">
+            {['All', 'Inward', 'Outward'].map(t => (
+              <button
+                key={t}
+                onClick={() => setFilterType(t as any)}
+                className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${filterType === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          
+          <div className="flex bg-slate-50 p-1 rounded-xl">
+            {['Monthly', 'Yearly', 'All'].map(t => (
+              <button
+                key={t}
+                onClick={() => setTimeFilter(t as any)}
+                className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${timeFilter === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* List */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredFillings.map((f, idx) => (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            key={f.id}
+            className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-md transition-all relative overflow-hidden"
+          >
+            <div className={`absolute top-0 right-0 p-8 opacity-[0.03] scale-[2.5] pointer-events-none ${f.type === 'Inward' ? 'text-green-600' : 'text-red-600'}`}>
+              {f.type === 'Inward' ? <ArrowUpRight size={48} /> : <ArrowDownLeft size={48} />}
+            </div>
+
+            <div className="flex items-center justify-between mb-4">
+              <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${f.type === 'Inward' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                {f.type === 'Inward' ? 'Filling Others' : 'Self Filling'}
+              </span>
+              <span className="text-[10px] font-bold text-slate-400">{format(new Date(f.date), 'dd MMM, hh:mm a')}</span>
+            </div>
+
+            <h3 className="text-xl font-display font-black text-slate-900 mb-1">{f.partyName}</h3>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded-md">{f.vehicleNumber}</span>
+              <span className="text-[10px] font-bold text-slate-400">#{f.tokenNumber}</span>
+            </div>
+
+            <div className="flex items-baseline gap-2 mb-6">
+              <span className="text-2xl font-display font-black text-slate-900">{formatCurrency(f.totalAmount)}</span>
+              <span className="text-xs font-bold text-slate-400">@ ₹{f.rate}</span>
+            </div>
+
+            <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${f.paymentMode === 'Udhaar' ? 'bg-orange-400' : 'bg-green-400'}`} />
+                <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">{f.paymentMode}</span>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setPrintingFilling(f)}
+                  className="w-10 h-10 bg-slate-50 text-slate-600 rounded-xl flex items-center justify-center hover:bg-slate-900 hover:text-white transition-all"
+                >
+                  <Printer size={18} />
+                </button>
+                <button 
+                  onClick={() => setDeleteConfirm(f)}
+                  className="w-10 h-10 bg-red-50 text-red-600 rounded-xl flex items-center justify-center hover:bg-red-600 hover:text-white transition-all"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Add Form Modal */}
+      <AnimatePresence>
+        {showAddForm && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-white w-full max-w-xl rounded-[3rem] p-8 shadow-2xl relative overflow-hidden"
+            >
+              <div className="flex justify-between items-center mb-8">
+                <div>
+                  <h2 className="text-2xl font-display font-black text-slate-900">New Filling Entry</h2>
+                  <p className="text-slate-500 font-medium text-sm">Issue token and log payment</p>
+                </div>
+                <button onClick={() => setShowAddForm(false)} className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="flex bg-slate-50 p-1 rounded-2xl">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({...formData, type: 'Inward', partyName: 'Rajhans Steel and Water', rate: '100'})}
+                    className={`flex-1 py-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${formData.type === 'Inward' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400'}`}
+                  >
+                    Filling Others
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({...formData, type: 'Outward', partyName: '', rate: '100'})}
+                    className={`flex-1 py-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${formData.type === 'Outward' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400'}`}
+                  >
+                    Self Filling
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="relative">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Party Name / Hydrant</label>
+                    <input 
+                      required
+                      type="text"
+                      className="material-input w-full h-14"
+                      placeholder="e.g. Ram Singh Tanker"
+                      value={formData.partyName}
+                      autoComplete="off"
+                      onFocus={() => setShowPartySuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowPartySuggestions(false), 200)}
+                      onChange={(e) => setFormData({...formData, partyName: e.target.value})}
+                    />
+                    <AnimatePresence>
+                      {showPartySuggestions && partySuggestions.length > 0 && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className="absolute z-[210] top-full left-0 right-0 mt-2 bg-white rounded-2xl border border-slate-100 shadow-xl max-h-48 overflow-y-auto"
+                        >
+                          {partySuggestions.filter(p => p.toLowerCase().includes(formData.partyName.toLowerCase())).map((p, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              className="w-full text-left px-5 py-3 hover:bg-slate-50 text-sm font-bold text-slate-700 transition-colors"
+                              onClick={() => setFormData({ ...formData, partyName: p })}
+                            >
+                              {p}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <div className="relative">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Vehicle Number</label>
+                    <input 
+                      type="text"
+                      className="material-input w-full h-14"
+                      placeholder="e.g. RJ14 GB 1234"
+                      value={formData.vehicleNumber}
+                      autoComplete="off"
+                      onFocus={() => setShowVehicleSuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowVehicleSuggestions(false), 200)}
+                      onChange={(e) => setFormData({...formData, vehicleNumber: e.target.value})}
+                    />
+                    <AnimatePresence>
+                      {showVehicleSuggestions && vehicleSuggestions.length > 0 && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className="absolute z-[210] top-full left-0 right-0 mt-2 bg-white rounded-2xl border border-slate-100 shadow-xl max-h-48 overflow-y-auto"
+                        >
+                          {vehicleSuggestions.filter(v => v.toLowerCase().includes(formData.vehicleNumber.toLowerCase())).map((v, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              className="w-full text-left px-5 py-3 hover:bg-slate-50 text-sm font-bold text-slate-700 transition-colors"
+                              onClick={() => setFormData({ ...formData, vehicleNumber: v.split(' (')[1]?.replace(')', '') || v })}
+                            >
+                              {v}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Rate (₹)</label>
+                    <input 
+                      required
+                      type="number"
+                      className="material-input w-full h-14 text-xl font-black"
+                      value={formData.rate}
+                      onChange={(e) => setFormData({...formData, rate: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Quantity (Tankers)</label>
+                    <input 
+                      required
+                      type="number"
+                      className="material-input w-full h-14 text-xl font-black"
+                      value={formData.quantity}
+                      onChange={(e) => setFormData({...formData, quantity: e.target.value})}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 block ml-1">Payment Mode</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { id: 'Cash', label: 'Cash', icon: Banknote },
+                      { id: 'Bank', label: 'Bank', icon: Smartphone },
+                      { id: 'Udhaar', label: 'Udhaar', icon: History }
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, paymentMode: m.id as any })}
+                        className={`flex flex-col items-center gap-2 p-4 rounded-3xl border-2 transition-all ${
+                          formData.paymentMode === m.id 
+                            ? 'border-slate-900 bg-slate-50 text-slate-900 shadow-inner' 
+                            : 'border-slate-50 text-slate-300'
+                        }`}
+                      >
+                        <m.icon size={20} />
+                        <span className="text-[10px] font-black uppercase tracking-tight">{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button 
+                  disabled={isSaving}
+                  className="w-full h-20 bg-slate-900 text-white rounded-[2rem] font-display font-black text-xl shadow-2xl shadow-slate-200 active:scale-95 transition-all disabled:opacity-50"
+                  type="submit"
+                >
+                  {isSaving ? 'Processing...' : `Issue Token - ${formatCurrency(Number(formData.rate) * Number(formData.quantity))}`}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Print View Hidden */}
+      <div className="hidden">
+        <div ref={printRef} className="p-8 w-[80mm] font-mono text-xs text-slate-900 bg-white">
+          <div className="text-center border-b-2 border-dashed border-slate-300 pb-4 mb-4">
+             <h2 className="text-lg font-black uppercase tracking-tighter">Rajhans Steel & Water</h2>
+             <p className="text-[10px]">Tanker Hydrant & Filling Point</p>
+             <p className="text-[10px]">Sikar, Rajasthan | 9876543210</p>
+          </div>
+
+          <div className="space-y-3 mb-6">
+            <div className="flex justify-between items-center">
+              <span className="font-bold">TOKEN NO:</span>
+              <span className="text-sm font-black">{printingFilling?.tokenNumber}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>DATE:</span>
+              <span className="font-bold">{printingFilling && format(new Date(printingFilling.date), 'dd/MM/yyyy HH:mm')}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>PARTY:</span>
+              <span className="font-bold uppercase">{printingFilling?.partyName}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>VEHICLE:</span>
+              <span className="font-bold uppercase">{printingFilling?.vehicleNumber || 'N/A'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>TYPE:</span>
+              <span className="font-bold uppercase">{printingFilling?.type === 'Inward' ? 'Filling Others' : 'Self Filling'}</span>
+            </div>
+            <div className="flex justify-between border-t border-dashed border-slate-200 pt-2 text-sm">
+              <span className="font-bold uppercase">TOTAL AMT:</span>
+              <span className="font-black">₹{printingFilling?.totalAmount}</span>
+            </div>
+          </div>
+
+          {/* CIRCULAR STAMP */}
+          <div className="flex justify-center my-8">
+            <div className="relative w-28 h-28 rounded-full border-[5px] border-blue-700/40 flex items-center justify-center p-3 text-center">
+              <div className="absolute inset-0 rounded-full border border-blue-700/20 m-1" />
+              <div className="text-[9px] font-black uppercase text-blue-800 tracking-tighter leading-[1.1] rotate-[-5deg]">
+                Rajhans Steel<br/>& Water<br/>
+                <span className="text-[14px]">TOKEN</span>
+              </div>
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl font-black text-blue-900/10 -rotate-12 select-none pointer-events-none">
+                #{printingFilling?.tokenNumber.split('-')[1]}
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center pt-4 border-t-2 border-dashed border-slate-300">
+            <p className="text-[10px] font-bold">Authorized Filling Token</p>
+            <p className="text-[9px] mt-1 italic text-slate-400">Computer Generated Receipt</p>
+          </div>
+        </div>
+      </div>
+
+      <ConfirmationModal 
+        isOpen={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={handleDelete}
+        title="Delete Filling Record?"
+        message="This will remove the filling record. Accounting entries will persist in ledger."
+      />
+
+      {/* Success Notification */}
+      <AnimatePresence>
+        {showDone && (
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[300] bg-green-600 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3"
+          >
+            <CheckCircle2 size={24} />
+            <span className="font-display font-black">Entry Saved Successfully!</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

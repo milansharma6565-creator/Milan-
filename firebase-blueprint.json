@@ -210,6 +210,26 @@
         "totalAmount": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "HydrantFilling": {
+      "title": "Hydrant Filling",
+      "description": "Tracking inward/outward tanker fillings at hydrants",
+      "type": "object",
+      "properties": {
+        "tokenNumber": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["Inward", "Outward"] },
+        "partyName": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "rate": { "type": "number" },
+        "quantity": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "paymentMode": { "type": "string", "enum": ["Cash", "Bank", "Udhaar"] },
+        "paymentAccountId": { "type": "string" },
+        "status": { "type": "string", "enum": ["Completed", "Pending"] },
+        "remarks": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -225,6 +245,7 @@
     "accountGroups": { "schema": "AccountGroup", "description": "Accounting groups" },
     "accounts": { "schema": "Account", "description": "Ledger accounts" },
     "vouchers": { "schema": "Voucher", "description": "Accounting vouchers" },
-    "attendance": { "schema": "AttendanceRecord", "description": "Daily driver attendance" }
+    "attendance": { "schema": "AttendanceRecord", "description": "Daily driver attendance" },
+    "hydrantFillings": { "schema": "HydrantFilling", "description": "Tanker fillings tracker" }
   }
 }

@@ -159,3 +159,20 @@ export interface DriverLocation {
   lastUpdated: any;
   isActive: boolean;
 }
+
+export interface HydrantFilling {
+  id?: string;
+  tokenNumber: string;
+  date: any;
+  type: 'Inward' | 'Outward';
+  partyName: string;
+  vehicleNumber?: string;
+  rate: number;
+  quantity: number;
+  totalAmount: number;
+  paymentMode: 'Cash' | 'Bank' | 'Udhaar';
+  paymentAccountId?: string;
+  status: 'Completed' | 'Pending';
+  remarks?: string;
+  createdAt: any;
+}

@@ -17,7 +17,8 @@ import {
   ClipboardList,
   Fuel,
   Navigation,
-  CheckCircle2
+  CheckCircle2,
+  Droplets
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dashboard } from './components/Dashboard';
@@ -31,11 +32,12 @@ import { DriverAttendance } from './components/DriverAttendance';
 import { DriverTrackingAdmin } from './components/DriverTrackingAdmin';
 import { DriverLiveTracking } from './components/DriverLiveTracking';
 import { CustomerOrderView } from './components/CustomerOrderView';
+import { HydrantFilling } from './components/HydrantFilling';
 import { Logo } from './components/Logo';
 import { auth, googleProvider, signInWithPopup, onAuthStateChanged } from './firebase';
 import { User } from 'firebase/auth';
 
-type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance';
+type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance' | 'filling';
 
 import { format } from 'date-fns';
 import { formatCurrency } from './constants';
@@ -150,6 +152,7 @@ export default function App() {
       case 'reports': return <ReportView />;
       case 'ledger': return <Ledger />;
       case 'tractors': return <TractorDiesel />;
+      case 'filling': return <HydrantFilling />;
       default: return <Dashboard />;
     }
   };
@@ -190,6 +193,7 @@ export default function App() {
           <SidebarButton icon={<Ticket size={20} />} label="Create Token" active={activeTab === 'billing'} onClick={() => { setActiveTab('billing'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Truck size={20} />} label="Drivers" active={activeTab === 'drivers'} onClick={() => { setActiveTab('drivers'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<ClipboardList size={20} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => { setActiveTab('ledger'); setIsSidebarOpen(false); }} />
+          <SidebarButton icon={<Droplets size={20} />} label="Hydrant Filling" active={activeTab === 'filling'} onClick={() => { setActiveTab('filling'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Fuel size={20} />} label="Fleet & Fuel" active={activeTab === 'tractors'} onClick={() => { setActiveTab('tractors'); setIsSidebarOpen(false); }} />
         </nav>
 
