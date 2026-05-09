@@ -248,8 +248,6 @@ export function TractorDiesel() {
 
         // --- 3. LOG & VOUCHER ---
         const dieselRef = doc(collection(db, 'dieselLogs'));
-        const voucherRef = doc(collection(db, 'vouchers'));
-        
         transaction.set(dieselRef, {
           tractorId: tractor.id!,
           tractorName: tractor.name,
@@ -259,10 +257,10 @@ export function TractorDiesel() {
           description: newDiesel.description,
           paymentMode: mode,
           paymentAccountId: finalPaymentAccId,
-          voucherId: voucherRef.id,
           createdAt: serverTimestamp()
         });
 
+        const voucherRef = doc(collection(db, 'vouchers'));
         transaction.set(voucherRef, {
           date: new Date(newDiesel.date),
           type: mode === 'Udhaar' ? 'Journal' : 'Payment',
@@ -407,8 +405,6 @@ export function TractorDiesel() {
 
         // --- 3. LOG & VOUCHER ---
         const maintRef = doc(collection(db, 'maintenanceLogs'));
-        const voucherRef = doc(collection(db, 'vouchers'));
-        
         transaction.set(maintRef, {
           tractorId: tractor.id!,
           tractorName: tractor.name,
@@ -417,10 +413,10 @@ export function TractorDiesel() {
           description: newMaintenance.description,
           paymentMode: mode,
           paymentAccountId: finalPaymentAccId,
-          voucherId: voucherRef.id,
           createdAt: serverTimestamp()
         });
 
+        const voucherRef = doc(collection(db, 'vouchers'));
         transaction.set(voucherRef, {
           date: new Date(newMaintenance.date),
           type: mode === 'Udhaar' ? 'Journal' : 'Payment',
@@ -790,52 +786,7 @@ export function TractorDiesel() {
 
   const handleDeleteLog = async (type: 'diesel' | 'maint', id: string) => {
     try {
-      await runTransaction(db, async (transaction) => {
-        const logRef = doc(db, type === 'diesel' ? 'dieselLogs' : 'maintenanceLogs', id);
-        const logDoc = await transaction.get(logRef);
-        
-        if (!logDoc.exists()) return;
-        const data = logDoc.data();
-        
-        // --- 1. COLLECT ALL READS ---
-        let voucherRef: any = null;
-        let voucherDoc: any = null;
-        let vchItems: any[] = [];
-        let accRefs: any[] = [];
-        let accSnaps: any[] = [];
-
-        if (data.voucherId) {
-          voucherRef = doc(db, 'vouchers', data.voucherId);
-          voucherDoc = await transaction.get(voucherRef);
-          
-          if (voucherDoc.exists()) {
-            vchItems = voucherDoc.data().items || [];
-            accRefs = vchItems.map(item => doc(db, 'accounts', item.accountId));
-            accSnaps = await Promise.all(accRefs.map(ref => transaction.get(ref)));
-          }
-        }
-        
-        // --- 2. PERFORM ALL WRITES ---
-        if (vchItems.length > 0) {
-          vchItems.forEach((item, index) => {
-            const accSnap = accSnaps[index];
-            if (accSnap.exists()) {
-              const accData = accSnap.data();
-              let newBalance = accData.currentBalance || 0;
-              if (item.type === 'Dr') {
-                newBalance -= (accData.balanceType === 'Dr' ? item.amount : -item.amount);
-              } else {
-                newBalance -= (accData.balanceType === 'Cr' ? item.amount : -item.amount);
-              }
-              transaction.update(accRefs[index], { currentBalance: newBalance });
-            }
-          });
-          if (voucherRef) transaction.delete(voucherRef);
-        }
-        
-        // Delete log record
-        transaction.delete(logRef);
-      });
+      await deleteDoc(doc(db, type === 'diesel' ? 'dieselLogs' : 'maintenanceLogs', id));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `${type === 'diesel' ? 'dieselLogs' : 'maintenanceLogs'}/${id}`);
     }

@@ -16,7 +16,6 @@ import {
   Truck, 
   Banknote,
   Smartphone,
-  Phone,
   History,
   X,
   Share2,
@@ -37,7 +36,7 @@ import { ThermalInvoice } from './ThermalInvoice';
 import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
 
-export function Dashboard({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+export function Dashboard() {
   const todayStart = startOfDay(new Date());
   
   const [bills, setBills] = useState<Bill[]>([]);
@@ -89,8 +88,6 @@ export function Dashboard({ onNavigate }: { onNavigate?: (tab: string) => void }
   const [smileyMood, setSmileyMood] = useState<'normal' | 'happy' | 'sad'>('normal');
   const [eatingState, setEatingState] = useState<'walking' | 'sitting' | 'eating' | 'idle'>('idle');
   const [removedDigits, setRemovedDigits] = useState<number[]>([]);
-  const [recentCalls, setRecentCalls] = useState<any[]>([]);
-  const [recentSMS, setRecentSMS] = useState<any[]>([]);
 
   useEffect(() => {
     if (!stats?.totalPending) return;
@@ -179,16 +176,6 @@ export function Dashboard({ onNavigate }: { onNavigate?: (tab: string) => void }
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts-dashboard')
     );
 
-    const unsubCalls = onSnapshot(
-      query(collection(db, 'callLogs'), orderBy('timestamp', 'desc'), limit(5)),
-      (snapshot) => setRecentCalls(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
-    );
-
-    const unsubSMS = onSnapshot(
-      query(collection(db, 'smsLogs'), orderBy('timestamp', 'desc'), limit(5)),
-      (snapshot) => setRecentSMS(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
-    );
-
     return () => {
       unsubBills();
       unsubRequests();
@@ -198,8 +185,6 @@ export function Dashboard({ onNavigate }: { onNavigate?: (tab: string) => void }
       unsubCashAcc();
       unsubBankAcc();
       unsubAccounts();
-      unsubCalls();
-      unsubSMS();
     };
   }, []);
 
@@ -1711,112 +1696,6 @@ export function Dashboard({ onNavigate }: { onNavigate?: (tab: string) => void }
             </motion.div>
           ))}
           </AnimatePresence>
-        </div>
-      </div>
-
-      {/* Business Phone Sync Summary */}
-      <div className="mt-8 mb-8">
-        <div className="flex justify-between items-center mb-4 px-2">
-          <h3 className="font-display font-bold text-lg flex items-center gap-2">
-            <Smartphone size={20} className="text-blue-600" />
-            Business Phone Sync
-          </h3>
-          <button 
-            onClick={() => onNavigate?.('phone-sync')}
-            className="text-blue-600 text-sm font-semibold flex items-center gap-1 hover:gap-2 transition-all"
-          >
-            View All <ArrowRight size={14} />
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Call Logs Summary */}
-          <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-md group">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-green-50 text-green-600 flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                  <Phone size={20} />
-                </div>
-                <div>
-                  <span className="text-sm font-bold text-slate-900 block">Recent Calls</span>
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Last 5 logs</span>
-                </div>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center">
-                <ArrowRight size={14} className="text-slate-300 group-hover:text-blue-500 transition-colors" />
-              </div>
-            </div>
-            <div className="space-y-3">
-              {recentCalls.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400 italic bg-slate-50/50 rounded-2xl border border-dashed">
-                  No calls synced yet. Go to settings to setup MacroDroid.
-                </div>
-              ) : (
-                recentCalls.map(call => (
-                  <div key={call.id} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                        call.type === 'INCOMING' ? 'bg-green-100 text-green-600' : 
-                        call.type === 'MISSED' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
-                      }`}>
-                        <Phone size={14} />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-slate-900 truncate max-w-[120px]">{call.name || call.number}</div>
-                        <div className="text-[10px] text-slate-400">{call.timestamp?.toDate ? format(call.timestamp.toDate(), 'hh:mm a, dd MMM') : 'Just now'}</div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                        call.type === 'INCOMING' ? 'bg-green-50 text-green-600' : 
-                        call.type === 'MISSED' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
-                      }`}>
-                        {call.type}
-                      </div>
-                      <div className="text-[9px] text-slate-400 font-bold mt-1">{call.duration}s</div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* SMS History Summary */}
-          <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-md group">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                  <MessageSquare size={20} />
-                </div>
-                <div>
-                  <span className="text-sm font-bold text-slate-900 block">Recent SMS</span>
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Last 5 messages</span>
-                </div>
-              </div>
-              <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center">
-                <ArrowRight size={14} className="text-slate-300 group-hover:text-blue-500 transition-colors" />
-              </div>
-            </div>
-            <div className="space-y-3">
-              {recentSMS.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400 italic bg-slate-50/50 rounded-2xl border border-dashed">
-                  No SMS synced yet. Link your phone to start syncing.
-                </div>
-              ) : (
-                recentSMS.map(sms => (
-                  <div key={sms.id} className="p-3 rounded-2xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-12 h-12 bg-blue-50/20 rounded-bl-full pointer-events-none" />
-                    <div className="flex justify-between items-start mb-1 relative z-10">
-                      <div className="text-xs font-bold text-slate-900 truncate max-w-[150px]">{sms.address}</div>
-                      <div className="text-[10px] text-slate-400">{sms.timestamp?.toDate ? format(sms.timestamp.toDate(), 'hh:mm a') : 'Just now'}</div>
-                    </div>
-                    <div className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed bg-slate-50/30 p-2 rounded-xl border border-slate-50 relative z-10">
-                      {sms.body}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
         </div>
       </div>
 

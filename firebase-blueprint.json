@@ -230,31 +230,6 @@
         "remarks": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       }
-    },
-    "CallLog": {
-      "title": "Call Log",
-      "description": "Incoming/Outgoing calls synced from business phone",
-      "type": "object",
-      "properties": {
-        "number": { "type": "string" },
-        "name": { "type": "string" },
-        "type": { "type": "string", "enum": ["Incoming", "Outgoing", "Missed", "Rejected"] },
-        "duration": { "type": "number" },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      }
-    },
-    "SMSLog": {
-      "title": "SMS Log",
-      "description": "Incoming SMS synced from business phone",
-      "type": "object",
-      "properties": {
-        "address": { "type": "string" },
-        "body": { "type": "string" },
-        "timestamp": { "type": "string", "format": "date-time" },
-        "type": { "type": "string", "enum": ["Inbox", "Sent"] },
-        "createdAt": { "type": "string", "format": "date-time" }
-      }
     }
   },
   "firestore": {
@@ -271,8 +246,6 @@
     "accounts": { "schema": "Account", "description": "Ledger accounts" },
     "vouchers": { "schema": "Voucher", "description": "Accounting vouchers" },
     "attendance": { "schema": "AttendanceRecord", "description": "Daily driver attendance" },
-    "hydrantFillings": { "schema": "HydrantFilling", "description": "Tanker fillings tracker" },
-    "callLogs": { "schema": "CallLog", "description": "Call history from business phone" },
-    "smsLogs": { "schema": "SMSLog", "description": "SMS history from business phone" }
+    "hydrantFillings": { "schema": "HydrantFilling", "description": "Tanker fillings tracker" }
   }
 }
