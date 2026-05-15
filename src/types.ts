@@ -12,6 +12,8 @@ export interface Customer {
   createdAt: any;
 }
 
+export type ProductCategory = 'TANKER' | 'STANDBY_TANKER' | 'MONTHLY_TANKER' | 'BOTTLE' | 'CAN';
+
 export interface Bill {
   id?: string;
   billNumber: string;
@@ -20,7 +22,9 @@ export interface Bill {
   customerName: string;
   customerMobile: string;
   customerAddress: string;
-  tankerSize: string;
+  category: ProductCategory;
+  tankerSize?: string;
+  bottleSize?: '500ml' | '1L' | '2L';
   quantity: number;
   rate: number;
   totalAmount: number;
@@ -34,13 +38,69 @@ export interface Bill {
     bank?: number;
     pending: number;
   };
+  driverId?: string;
   driverName?: string;
   driverMobile?: string;
   tractorId?: string;
-  status: 'Delivered' | 'Pending' | 'Cancelled' | 'Printed';
+  deliveryLocation?: {
+    lat: number;
+    lng: number;
+    address: string;
+    mapLink?: string;
+  };
+  status: 'Delivered' | 'Pending' | 'Filling' | 'Cancelled' | 'Printed' | 'Assigned' | 'On the way' | 'Reached';
   isSettled: boolean;
   remarks?: string;
   createdAt: any;
+  completedAt?: any;
+}
+
+export interface Trip {
+  id?: string;
+  billId: string;
+  billNumber: string;
+  driverId: string;
+  driverName: string;
+  customerName: string;
+  customerMobile: string;
+  siteLocation: string;
+  category: ProductCategory;
+  deliveryLocation?: {
+    lat: number;
+    lng: number;
+    address: string;
+    mapLink?: string;
+  };
+  quantity: number;
+  tankerSize?: string;
+  bottleSize?: '500ml' | '1L' | '2L';
+  tankerNumber?: string;
+  status: 'Active' | 'Filling' | 'On the way' | 'Reached' | 'Delivered';
+  createdAt: any;
+  completedAt?: any;
+}
+
+export interface BookingRequest {
+  id?: string;
+  billId: string | null;
+  customerId: string;
+  customerName: string;
+  customerMobile: string;
+  category: ProductCategory;
+  tankerSize?: string;
+  bottleSize?: '500ml' | '1L' | '2L';
+  quantity?: number;
+  remarks?: string;
+  location?: {
+    lat: number;
+    lng: number;
+    address: string;
+  };
+  distanceKm?: number;
+  totalEstimate?: number;
+  status: 'Pending' | 'Accepted' | 'Rejected';
+  requestedAt: any;
+  updatedAt: any;
 }
 
 export interface Tractor {
@@ -106,6 +166,8 @@ export interface Account {
   balanceType: 'Dr' | 'Cr';
   currentBalance: number;
   description?: string;
+  isHidden?: boolean;
+  driverId?: string;
 }
 
 export type VoucherType = 'Receipt' | 'Payment' | 'Journal' | 'Contra' | 'Sales' | 'Purchase';
@@ -127,6 +189,7 @@ export interface Voucher {
   narration: string;
   createdAt: any;
   totalAmount: number;
+  isHidden?: boolean;
 }
 
 export interface Driver {

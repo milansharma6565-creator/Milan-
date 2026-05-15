@@ -20,7 +20,7 @@
     },
     "Bill": {
       "title": "Bill",
-      "description": "Water tanker delivery bill",
+      "description": "Water tanker/bottle/can delivery bill",
       "type": "object",
       "properties": {
         "billNumber": { "type": "string" },
@@ -29,7 +29,9 @@
         "customerName": { "type": "string" },
         "customerMobile": { "type": "string" },
         "customerAddress": { "type": "string" },
+        "category": { "type": "string", "enum": ["TANKER", "STANDBY_TANKER", "MONTHLY_TANKER", "BOTTLE", "CAN"] },
         "tankerSize": { "type": "string" },
+        "bottleSize": { "type": "string", "enum": ["500ml", "1L", "2L"] },
         "quantity": { "type": "number" },
         "rate": { "type": "number" },
         "totalAmount": { "type": "number" },
@@ -50,6 +52,15 @@
         "driverMobile": { "type": "string" },
         "tractorId": { "type": "string" },
         "remarks": { "type": "string" },
+        "deliveryLocation": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "address": { "type": "string" },
+            "mapLink": { "type": "string" }
+          }
+        },
         "status": { "type": "string", "enum": ["Delivered", "Pending", "Cancelled", "Printed"] },
         "isSettled": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
@@ -63,6 +74,9 @@
         "name": { "type": "string" },
         "mobile": { "type": "string" },
         "monthlySalary": { "type": "number" },
+        "licenseFrontUrl": { "type": "string" },
+        "licenseBackUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "pending", "Inactive"] },
         "createdAt": { "type": "string", "format": "date-time" }
       }
     },
@@ -76,6 +90,35 @@
         "date": { "type": "string", "format": "date-time" },
         "status": { "type": "string", "enum": ["Full Day", "Half Day", "Absent"] },
         "note": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Trip": {
+      "title": "Trip",
+      "description": "Active delivery trip for a driver",
+      "type": "object",
+      "properties": {
+        "billId": { "type": "string" },
+        "billNumber": { "type": "string" },
+        "driverId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerMobile": { "type": "string" },
+        "siteLocation": { "type": "string" },
+        "category": { "type": "string", "enum": ["TANKER", "STANDBY_TANKER", "MONTHLY_TANKER", "BOTTLE", "CAN"] },
+        "deliveryLocation": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "address": { "type": "string" },
+            "mapLink": { "type": "string" }
+          }
+        },
+        "quantity": { "type": "number" },
+        "tankerSize": { "type": "string" },
+        "bottleSize": { "type": "string", "enum": ["500ml", "1L", "2L"] },
+        "tankerNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Filling", "On the way", "Reached", "Delivered"] },
         "createdAt": { "type": "string", "format": "date-time" }
       }
     },
@@ -154,7 +197,10 @@
         "customerId": { "type": "string" },
         "customerName": { "type": "string" },
         "customerMobile": { "type": "string" },
+        "category": { "type": "string", "enum": ["TANKER", "STANDBY_TANKER", "MONTHLY_TANKER", "BOTTLE", "CAN"] },
         "tankerSize": { "type": "string" },
+        "bottleSize": { "type": "string", "enum": ["500ml", "1L", "2L"] },
+        "quantity": { "type": "number" },
         "remarks": { "type": "string" },
         "status": { "type": "string", "enum": ["Pending", "Accepted", "Rejected"] },
         "requestedAt": { "type": "string", "format": "date-time" },
@@ -230,6 +276,20 @@
         "remarks": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "DieselRequest": {
+      "title": "Diesel Request",
+      "description": "Fuel request from driver to admin",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "amount": { "type": "number" },
+        "liters": { "type": "number" },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -246,6 +306,8 @@
     "accounts": { "schema": "Account", "description": "Ledger accounts" },
     "vouchers": { "schema": "Voucher", "description": "Accounting vouchers" },
     "attendance": { "schema": "AttendanceRecord", "description": "Daily driver attendance" },
-    "hydrantFillings": { "schema": "HydrantFilling", "description": "Tanker fillings tracker" }
+    "hydrantFillings": { "schema": "HydrantFilling", "description": "Tanker fillings tracker" },
+    "trips": { "schema": "Trip", "description": "Collection of active trips" },
+    "dieselRequests": { "schema": "DieselRequest", "description": "Fuel requests from drivers" }
   }
 }

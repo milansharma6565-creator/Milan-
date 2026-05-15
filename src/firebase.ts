@@ -5,13 +5,19 @@ import {
   browserPopupRedirectResolver, 
   GoogleAuthProvider, 
   signInWithPopup, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  RecaptchaVerifier,
+  signInWithPhoneNumber
 } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, (firebaseConfig as any).firestoreDatabaseId);
+export const storage = getStorage(app);
 
 // Use initializeAuth for more robust configuration
 export const auth = initializeAuth(app, {
@@ -22,7 +28,7 @@ export const auth = initializeAuth(app, {
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export { signInWithPopup, onAuthStateChanged };
+export { signInWithPopup, onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber };
 
 // Test connection as required by constraints
 async function testConnection() {

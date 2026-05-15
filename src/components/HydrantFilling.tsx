@@ -195,7 +195,7 @@ export function HydrantFilling() {
 
   const [formData, setFormData] = useState({
     type: 'Inward' as 'Inward' | 'Outward',
-    partyName: 'Rajhans Steel and Water',
+    partyName: 'TankerWala Powered by Rajhans',
     vehicleNumber: '',
     rate: '100',
     quantity: '1',
@@ -632,7 +632,7 @@ export function HydrantFilling() {
                 <div className="flex bg-slate-50 p-1 rounded-2xl">
                   <button
                     type="button"
-                    onClick={() => setFormData({...formData, type: 'Inward', partyName: 'Rajhans Steel and Water', rate: '100'})}
+                    onClick={() => setFormData({...formData, type: 'Inward', partyName: 'TankerWala Powered by Rajhans', rate: '100'})}
                     className={`flex-1 py-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${formData.type === 'Inward' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400'}`}
                   >
                     Filling Others
@@ -783,7 +783,7 @@ export function HydrantFilling() {
       <div className="hidden">
         <div ref={printRef} className="p-8 w-[80mm] font-mono text-xs text-slate-900 bg-white">
           <div className="text-center border-b-2 border-dashed border-slate-300 pb-4 mb-4">
-             <h2 className="text-lg font-black uppercase tracking-tighter">Rajhans Steel & Water</h2>
+             <h2 className="text-lg font-black uppercase tracking-tighter">TankerWala Powered by Rajhans</h2>
              <p className="text-[10px]">Tanker Hydrant & Filling Point</p>
              <p className="text-[10px]">Sikar, Rajasthan | 9876543210</p>
           </div>
@@ -820,7 +820,7 @@ export function HydrantFilling() {
             <div className="relative w-28 h-28 rounded-full border-[5px] border-blue-700/40 flex items-center justify-center p-3 text-center">
               <div className="absolute inset-0 rounded-full border border-blue-700/20 m-1" />
               <div className="text-[9px] font-black uppercase text-blue-800 tracking-tighter leading-[1.1] rotate-[-5deg]">
-                Rajhans Steel<br/>& Water<br/>
+                TankerWala<br/>Powered by<br/>Rajhans<br/>
                 <span className="text-[14px]">TOKEN</span>
               </div>
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl font-black text-blue-900/10 -rotate-12 select-none pointer-events-none">

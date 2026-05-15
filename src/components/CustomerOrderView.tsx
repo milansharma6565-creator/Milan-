@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, addDoc, collection, serverTimestamp, onSnapshot, query, where, deleteDoc, getDocs } from 'firebase/firestore';
 import { Bill } from '../types';
-import { motion } from 'motion/react';
-import { Truck, CheckCircle2, XCircle, Clock, RefreshCw } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Truck, CheckCircle2, XCircle, Clock, RefreshCw, Phone, MapPin } from 'lucide-react';
 import { formatCurrency } from '../constants';
 import { Logo } from './Logo';
 
@@ -14,36 +14,40 @@ export function CustomerOrderView({ billId }: { billId: string }) {
   const [requestId, setRequestId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [driverLocation, setDriverLocation] = useState<any>(null);
+  const beepAudio = useRef<HTMLAudioElement | null>(null);
+  const prevStatus = useRef<string | null>(null);
 
   useEffect(() => {
-    const fetchBill = async () => {
-      try {
-        const docRef = doc(db, 'bills', billId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setBill({ id: docSnap.id, ...docSnap.data() } as Bill);
-        } else {
-          setError('Bill not found');
+    const unsubBill = onSnapshot(doc(db, 'bills', billId), (snap) => {
+      if (snap.exists()) {
+        const data = { id: snap.id, ...snap.data() } as Bill;
+        setBill(data);
+        setLoading(false);
+        
+        // Audio Logic
+        if (!beepAudio.current) {
+          beepAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
         }
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, `bills/${billId}`);
-      } finally {
+        
+        if (prevStatus.current && prevStatus.current !== data.status) {
+           beepAudio.current.play().catch(() => {});
+        }
+        prevStatus.current = data.status;
+      } else {
+        setError('Bill not found');
         setLoading(false);
       }
-    };
+    });
 
-    fetchBill();
-
-    // Listen for existing booking requests for this bill
     const q = query(
         collection(db, 'bookingRequests'), 
         where('billId', '==', billId),
         where('status', 'in', ['Pending', 'Accepted'])
     );
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeRequests = onSnapshot(q, (snapshot) => {
         if (!snapshot.empty) {
-            // Find the active request (Pending or Accepted)
             const latest = snapshot.docs.find(d => d.data().status === 'Pending' || d.data().status === 'Accepted') || snapshot.docs[0];
             setRequestId(latest.id);
             setRequestStatus(latest.data().status.toLowerCase() as any);
@@ -53,8 +57,22 @@ export function CustomerOrderView({ billId }: { billId: string }) {
         }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubBill();
+      unsubscribeRequests();
+    };
   }, [billId]);
+
+  useEffect(() => {
+    if (!bill?.driverId) {
+      setDriverLocation(null);
+      return;
+    }
+    const unsubLoc = onSnapshot(doc(db, 'driverLocations', bill.driverId), (locSnap) => {
+      if (locSnap.exists()) setDriverLocation(locSnap.data());
+    });
+    return () => unsubLoc();
+  }, [bill?.driverId]);
 
   const handleRebook = async () => {
     if (!bill) return;
@@ -106,7 +124,7 @@ export function CustomerOrderView({ billId }: { billId: string }) {
       <div className="max-w-md w-full">
         <div className="flex items-center justify-center gap-3 mb-10">
           <Logo size={48} />
-          <h1 className="text-2xl font-display font-bold uppercase tracking-tight text-blue-900">Rajhans</h1>
+          <h1 className="text-2xl font-display font-bold uppercase tracking-tight text-blue-900">TankerWala</h1>
         </div>
 
         <motion.div 
@@ -141,6 +159,50 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                 {bill.status}
               </span>
             </div>
+
+            {bill.driverId && driverLocation && (
+              <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600">
+                      <Truck size={20} />
+                    </div>
+                    <div>
+                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Driver Details</p>
+                       <h4 className="font-bold text-slate-900">{bill.driverName}</h4>
+                    </div>
+                  </div>
+                  {bill.driverMobile && (
+                    <a href={`tel:${bill.driverMobile}`} className="p-3 bg-blue-600 text-white rounded-2xl shadow-lg shadow-blue-200">
+                      <Phone size={18} />
+                    </a>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between mb-3 px-1">
+                   <div className="flex items-center gap-1.5 font-black text-[10px] text-blue-500 uppercase">
+                     <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
+                     Live Tracking Active
+                   </div>
+                   <div className="text-[10px] font-bold text-slate-400 uppercase">
+                     {Math.round(driverLocation.speed || 0)} KM/H
+                   </div>
+                </div>
+
+                <div className="h-40 bg-slate-200 rounded-2xl overflow-hidden relative border-2 border-white shadow-inner">
+                   <div className="absolute inset-0 bg-blue-50 flex flex-col items-center justify-center">
+                      <MapPin className="text-blue-500 animate-bounce mb-2" size={32} />
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tanker is on the way</p>
+                      <button 
+                        onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${driverLocation.latitude},${driverLocation.longitude}`)}
+                        className="mt-2 text-[10px] font-black text-blue-600 uppercase border-b-2 border-blue-200 pb-0.5"
+                      >
+                        Open Real-time Map
+                      </button>
+                   </div>
+                </div>
+              </div>
+            )}
 
             {requestStatus === 'none' && (
               <div className="pt-6 space-y-4">
@@ -190,7 +252,7 @@ export function CustomerOrderView({ billId }: { billId: string }) {
         </motion.div>
         
         <p className="mt-8 text-center text-slate-400 text-xs font-semibold uppercase tracking-widest">
-            Rajhans Steel & Water Service
+            TankerWala Powered by Rajhans
         </p>
       </div>
     </div>

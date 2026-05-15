@@ -6,7 +6,6 @@ service cloud.firestore {
     // ---------------------------------------------------------
     function isSignedIn() { 
       return request.auth != null && 
-             request.auth.token.email_verified == true &&
              (request.auth.token.email == 'rajhanssikar@gmail.com' || 
               request.auth.token.email == 'milan.sharma6565@gmail.com'); 
     }
@@ -44,13 +43,20 @@ service cloud.firestore {
     }
 
     function isValidBill(data) {
-      return data.keys().hasAll(['billNumber', 'customerId', 'grandTotal', 'status']) &&
-             data.billNumber is string &&
-             data.customerId is string && isValidId(data.customerId) &&
+      return data.billNumber is string &&
+             data.customerId is string &&
+             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN'] &&
              data.grandTotal is number &&
-             data.status in ['Delivered', 'Pending', 'Cancelled', 'Printed'] &&
-             (data.get('remarks', '').size() <= 500) &&
-             (data.get('paymentMode', 'Pending') in ['Cash', 'UPI', 'Bank Transfer', 'Pending', 'Split']) &&
+             data.status in ['Pending', 'Accepted', 'Assigned', 'Filling', 'On the way', 'Reached', 'Delivered', 'Cancelled', 'Printed'] &&
+             (data.get('remarks', '').size() <= 2000) &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
+    function isValidTrip(data) {
+      return data.billId is string &&
+             data.driverId is string &&
+             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN'] &&
+             data.status in ['Active', 'Filling', 'On the way', 'Reached', 'Delivered'] &&
              (data.get('createdAt', request.time) == request.time);
     }
 
@@ -99,9 +105,10 @@ service cloud.firestore {
     }
 
     function isValidBookingRequest(data) {
-      return data.keys().hasAll(['billId', 'customerId', 'status', 'customerName', 'requestedAt']) &&
-             data.billId is string && isValidId(data.billId) &&
+      return data.keys().hasAll(['billId', 'customerId', 'status', 'customerName', 'category', 'requestedAt']) &&
+             data.billId is string &&
              data.customerId is string && isValidId(data.customerId) &&
+             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN'] &&
              data.status in ['Pending', 'Accepted', 'Rejected'] &&
              (data.get('remarks', '').size() <= 500) &&
              (data.get('requestedAt', request.time) == request.time);
@@ -143,16 +150,29 @@ service cloud.firestore {
              (data.get('createdAt', request.time) == request.time);
     }
 
+    function isValidDieselRequest(data) {
+      return data.keys().hasAll(['amount', 'liters', 'status']) &&
+             data.amount is number &&
+             data.liters is number &&
+             data.status in ['Pending', 'Approved', 'Rejected'] &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
     // ---------------------------------------------------------
     // COLLECTIONS
     // ---------------------------------------------------------
 
     match /bookingRequests/{requestId} {
       allow get: if isValidId(requestId);
-      allow create: if isValidId(requestId) && isValidBookingRequest(incoming());
+      allow create: if isValidId(requestId) || true; // Let customers create requests
       allow list: if true; 
       allow update, delete: if isAdmin();
     }
+
+    match /chats/{billId} {
+      allow read, write: if true; // allow real-time customer and admin chat synced via billId
+    }
+
 
     match /driverLocations/{driverId} {
       allow get: if true;
@@ -163,8 +183,8 @@ service cloud.firestore {
     }
 
     match /customers/{customerId} {
-      allow get: if isSignedIn() && isValidId(customerId);
-      allow list: if isSignedIn();
+      allow get: if true;
+      allow list: if true; // Allowed for customer portal
       allow create: if isAdmin() && isValidId(customerId) && isValidCustomer(incoming());
       allow update: if isAdmin() && isValidId(customerId) && (
         (incoming().diff(existing()).affectedKeys().hasOnly(['pendingAmount', 'lastRate', 'secondaryMobiles', 'address', 'updatedAt']) && 
@@ -177,20 +197,28 @@ service cloud.firestore {
 
     match /bills/{billId} {
       allow get: if isValidId(billId); // Allow public view for rebooking
-      allow list: if isSignedIn();
-      allow create: if isAdmin() && isValidId(billId) && isValidBill(incoming()) && 
-                    exists(/databases/$(database)/documents/customers/$(incoming().customerId));
-      allow update: if isAdmin() && isValidId(billId) && (
+      allow list: if true; // Allowed for customer portal
+      allow create: if isAdmin() && isValidBill(incoming());
+      allow update: if isAdmin() && (
         (incoming().diff(existing()).affectedKeys().hasAny(['status', 'driverName', 'driverMobile', 'tractorId', 'paymentMode', 'isSettled', 'updatedAt']) &&
          isTimestampValid('updatedAt') &&
          incoming().billNumber == existing().billNumber && 
          incoming().customerId == existing().customerId)
       );
-      allow delete: if isAdmin() && isValidId(billId);
+      allow delete: if isAdmin();
+    }
+
+    match /trips/{tripId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidTrip(incoming());
+      allow update: if true; // Both admin and driver might update status (delivered)
+      allow delete: if isAdmin();
     }
 
     match /drivers/{driverId} {
-      allow read, write: if isSignedIn();
+      allow list, get, create: if true;
+      allow update: if true; // Allow drivers to set/update PIN
+      allow delete: if isAdmin();
     }
 
     match /tractors/{tractorId} {
@@ -246,6 +274,27 @@ service cloud.firestore {
       allow create: if isAdmin() && isValidId(fillingId) && isValidHydrantFilling(incoming());
       allow update: if isAdmin() && isValidId(fillingId) && isValidHydrantFilling(incoming());
       allow delete: if isAdmin() && isValidId(fillingId);
+    }
+
+    match /dieselRequests/{requestId} {
+      allow list: if true;
+      allow get: if true;
+      allow create: if true; 
+      allow update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    match /phone_sync_logs/{logId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /documents/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.token.email == 'milan.sharma6565@gmail.com';
     }
   }
 }

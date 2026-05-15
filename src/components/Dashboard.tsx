@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc, where, setDoc, arrayUnion } from 'firebase/firestore';
 import { Customer, Driver, Bill, Tractor, Account } from '../types';
 import { 
   ArrowUpRight, 
@@ -16,37 +16,207 @@ import {
   Truck, 
   Banknote,
   Smartphone,
+  Coins,
   History,
+  Calendar,
   X,
   Share2,
   Minus,
   RefreshCw,
   Droplets,
+  Fuel,
+  MapPin,
   ArrowRight,
   ShieldCheck,
-  BellRing,
-  Coins
+  BellRing
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { formatCurrency, PAYMENT_MODES, generateBillNumber } from '../constants';
-import { startOfDay, endOfDay, subDays, format, differenceInDays } from 'date-fns';
-import { useReactToPrint } from 'react-to-print';
+import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay } from 'date-fns';
+import { generatePDF } from '../lib/pdfUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
+
+function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void }) {
+   const [text, setText] = useState('');
+   const [chatData, setChatData] = useState<any>(null);
+
+   useEffect(() => {
+     if (!bill.id) return;
+     const unsubscribe = onSnapshot(doc(db, 'chats', bill.id), snap => {
+       if (snap.exists()) {
+           setChatData(snap.data());
+           if (snap.data().adminDraft === '' && text !== '') {
+               setText('');
+           }
+       }
+     }, (error) => console.error("Admin Chat Error:", error));
+     return () => unsubscribe();
+   }, [bill.id, text]);
+
+   const handleChange = async (e: any) => {
+     const val = e.target.value;
+     setText(val);
+     await setDoc(doc(db, 'chats', bill.id!), { 
+       adminDraft: val, 
+       updatedAt: serverTimestamp()
+     }, { merge: true });
+   }
+
+   const handleSend = async () => {
+      if(!text.trim()) return;
+      await setDoc(doc(db, 'chats', bill.id!), {
+        messages: arrayUnion({ text, sender: 'admin', timestamp: new Date() }),
+        adminDraft: '',
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      setText('');
+   };
+
+   return (
+     <div className="fixed inset-0 bg-black/60 z-[70] flex items-end justify-center p-4">
+       <motion.div 
+         initial={{ y: "100%" }}
+         animate={{ y: 0 }}
+         exit={{ y: "100%" }}
+         className="bg-white w-full max-w-md rounded-[3rem] p-6 shadow-2xl relative flex flex-col h-[70vh] mb-4"
+       >
+         <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-2 bg-slate-50 rounded-full z-10"><X size={20} /></button>
+         <h2 className="text-xl font-display font-bold text-slate-900 mb-1">Customer Support</h2>
+         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-4 border-b border-slate-100 pb-4">Token #{bill.billNumber} • {bill.customerName}</p>
+         
+         <div className="flex-1 overflow-y-auto mb-4 space-y-4 pr-1">
+           {(chatData?.messages || []).map((m: any, i: number) => (
+             <div key={i} className={`flex ${m.sender === 'admin' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`p-3 rounded-2xl max-w-[85%] text-sm ${m.sender === 'admin' ? 'bg-slate-900 text-white rounded-br-sm' : 'bg-blue-50 text-blue-900 rounded-bl-sm border border-blue-100'}`}>
+                  {m.text}
+                </div>
+             </div>
+           ))}
+           {chatData?.customerDraft && (
+             <div className="flex justify-start">
+               <div className="p-3 rounded-2xl bg-slate-50 text-slate-500 rounded-bl-sm text-sm border border-slate-100 animate-pulse">
+                 <span className="font-bold text-[10px] uppercase block mb-1">Customer typing...</span>
+                 {chatData.customerDraft}
+               </div>
+             </div>
+           )}
+         </div>
+
+         <div className="pt-3 border-t border-slate-100 relative">
+           <textarea 
+             autoFocus
+             value={text}
+             onChange={handleChange}
+             placeholder="Type your message to customer in real-time..."
+             className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 pr-12 text-sm font-medium focus:border-slate-500 outline-none resize-none h-24"
+           />
+         </div>
+       </motion.div>
+     </div>
+   );
+}
 
 export function Dashboard() {
   const todayStart = startOfDay(new Date());
   
   const [bills, setBills] = useState<Bill[]>([]);
   const [bookingRequests, setBookingRequests] = useState<any[]>([]);
+  const [pendingDieselRequests, setPendingDieselRequests] = useState<any[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [tractors, setTractors] = useState<Tractor[]>([]);
   const [cashBalance, setCashBalance] = useState(0);
   const [bankBalance, setBankBalance] = useState(0);
   const [accounts, setAccounts] = useState<Account[]>([]);
+
+  const stats = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayBillsList = bills.filter(b => {
+      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+      return bDate >= todayStart;
+    });
+
+    const todayCollection = todayBillsList
+      .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
+      .reduce((sum, b) => sum + b.grandTotal, 0);
+      
+    const totalPending = accounts
+      .filter(acc => acc.group === 'Sundry Debtors' || acc.group === 'Duty Assignment' || customers.some(c => c.id === acc.customerId || c.name === acc.name))
+      .reduce((sum, acc) => {
+        // For Sundry Debtors (Customers), Dr balance is positive pending
+        const bal = acc.balanceType === 'Dr' ? acc.currentBalance : -acc.currentBalance;
+        // Only include if it's a customer-linked account
+        const isCustomer = customers.some(c => c.id === acc.customerId || c.name === acc.name);
+        return isCustomer ? sum + bal : sum;
+      }, 0);
+
+    const deliveredCount = bills.filter(b => b.status === 'Delivered').length;
+    const unsettledCount = bills.filter(b => !b.isSettled).length;
+
+    const chartData = Array.from({ length: 7 }).map((_, i) => {
+      const date = subDays(new Date(), 6 - i);
+      const dayBills = bills.filter(b => {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        return format(bDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') && 
+               b.status !== 'Cancelled';
+      });
+      return {
+        name: format(date, 'EEE'),
+        amount: dayBills.reduce((sum, b) => sum + b.grandTotal, 0)
+      };
+    });
+    
+    const driverStatsList = drivers.map(driver => {
+      const driverBills = bills.filter(b => b.driverName === driver.name && b.status === 'Delivered');
+      const tractorUsage: Record<string, number> = {};
+      driverBills.forEach(b => {
+        if (b.tractorId) {
+          const tractorName = tractors.find(t => t.id === b.tractorId)?.name || 'Unknown';
+          tractorUsage[tractorName] = (tractorUsage[tractorName] || 0) + 1;
+        }
+      });
+      return {
+        name: driver.name,
+        mobile: driver.mobile,
+        tripCount: driverBills.length,
+        mostUsedTractor: Object.entries(tractorUsage).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A'
+      };
+    }).filter(d => d.tripCount > 0).sort((a, b) => b.tripCount - a.tripCount);
+
+    const allBillsSorted = [...bills].sort((a, b) => {
+      // First sort by status: Pending should be on top
+      if (a.status === 'Pending' && b.status !== 'Pending') return -1;
+      if (a.status !== 'Pending' && b.status === 'Pending') return 1;
+      
+      // Then secondary sort by createdAt descending
+      const timeA = a.createdAt?.seconds || 0;
+      const timeB = b.createdAt?.seconds || 0;
+      return timeB - timeA;
+    });
+
+    return {
+      todayCollection,
+      totalPending,
+      cashBalance,
+      bankBalance,
+      deliveredCount,
+      unsettledCount,
+      chartData,
+      customerCount: customers.length,
+      drivers,
+      tractors,
+      driverStats: driverStatsList,
+      recentBills: allBillsSorted.slice(0, 10)
+    };
+  }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts]);
+
+  const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
+  const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [quickVoucher, setQuickVoucher] = useState<{
     type: 'Receipt' | 'Payment';
     paymentMethod: 'Cash' | 'Bank';
@@ -84,7 +254,6 @@ export function Dashboard() {
     date: new Date().toISOString().split('T')[0]
   });
   const [isSavingQuickVch, setIsSavingQuickVch] = useState(false);
-  const [stats, setStats] = useState<any>(null);
   const [smileyMood, setSmileyMood] = useState<'normal' | 'happy' | 'sad'>('normal');
   const [eatingState, setEatingState] = useState<'walking' | 'sitting' | 'eating' | 'idle'>('idle');
   const [removedDigits, setRemovedDigits] = useState<number[]>([]);
@@ -133,7 +302,8 @@ export function Dashboard() {
   };
 
   useEffect(() => {
-    const unsubBills = onSnapshot(collection(db, 'bills'), 
+    const sixtyDaysAgo = subDays(new Date(), 60);
+    const unsubBills = onSnapshot(query(collection(db, 'bills'), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000)), 
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'bills-dashboard')
     );
@@ -141,6 +311,11 @@ export function Dashboard() {
       query(collection(db, 'bookingRequests'), where('status', '==', 'Pending'), orderBy('requestedAt', 'desc')),
       (snapshot) => setBookingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       (error) => console.log('Requests err:', error)
+    );
+    const unsubDiesel = onSnapshot(
+      query(collection(db, 'dieselRequests'), where('status', '==', 'Pending')),
+      (snapshot) => setPendingDieselRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (error) => console.log('Diesel Requests err:', error)
     );
     const unsubCustomers = onSnapshot(collection(db, 'customers'), 
       (snapshot) => setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer))),
@@ -155,115 +330,64 @@ export function Dashboard() {
       (error) => handleFirestoreError(error, OperationType.LIST, 'tractors-dashboard')
     );
 
-    const unsubCashAcc = onSnapshot(query(collection(db, 'accounts'), where('name', '==', 'Cash')), 
-      (snapshot) => {
-        if (!snapshot.empty) {
-          setCashBalance(snapshot.docs[0].data().currentBalance || 0);
-        }
-      }
-    );
-
-    const unsubBankAcc = onSnapshot(query(collection(db, 'accounts'), where('name', '==', 'Bank Account')), 
-      (snapshot) => {
-        if (!snapshot.empty) {
-          setBankBalance(snapshot.docs[0].data().currentBalance || 0);
-        }
-      }
-    );
-
     const unsubAccounts = onSnapshot(collection(db, 'accounts'), 
-      (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
+      (snapshot) => {
+        const accs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account));
+        setAccounts(accs);
+        
+        // Derive Cash & Bank from accounts
+        const cash = accs.find(a => a.name === 'Cash');
+        const bank = accs.find(a => a.name === 'Bank Account');
+        if (cash) setCashBalance(cash.currentBalance || 0);
+        if (bank) setBankBalance(bank.currentBalance || 0);
+      },
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts-dashboard')
     );
 
     return () => {
       unsubBills();
       unsubRequests();
+      unsubDiesel();
       unsubCustomers();
       unsubDrivers();
       unsubTractors();
-      unsubCashAcc();
-      unsubBankAcc();
       unsubAccounts();
     };
   }, []);
 
-  useEffect(() => {
-    if (!bills.length || !customers.length) return;
-    // ... rest of effect
-
-    const todayBills = bills.filter(b => {
-      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
-      return bDate >= todayStart;
-    });
-
-    const todayCollection = todayBills
-      .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + b.grandTotal, 0);
-      
-    const totalPending = accounts
-      .filter(acc => acc.group === 'Sundry Debtors' || acc.group === 'Duty Assignment' || customers.some(c => c.id === acc.customerId || c.name === acc.name))
-      .reduce((sum, acc) => {
-        // For Sundry Debtors (Customers), Dr balance is positive pending
-        const bal = acc.balanceType === 'Dr' ? acc.currentBalance : -acc.currentBalance;
-        // Only include if it's a customer-linked account
-        const isCustomer = customers.some(c => c.id === acc.customerId || c.name === acc.name);
-        return isCustomer ? sum + bal : sum;
-      }, 0);
-
-    const deliveredCount = bills.filter(b => b.status === 'Delivered').length;
-    const unsettledCount = bills.filter(b => !b.isSettled).length;
+  const filteredTokenBills = useMemo(() => {
+    let baseBills = [...bills];
     
-    const chartData = Array.from({ length: 7 }).map((_, i) => {
-      const date = subDays(new Date(), 6 - i);
-      const dayBills = bills.filter(b => {
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
-        return format(bDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') && 
-               b.status !== 'Cancelled';
-      });
-      return {
-        name: format(date, 'EEE'),
-        amount: dayBills.reduce((sum, b) => sum + b.grandTotal, 0)
-      };
-    });
-
-    const allBillsSorted = [...bills].sort((a, b) => {
+    // Sort logic: Pending on top, then time descending
+    baseBills.sort((a, b) => {
+      if (a.status === 'Pending' && b.status !== 'Pending') return -1;
+      if (a.status !== 'Pending' && b.status === 'Pending') return 1;
       const timeA = a.createdAt?.seconds || 0;
       const timeB = b.createdAt?.seconds || 0;
       return timeB - timeA;
     });
 
-    const driverStats = drivers.map(driver => {
-      const driverBills = bills.filter(b => b.driverName === driver.name && b.status === 'Delivered');
-      const tractorUsage: Record<string, number> = {};
-      driverBills.forEach(b => {
-        if (b.tractorId) {
-          const tractorName = tractors.find(t => t.id === b.tractorId)?.name || 'Unknown';
-          tractorUsage[tractorName] = (tractorUsage[tractorName] || 0) + 1;
-        }
+    if (tokenFilter === 'Today') {
+      const today = startOfDay(new Date());
+      return baseBills.filter(b => {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        return bDate >= today;
       });
-      return {
-        name: driver.name,
-        mobile: driver.mobile,
-        tripCount: driverBills.length,
-        mostUsedTractor: Object.entries(tractorUsage).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A'
-      };
-    }).filter(d => d.tripCount > 0).sort((a, b) => b.tripCount - a.tripCount);
-
-    setStats({
-      todayCollection,
-      totalPending,
-      cashBalance,
-      bankBalance,
-      deliveredCount,
-      unsettledCount,
-      customerCount: customers.length,
-      drivers,
-      tractors,
-      driverStats,
-      recentBills: allBillsSorted.slice(0, 10)
-    });
-  }, [bills, customers, drivers, tractors, cashBalance, bankBalance]);
+    } else if (tokenFilter === 'Yesterday') {
+      const yesterday = startOfDay(subDays(new Date(), 1));
+      const today = startOfDay(new Date());
+      return baseBills.filter(b => {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        return bDate >= yesterday && bDate < today;
+      });
+    } else {
+      // Custom Date
+      return baseBills.filter(b => {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        return format(bDate, 'yyyy-MM-dd') === selectedTokenDate;
+      });
+    }
+  }, [bills, tokenFilter, selectedTokenDate]);
 
   const handleQuickVchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -305,6 +429,13 @@ export function Dashboard() {
         const otherBal = otherDoc.data()?.currentBalance || 0;
         const otherData = otherDoc.data();
 
+        let custDoc: any = null;
+        let custRef: any = null;
+        if (!isPayment && otherData?.customerId) {
+          custRef = doc(db, 'customers', otherData.customerId);
+          custDoc = await transaction.get(custRef);
+        }
+
         if (isPayment && payBal < amount) {
           throw new Error(`INSUFFICIENT_FUNDS:${paymentAccName}:${payBal}`);
         }
@@ -320,15 +451,11 @@ export function Dashboard() {
             currentBalance: otherBal + (otherData?.balanceType === 'Cr' ? amount : -amount) 
           });
           
-          if (otherData?.customerId) {
-            const custRef = doc(db, 'customers', otherData.customerId);
-            const custDoc = await transaction.get(custRef);
-            if (custDoc.exists()) {
-              transaction.update(custRef, {
-                pendingAmount: Math.max(0, (custDoc.data().pendingAmount || 0) - amount),
-                updatedAt: serverTimestamp()
-              });
-            }
+          if (otherData?.customerId && custDoc?.exists()) {
+            transaction.update(custRef, {
+              pendingAmount: Math.max(0, (custDoc.data().pendingAmount || 0) - amount),
+              updatedAt: serverTimestamp()
+            });
           }
         }
 
@@ -373,10 +500,11 @@ export function Dashboard() {
   };
 
   const [editingBill, setEditingBill] = React.useState<any>(null);
+  const [chatBill, setChatBill] = React.useState<any>(null);
   const [showPaymentSelection, setShowPaymentSelection] = React.useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, number: string } | null>(null);
 
-  const handleStatusUpdate = async (status: 'Delivered' | 'Pending' | 'Cancelled') => {
+  const handleStatusUpdate = async (status: 'Delivered' | 'Pending' | 'Filling' | 'Cancelled') => {
     if (!editingBill?.id) return;
 
     if (status === 'Delivered') {
@@ -427,7 +555,7 @@ export function Dashboard() {
         ]);
 
         // --- 2. WRITES SECOND ---
-        if (wasDelivered && (status === 'Pending' || status === 'Cancelled')) {
+        if (wasDelivered && (status === 'Pending' || status === 'Filling' || status === 'Cancelled')) {
           // REVERSE ACCOUNTING
           
           // Reverse Income
@@ -843,14 +971,52 @@ export function Dashboard() {
     }
   };
 
-  const handleDriverUpdate = async (driver: { name: string; mobile: string }) => {
+  const handleDriverUpdate = async (driver: Driver) => {
     if (editingBill?.id) {
       try {
+        // Check if driver is already on an active trip
+        const qTrp = query(collection(db, 'trips'), where('driverId', '==', driver.id), where('status', 'in', ['Active', 'Filling', 'On the way', 'Reached']));
+        const snap = await getDocs(qTrp);
+        if (!snap.empty) {
+           alert('Driver is already on an active trip! Please wait until they finish.');
+           return;
+        }
+
         await updateDoc(doc(db, 'bills', editingBill.id), { 
           driverName: driver.name,
           driverMobile: driver.mobile,
+          driverId: driver.id,
+          status: 'Assigned',
           updatedAt: serverTimestamp()
         });
+
+        // Create or Update Trip Record
+        const qExisting = query(collection(db, 'trips'), where('billId', '==', editingBill.id));
+        const existingSnap = await getDocs(qExisting);
+        
+        if (!existingSnap.empty) {
+          await updateDoc(doc(db, 'trips', existingSnap.docs[0].id), {
+            driverId: driver.id,
+            driverName: driver.name,
+            status: 'Active',
+            updatedAt: serverTimestamp()
+          });
+        } else {
+          await addDoc(collection(db, 'trips'), {
+            billId: editingBill.id,
+            billNumber: editingBill.billNumber,
+            driverId: driver.id,
+            driverName: driver.name,
+            customerName: editingBill.customerName,
+            customerMobile: editingBill.customerMobile,
+            siteLocation: editingBill.customerAddress,
+            quantity: editingBill.quantity,
+            tankerSize: editingBill.tankerSize,
+            status: 'Active',
+            createdAt: serverTimestamp()
+          });
+        }
+
         const updated = await getDoc(doc(db, 'bills', editingBill.id));
         setEditingBill({ id: updated.id, ...updated.data() });
       } catch (error) {
@@ -876,16 +1042,48 @@ export function Dashboard() {
 
   const handleAcceptRequest = async (request: any) => {
     try {
-      // 1. Get original bill details
-      const originalBillRef = doc(db, 'bills', request.billId);
-      const originalBillSnap = await getDoc(originalBillRef);
+      let originalData: any = {};
       
-      if (!originalBillSnap.exists()) {
-        alert("Original order not found.");
-        return;
+      if (request.billId) {
+        // 1. Get original bill details for Rebooking
+        const originalBillRef = doc(db, 'bills', request.billId);
+        const originalBillSnap = await getDoc(originalBillRef);
+        
+        if (!originalBillSnap.exists()) {
+          alert("Original order not found.");
+          return;
+        }
+        originalData = originalBillSnap.data();
+      } else {
+        // New web request from Customer Booking Portal
+        const customerSnap = await getDoc(doc(db, 'customers', request.customerId));
+        if (customerSnap.exists()) {
+          const cust = customerSnap.data();
+          originalData = {
+            customerId: request.customerId,
+            customerName: request.customerName,
+            customerMobile: request.customerMobile,
+            customerAddress: request.location?.address || cust.address,
+            tankerSize: request.tankerSize || 'Standard',
+            quantity: 1,
+            rate: request.totalEstimate || cust.lastRate || 0,
+            totalAmount: request.totalEstimate || cust.lastRate || 0,
+            extraCharges: 0,
+            discount: 0,
+            grandTotal: request.totalEstimate || cust.lastRate || 0,
+            remarks: request.remarks,
+            deliveryLocation: request.location ? {
+              lat: request.location.lat,
+              lng: request.location.lng,
+              address: request.location.address,
+              mapLink: `https://www.google.com/maps?q=${request.location.lat},${request.location.lng}`
+            } : null
+          };
+        } else {
+            alert("Customer not found.");
+            return;
+        }
       }
-
-      const originalData = originalBillSnap.data();
       
       // 2. Generate new bill number
       const allBills = await getDocs(collection(db, 'bills'));
@@ -1027,7 +1225,7 @@ export function Dashboard() {
           await navigator.share({
             files: [file],
             title: `Token #${bill.billNumber}`,
-            text: `Trip Token from Rajhans steel and Water. Target: ${target.toUpperCase()}`
+            text: `Trip Token from TankerWala Powered by Rajhans. Target: ${target.toUpperCase()}`
           });
           return;
         } catch (shareErr: any) {
@@ -1072,16 +1270,20 @@ export function Dashboard() {
       ? cleanPhone 
       : `91${cleanPhone.slice(-10)}`;
 
-    const rebookUrl = `${window.location.origin}/?o=${bill.id}`;
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.searchParams.set('o', bill.id);
+    const rebookUrl = url.toString();
+
     const message = target === 'customer' 
-      ? `*Order Token - Rajhans* 🚛\n\n` +
+      ? `*Order Token - TankerWala* 🚛\n\n` +
         `Token: #${bill.billNumber}\n` +
         `Amt: ₹${bill.grandTotal}\n` +
         `Size: ${bill.tankerSize}\n` +
         `Driver: ${bill.driverName || 'N/A'}\n\n` +
         `Rebook: ${rebookUrl}\n\n` +
-        `Rajhans Steel & Water`
-      : `*Duty Assignment - Rajhans steel and Water* 🚛\n\n` +
+        `TankerWala Powered by Rajhans`
+      : `*Duty Assignment - TankerWala Powered by Rajhans* 🚛\n\n` +
         `Hi ${bill.driverName},\n` +
         `New trip assigned to you.\n\n` +
         `*Token:* #${bill.billNumber}\n` +
@@ -1094,10 +1296,17 @@ export function Dashboard() {
   };
 
   const printRef = React.useRef<HTMLDivElement>(null);
-  const handlePrint = useReactToPrint({
-    contentRef: printRef,
-    documentTitle: `Token_${editingBill?.billNumber || 'Order'}`,
-  });
+  const handlePrint = async () => {
+    if (printRef.current) {
+      try {
+        const fileName = `Token_${editingBill?.billNumber || 'Order'}`;
+        await generatePDF(printRef.current, fileName);
+      } catch (err) {
+        console.error("PDF Export Error:", err);
+        alert("Failed to generate PDF. Please try again.");
+      }
+    }
+  };
 
   if (!stats) {
     return (
@@ -1118,7 +1327,7 @@ export function Dashboard() {
             <Droplets size={28} />
           </div>
           <div>
-            <h1 className="text-2xl font-display font-bold">Rajhans steel and Water</h1>
+            <h1 className="text-2xl font-display font-bold">TankerWala Powered by Rajhans</h1>
             <p className="text-slate-500 text-sm">Dashboard Overview</p>
           </div>
         </div>
@@ -1127,10 +1336,48 @@ export function Dashboard() {
             <AlertCircle size={14} /> {stats.unsettledCount} Open
           </div>
         )}
+        {pendingDieselRequests.length > 0 && (
+          <div className="bg-red-100 text-red-600 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase flex items-center gap-1.5 animate-bounce ml-2">
+            <Fuel size={14} /> {pendingDieselRequests.length} Fuel Req
+          </div>
+        )}
       </header>
 
-      {/* Hero Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+      {/* Critical Alerts for Admin */}
+      <AnimatePresence>
+        {pendingDieselRequests.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-6"
+          >
+             <div className="bg-red-50 border border-red-100 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-4 text-center md:text-left">
+                   <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center text-white shrink-0 animate-pulse">
+                      <Fuel size={24} />
+                   </div>
+                   <div>
+                      <h3 className="font-bold text-red-900">Pending Fuel Approvals</h3>
+                      <p className="text-sm text-red-600 font-medium">{pendingDieselRequests.length} refuel entries from drivers need your review.</p>
+                   </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    // This assumes we can trigger a tab change. 
+                    // In the parent (App.tsx), we need to handle this.
+                    // For now, prompt manually or provide a link if possible.
+                    window.location.search = '?tab=tractors';
+                  }}
+                  className="bg-red-600 text-white px-6 py-3 rounded-2xl font-bold text-sm hover:bg-red-700 transition-all shadow-lg shadow-red-100"
+                >
+                  Go to Approvals
+                </button>
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
@@ -1459,6 +1706,70 @@ export function Dashboard() {
         </motion.div>
       </div>
 
+      {/* Automation Desk */}
+      <div className="mb-8 p-6 bg-slate-900 rounded-[2.5rem] text-white relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-12 opacity-10 scale-[2] pointer-events-none">
+          <Droplets size={48} />
+        </div>
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400">Automation Desk</span>
+          </div>
+          <h3 className="text-xl font-display font-bold mb-6">Smart Business Insights</h3>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Auto-Accounting Status */}
+            <div className="bg-white/5 border border-white/10 p-4 rounded-3xl backdrop-blur-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center">
+                  <ShieldCheck size={20} />
+                </div>
+                <div>
+                  <div className="text-sm font-bold">Auto-Ledger Active</div>
+                  <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Billing & Sync</div>
+                </div>
+              </div>
+              <div className="text-xs text-slate-400 leading-relaxed">
+                Tokens are automatically posted to accounting. No manual entry needed for sales.
+              </div>
+            </div>
+
+            {/* Rebooking Suggestion */}
+            {(() => {
+              const suggestions = customers
+                .filter(c => c.pendingAmount === 0)
+                .slice(0, 1);
+              
+              if (suggestions.length === 0) return null;
+              
+              return suggestions.map(c => (
+                <div key={c.id} className="bg-white/5 border border-white/10 p-4 rounded-3xl backdrop-blur-sm border-l-orange-500 border-l-4">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 bg-orange-500/20 text-orange-400 rounded-xl flex items-center justify-center">
+                      <BellRing size={20} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold">High Likelihood Rebook</div>
+                      <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Insight</div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-400 leading-relaxed mb-3">
+                    <span className="text-white font-bold">{c.name}</span> hasn't ordered in 5 days. Usually orders every 3 days.
+                  </div>
+                  <button 
+                    onClick={() => window.open(`https://wa.me/91${c.mobile}?text=${encodeURIComponent(`Hi ${c.name}, hope you're doing well! Need a water tanker refilled? - TankerWala Powered by Rajhans`)}`, '_blank')}
+                    className="w-full py-2 bg-orange-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-orange-700 transition-all"
+                  >
+                    Send Friendly Nudge
+                  </button>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-4 mb-8">
         <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-50 shadow-sm">
           <div className="w-10 h-10 rounded-xl bg-green-50 text-green-600 flex items-center justify-center">
@@ -1593,25 +1904,92 @@ export function Dashboard() {
 
       {/* Recent Tokens */}
       <div>
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-display font-bold text-lg">Recent Tokens</h3>
-          <button className="text-blue-600 text-sm font-semibold flex items-center gap-1">
-            View All <ArrowRight size={14} />
-          </button>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+          <div className="flex items-center gap-3">
+            <h3 className="font-display font-bold text-lg">Recent Tokens</h3>
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                const urlObj = new URL(window.location.href);
+                urlObj.search = '';
+                urlObj.searchParams.set('mode', 'booking');
+                const url = urlObj.toString();
+                
+                if (navigator.share) {
+                  navigator.share({
+                    title: 'Book a Tanker',
+                    text: 'Book your water tanker now from TankerWala Powered by Rajhans',
+                    url: url
+                  });
+                } else {
+                  navigator.clipboard.writeText(url);
+                  alert('Booking Link Copied!');
+                }
+              }}
+              className="group flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+              title="Share Booking Portal Link"
+            >
+              <Share2 size={12} className="group-hover:scale-110 transition-transform" /> Share Booking Link
+            </button>
+          </div>
+          
+          <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl w-full sm:w-auto">
+            <button
+              onClick={() => setTokenFilter('Today')}
+              className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                tokenFilter === 'Today' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              Today
+            </button>
+            <button
+              onClick={() => setTokenFilter('Yesterday')}
+              className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                tokenFilter === 'Yesterday' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              Yesterday
+            </button>
+            <button
+              onClick={() => setTokenFilter('Custom')}
+              className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                tokenFilter === 'Custom' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              Date
+            </button>
+          </div>
         </div>
+
+        {tokenFilter === 'Custom' && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 flex items-center gap-2"
+          >
+            <Calendar size={14} className="text-blue-600" />
+            <input
+              type="date"
+              value={selectedTokenDate}
+              onChange={(e) => setSelectedTokenDate(e.target.value)}
+              className="bg-white border-2 border-slate-50 rounded-xl px-4 py-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 shadow-sm"
+            />
+          </motion.div>
+        )}
+
         <div className="flex flex-col gap-3">
-          <AnimatePresence mode="popLayout">
-            {stats.recentBills.length === 0 && (
+          <AnimatePresence mode="popLayout" initial={false}>
+            {filteredTokenBills.length === 0 && (
               <motion.div 
                 key="empty"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-center py-8 text-slate-400 bg-white rounded-3xl border border-dashed text-xs uppercase font-bold tracking-widest"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="text-center py-12 text-slate-400 bg-white rounded-[2.5rem] border border-dashed border-slate-200 text-[10px] uppercase font-bold tracking-[0.2em]"
               >
-                No recent activity
+                No trips found for this {tokenFilter === 'Custom' ? 'date' : 'period'}
               </motion.div>
             )}
-            {stats.recentBills.map(bill => (
+            {filteredTokenBills.map(bill => (
               <motion.div 
                 key={bill.id} 
                 layout
@@ -1644,20 +2022,28 @@ export function Dashboard() {
                 }`}>
                   {bill.tankerSize[0]}
                 </div>
-                <div>
-                  <div className="font-bold">{bill.customerName}</div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-slate-400 font-medium">
-                      {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
-                    </span>
-                    {(bill.tractorId || bill.driverName) && (
-                      <div className="flex items-center gap-1.5 ml-1">
-                        <span className="w-1 h-1 rounded-full bg-slate-200" />
-                        <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md flex items-center gap-1">
-                          {tractors.find(t => t.id === bill.tractorId)?.name || 'N/A'} • {bill.driverName || 'N/A'}
-                        </span>
-                      </div>
-                    )}
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate">
+                    {bill.customerName}
+                  </div>
+                  <div className="flex flex-col gap-1 mt-1">
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium leading-none">
+                      <MapPin size={10} className="text-slate-400 shrink-0" />
+                      <span className="truncate">{bill.customerAddress || 'No Address'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] text-slate-400 font-medium">
+                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+                      </span>
+                      {(bill.tractorId || bill.driverName) && (
+                        <div className="flex items-center gap-1.5 ml-1">
+                          <span className="w-1 h-1 rounded-full bg-slate-200" />
+                          <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                            {tractors.find(t => t.id === bill.tractorId)?.name || 'N/A'} • {bill.driverName || 'N/A'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   {bill.remarks && (
                     <div className="mt-2 text-[11px] text-slate-600 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100 flex items-start gap-1 max-w-[250px]">
@@ -1906,16 +2292,74 @@ export function Dashboard() {
               </div>
 
               <div className="space-y-6">
-                {/* Status Options */}
+                {/* Workflow Management and Payment Finalization */}
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Update Delivery Status</label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Workflow Management</label>
+                  
+                  {editingBill.status === 'Delivered' && !editingBill.isSettled ? (
+                    <div className="bg-green-50 border-2 border-green-200 rounded-[2rem] p-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center text-white">
+                          <CheckCircle2 size={20} />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-green-900 leading-tight">Trip Delivered</h4>
+                          <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider">Finalize Payment - Token #{editingBill.billNumber}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <button 
+                          onClick={() => handleSettleOrder('Cash')}
+                          disabled={isSettling !== null}
+                          className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-green-500 hover:text-green-600 transition-all shadow-sm"
+                        >
+                          <Coins size={20} />
+                          <span className="text-[10px] uppercase">Cash</span>
+                        </button>
+                        <button 
+                          onClick={() => handleSettleOrder('UPI')}
+                          disabled={isSettling !== null}
+                          className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-blue-500 hover:text-blue-600 transition-all shadow-sm"
+                        >
+                          <Smartphone size={20} />
+                          <span className="text-[10px] uppercase">UPI</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button 
+                          onClick={() => handleSettleOrder('Bank')}
+                          disabled={isSettling !== null}
+                          className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-indigo-500 hover:text-indigo-600 transition-all shadow-sm"
+                        >
+                          <Banknote size={20} />
+                          <span className="text-[10px] uppercase">Bank / TB</span>
+                        </button>
+                        <button 
+                          onClick={() => handleSettleOrder('Credit')}
+                          disabled={isSettling !== null}
+                          className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-orange-500 hover:text-orange-600 transition-all shadow-sm"
+                        >
+                          <Plus size={20} />
+                          <span className="text-[10px] uppercase">Udhaar</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-2">
                     <button 
                       onClick={() => handleStatusUpdate('Delivered')}
                       className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Delivered' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-100 text-slate-500'}`}
                     >
                       <CheckCircle2 size={24} />
                       <span className="text-[10px] font-bold">Delivered</span>
+                    </button>
+                    <button 
+                      onClick={() => handleStatusUpdate('Filling')}
+                      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Filling' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
+                    >
+                      <Truck size={24} />
+                      <span className="text-[10px] font-bold">Filling</span>
                     </button>
                     <button 
                       onClick={() => handleStatusUpdate('Pending')}
@@ -1931,7 +2375,8 @@ export function Dashboard() {
                       <AlertCircle size={24} />
                       <span className="text-[10px] font-bold">Cancel</span>
                     </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Show payment status but not editable here */}
@@ -1988,7 +2433,18 @@ export function Dashboard() {
                     {stats.drivers.map(d => (
                       <button 
                         key={d.id}
-                        onClick={() => handleDriverUpdate(d)}
+                        onClick={async () => {
+                          const hasActiveTrip = await (async () => {
+                            const qTrp = query(collection(db, 'trips'), where('driverId', '==', d.id), where('status', 'in', ['Active', 'Filling', 'On the way', 'Reached']));
+                            const snap = await getDocs(qTrp);
+                            return !snap.empty;
+                          })();
+                          if (hasActiveTrip) {
+                             alert('Driver Busy: Completion of current trip required.');
+                             return;
+                          }
+                          handleDriverUpdate(d);
+                        }}
                         className={`px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${editingBill.driverName === d.name ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
                       >
                         {d.name}
@@ -2021,21 +2477,34 @@ export function Dashboard() {
 
                 <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-3">
                   <button 
-                    onClick={() => shareBillImage(editingBill, 'customer')}
-                    className="bg-[#25D366] text-white flex flex-col items-center justify-center gap-1 p-4 rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all"
+                    onClick={() => { setEditingBill(null); setChatBill(editingBill); }}
+                    className="col-span-2 bg-blue-50 text-blue-600 border border-blue-200 flex flex-row items-center justify-center gap-2 p-4 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all text-sm mb-2"
                   >
-                    <MessageSquare size={20} />
-                    <span className="text-[10px] uppercase">Customer Copy</span>
+                    <MessageSquare size={18} />
+                    <span>Customer Feedback</span>
+                  </button>
+                  <button 
+                    onClick={() => shareBillImage(editingBill, 'customer')}
+                    className="bg-[#25D366] text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all"
+                  >
+                    <MessageSquare size={16} />
+                    <span className="text-[9px] uppercase">Customer Copy</span>
                   </button>
                   <button 
                     onClick={() => shareBillImage(editingBill, 'driver')}
-                    className="bg-slate-800 text-white flex flex-col items-center justify-center gap-1 p-4 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all"
+                    className="bg-slate-800 text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all"
                   >
-                    <Share2 size={20} />
-                    <span className="text-[10px] uppercase">Driver Copy</span>
+                    <Share2 size={16} />
+                    <span className="text-[9px] uppercase">Driver Copy</span>
                   </button>
                   <button 
-                    onClick={() => handlePrint()}
+                    onClick={async () => {
+                      try {
+                        await handlePrint();
+                      } catch (err) {
+                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+                      }
+                    }}
                     className="col-span-2 material-btn bg-white border-2 border-slate-100 text-slate-900 flex items-center justify-center gap-2 py-4 shadow-sm"
                   >
                     <Printer size={20} /> Print Token
@@ -2249,6 +2718,11 @@ export function Dashboard() {
               </form>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {chatBill && (
+          <LiveChatAdminModal bill={chatBill} onClose={() => setChatBill(null)} />
         )}
       </AnimatePresence>
     </div>

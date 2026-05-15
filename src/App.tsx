@@ -35,21 +35,41 @@ import { DriverLiveTracking } from './components/DriverLiveTracking';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { HydrantFilling } from './components/HydrantFilling';
 import PhoneSync from './components/PhoneSync';
+import { DocumentVault } from './components/DocumentVault';
 import { Logo } from './components/Logo';
-import { auth, googleProvider, signInWithPopup, onAuthStateChanged } from './firebase';
+import { GoodMorningGreeting } from './components/GoodMorningGreeting';
+import { DriverApp } from './components/DriverApp';
+import { CustomerBookingPortal } from './components/CustomerBookingPortal';
+import { auth, googleProvider, signInWithPopup, onAuthStateChanged, db } from './firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 
-type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance' | 'filling' | 'sync';
+type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance' | 'filling' | 'sync' | 'documents';
 
 import { format } from 'date-fns';
 import { formatCurrency } from './constants';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('attendance');
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab') as Tab;
+    if (tabParam && ['dashboard', 'customers', 'billing', 'reports', 'drivers', 'ledger', 'tractors', 'live-map', 'attendance', 'filling', 'sync', 'documents'].includes(tabParam)) {
+      return tabParam;
+    }
+    return 'dashboard';
+  });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [loginInProgress, setLoginInProgress] = useState(false);
+  const [pendingFuelCount, setPendingFuelCount] = useState(0);
+
+  useEffect(() => {
+    const unsub = onSnapshot(query(collection(db, 'dieselRequests'), where('status', '==', 'Pending')), (snap) => {
+      setPendingFuelCount(snap.size);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (user) => {
@@ -61,6 +81,8 @@ export default function App() {
   const queryParams = new URLSearchParams(window.location.search);
   const driverId = queryParams.get('driverId');
   const orderId = queryParams.get('o');
+  const isDriverMode = queryParams.get('mode') === 'driver';
+  const isCustomerMode = queryParams.get('mode') === 'booking';
 
   const handleLogin = async () => {
     if (loginInProgress) return;
@@ -69,10 +91,15 @@ export default function App() {
       const result = await signInWithPopup(auth, googleProvider);
       const authorizedEmails = ['rajhanssikar@gmail.com', 'milan.sharma6565@gmail.com'];
       
+      // If NOT an admin, check if they are a registered driver
       if (!authorizedEmails.includes(result.user.email || '')) {
-        await auth.signOut();
-        alert(`ACCESS DENIED: Only authorized administrative accounts can access this system.`);
-        return;
+        // We will check during the next render if they have a driver profile
+        // but for now, if they are NOT on the driver portal and NOT an admin, reject
+        if (!isDriverMode) {
+          await auth.signOut();
+          alert(`ACCESS DENIED: Only authorized administrative accounts can access this system.`);
+          return;
+        }
       }
     } catch (error: any) {
       console.error('Login failed:', error);
@@ -94,6 +121,11 @@ export default function App() {
 
   const handleLogout = () => auth.signOut();
 
+  // Driver App View
+  if (isDriverMode) {
+    return <DriverApp />;
+  }
+
   // If driverId is present, show tracking page regardless of auth
   if (driverId) {
     return <DriverLiveTracking driverId={driverId} />;
@@ -102,6 +134,11 @@ export default function App() {
   // If orderId is present, show customer view regardless of auth
   if (orderId) {
     return <CustomerOrderView billId={orderId} />;
+  }
+
+  // Customer Booking view
+  if (isCustomerMode) {
+    return <CustomerBookingPortal />;
   }
 
   if (loading) {
@@ -123,7 +160,7 @@ export default function App() {
           <div className="bg-blue-600 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-200 text-white">
             <Truck size={40} />
           </div>
-          <h1 className="text-3xl font-display font-black text-slate-900 mb-2 whitespace-pre-wrap">Rajhans steel and Water</h1>
+          <h1 className="text-3xl font-display font-black text-slate-900 mb-2 whitespace-pre-wrap">TankerWala <br/><span className="text-blue-600">Powered by Rajhans</span></h1>
           <p className="text-slate-500 font-medium mb-8">Management System • Water Tanker Service</p>
           
           <button 
@@ -156,17 +193,19 @@ export default function App() {
       case 'tractors': return <TractorDiesel />;
       case 'filling': return <HydrantFilling />;
       case 'sync': return <PhoneSync />;
+      case 'documents': return <DocumentVault userEmail={user?.email || ''} />;
       default: return <Dashboard />;
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      <GoodMorningGreeting />
       {/* Mobile Top Header */}
       <header className="md:hidden bg-white border-b border-slate-100 p-4 flex items-center justify-between sticky top-0 z-[40]">
         <div className="flex items-center gap-2">
           <Logo size={32} />
-          <span className="font-display font-bold text-lg uppercase tracking-tight text-blue-900">Rajhans</span>
+          <span className="font-display font-bold text-lg uppercase tracking-tight text-blue-900">TankerWala</span>
         </div>
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -181,7 +220,7 @@ export default function App() {
         <div className="flex items-center justify-between mb-10">
           <div className="flex items-center gap-3">
             <Logo size={48} />
-            <span className="font-display font-bold text-xl uppercase tracking-tight text-blue-900">Rajhans</span>
+            <span className="font-display font-bold text-xl uppercase tracking-tight text-blue-900">TankerWala</span>
           </div>
           <button onClick={() => setIsSidebarOpen(false)} className="md:hidden">
             <X size={24} />
@@ -198,10 +237,50 @@ export default function App() {
           <SidebarButton icon={<ClipboardList size={20} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => { setActiveTab('ledger'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Droplets size={20} />} label="Hydrant Filling" active={activeTab === 'filling'} onClick={() => { setActiveTab('filling'); setIsSidebarOpen(false); }} />
           <SidebarButton icon={<Smartphone size={20} />} label="Phone Sync" active={activeTab === 'sync'} onClick={() => { setActiveTab('sync'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<Fuel size={20} />} label="Fleet & Fuel" active={activeTab === 'tractors'} onClick={() => { setActiveTab('tractors'); setIsSidebarOpen(false); }} />
+          <SidebarButton icon={<FileBox size={20} />} label="Documents" active={activeTab === 'documents'} onClick={() => { setActiveTab('documents'); setIsSidebarOpen(false); }} />
+          <SidebarButton icon={<Fuel size={20} />} label="Fleet & Fuel" active={activeTab === 'tractors'} onClick={() => { setActiveTab('tractors'); setIsSidebarOpen(false); }} badgeCount={pendingFuelCount} />
         </nav>
 
         <div className="pt-6 border-t border-slate-100 mt-auto">
+          <div className="px-2 mb-4">
+             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Internal Portals</p>
+             <div className="flex flex-col gap-2">
+               <div className="flex gap-2">
+                 <button 
+                   onClick={() => {
+                     const url = new URL(window.location.href);
+                     url.searchParams.set('mode', 'booking');
+                     url.searchParams.delete('tab');
+                     const link = url.toString();
+                     navigator.clipboard.writeText(link);
+                     alert('Portal Link Copied!\n\nIMPORTANT: If you are in Developer Preview, this link only works for you. Use the "Public URL" from the AIS Share menu to share with customers.');
+                   }}
+                   className="flex-1 p-2 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
+                 >
+                   Copy Cust. Link
+                 </button>
+                 <button 
+                   onClick={() => {
+                      const url = new URL(window.location.href);
+                      url.searchParams.set('mode', 'driver');
+                      url.searchParams.delete('tab');
+                      const link = url.toString();
+                      navigator.clipboard.writeText(link);
+                      alert('Driver App Link Copied!\n\nIMPORTANT: If you are in Developer Preview, this link only works for you. Use the "Public URL" from the AIS Share menu to share with drivers.');
+                   }}
+                   className="flex-1 p-2 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
+                 >
+                   Copy Driver Link
+                 </button>
+               </div>
+               <button 
+                 onClick={() => window.open(`${window.location.origin}${window.location.pathname}?mode=driver`, '_blank')}
+                 className="w-full p-2 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-colors border border-blue-100"
+               >
+                 Test Driver App View
+               </button>
+             </div>
+          </div>
           <div className="flex items-center gap-3 px-2 mb-4">
             <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center overflow-hidden border border-slate-100">
               {user.photoURL ? (
@@ -259,40 +338,51 @@ export default function App() {
         <NavButton icon={<LayoutDashboard size={24} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
         <NavButton icon={<Users size={24} />} label="Customers" active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} />
         <div className="w-16" />
+        <NavButton icon={<Fuel size={24} />} label="Fleet" active={activeTab === 'tractors'} onClick={() => setActiveTab('tractors')} badgeCount={pendingFuelCount} />
         <NavButton icon={<BookOpen size={24} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => setActiveTab('ledger')} />
       </nav>
     </div>
   );
 }
 
-function SidebarButton({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
+function SidebarButton({ icon, label, active, onClick, badgeCount }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, badgeCount?: number }) {
   return (
     <button 
       onClick={onClick}
-      className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${
+      className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all duration-200 ${
         active 
           ? 'bg-blue-600 text-white font-bold shadow-lg shadow-blue-100' 
           : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
       }`}
     >
-      <div className={`${active ? 'text-white' : 'text-slate-400'}`}>
-        {icon}
+      <div className="flex items-center gap-3">
+        <div className={`${active ? 'text-white' : 'text-slate-400'}`}>
+          {icon}
+        </div>
+        <span className="text-sm tracking-tight">{label}</span>
       </div>
-      <span className="text-sm tracking-tight">{label}</span>
+      {badgeCount && badgeCount > 0 ? (
+        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${active ? 'bg-white text-blue-600' : 'bg-red-500 text-white animate-bounce'}`}>
+          {badgeCount}
+        </span>
+      ) : null}
     </button>
   );
 }
 
-function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
+function NavButton({ icon, label, active, onClick, badgeCount }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, badgeCount?: number }) {
   return (
     <button 
       onClick={onClick}
-      className={`flex flex-col items-center gap-1 transition-all ${active ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}
+      className={`flex flex-col items-center gap-1 transition-all relative ${active ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}
     >
       {icon}
-      <span className={`text-[10px] font-bold uppercase tracking-wider ${active ? 'opacity-100' : 'opacity-0'}`}>
-        {label}
-      </span>
+      <span className="text-[10px] font-bold tracking-tight">{label}</span>
+      {badgeCount && badgeCount > 0 ? (
+        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-bounce">
+          {badgeCount}
+        </span>
+      ) : null}
     </button>
   );
 }

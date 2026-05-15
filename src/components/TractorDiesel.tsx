@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc, getDocs, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc, getDocs, where, limit, Timestamp } from 'firebase/firestore';
 import { Tractor, DieselLog, MaintenanceLog, Bill, Account } from '../types';
 import { 
   Plus, 
@@ -21,13 +21,14 @@ import {
   Smartphone,
   Banknote,
   History,
-  X
+  X,
+  BellRing
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, format, subDays } from 'date-fns';
 import { ConfirmationModal } from './ConfirmationModal';
 
 export function TractorDiesel() {
@@ -56,6 +57,8 @@ export function TractorDiesel() {
   const [showDone, setShowDone] = useState(false);
   const pressTimer = React.useRef<NodeJS.Timeout | null>(null);
 
+  const [dieselRequests, setDieselRequests] = useState<any[]>([]);
+
   useEffect(() => {
     const unsubTractors = onSnapshot(collection(db, 'tractors'), 
       (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tractor))),
@@ -69,13 +72,23 @@ export function TractorDiesel() {
       (snapshot) => setMaintenanceLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MaintenanceLog))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'maintenanceLogs')
     );
-    const unsubBills = onSnapshot(collection(db, 'bills'), 
+    const ninetyDaysAgo = subDays(new Date(), 90);
+    const unsubBills = onSnapshot(query(collection(db, 'bills'), where('createdAt', '>=', ninetyDaysAgo), orderBy('createdAt', 'desc')), 
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'bills')
     );
     const unsubAcc = onSnapshot(collection(db, 'accounts'),
       (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts')
+    );
+    const unsubRequests = onSnapshot(collection(db, 'dieselRequests'),
+      (snapshot) => {
+        const pending = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter((req: any) => req.status === 'Pending');
+        setDieselRequests(pending);
+      },
+      (error) => handleFirestoreError(error, OperationType.LIST, 'dieselRequests')
     );
 
     return () => {
@@ -84,6 +97,7 @@ export function TractorDiesel() {
       unsubMaint();
       unsubBills();
       unsubAcc();
+      unsubRequests();
     };
   }, []);
 
@@ -99,7 +113,8 @@ export function TractorDiesel() {
     liters: 0,
     amount: 0,
     description: '',
-    paymentMode: 'Cash' as 'Cash' | 'Bank' | 'Udhaar'
+    paymentMode: 'Cash' as 'Cash' | 'Bank' | 'Udhaar',
+    pendingRequestId: ''
   });
 
   const [newMaintenance, setNewMaintenance] = useState({
@@ -273,10 +288,18 @@ export function TractorDiesel() {
           totalAmount: Number(newDiesel.amount),
           createdAt: serverTimestamp()
         });
+
+        if (newDiesel.pendingRequestId) {
+          const reqRef = doc(db, 'dieselRequests', newDiesel.pendingRequestId);
+          transaction.update(reqRef, {
+            status: 'Approved',
+            updatedAt: serverTimestamp()
+          });
+        }
       });
 
       setIsAddingDiesel(false);
-      setNewDiesel({ date: new Date().toISOString().split('T')[0], tractorId: '', liters: 0, amount: 0, description: '', paymentMode: 'Cash' });
+      setNewDiesel({ date: new Date().toISOString().split('T')[0], tractorId: '', liters: 0, amount: 0, description: '', paymentMode: 'Cash', pendingRequestId: '' });
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('INSUFFICIENT_FUNDS:')) {
         const [_, acc, bal] = error.message.split(':');
@@ -651,7 +674,7 @@ export function TractorDiesel() {
       : tractors.filter(t => t.id === reportConfig.tractorId);
 
     doc.setFontSize(22);
-    doc.text('Rajhans steel and Water - Tractor Report', 14, 20);
+    doc.text('TankerWala Powered by Rajhans - Tractor Report', 14, 20);
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.text(`Period: ${periodLabel} (${start.toLocaleDateString()} - ${end.toLocaleDateString()})`, 14, 28);
@@ -837,6 +860,93 @@ export function TractorDiesel() {
             </div>
           </div>
         </div>
+
+        {dieselRequests.length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2">
+              <BellRing size={14} className="text-orange-500 animate-pulse" /> Pending Driver Fuel Entries
+            </h3>
+            <div className="space-y-4">
+              {dieselRequests.map((req: any) => (
+                <div key={req.id} className="bg-white border-2 border-orange-100 p-5 rounded-[2.5rem] shadow-sm relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-4 opacity-[0.03] scale-150 rotate-12">
+                    <Fuel size={48} />
+                  </div>
+
+                  <div className="flex flex-col md:flex-row gap-6">
+                    {/* Photos Section */}
+                    <div className="flex gap-2 shrink-0">
+                      <div className="relative group/img">
+                        <img 
+                          src={req.zeroMeterPhoto} 
+                          alt="Zero Meter" 
+                          className="w-24 h-24 object-cover rounded-2xl border-2 border-slate-100 hover:border-orange-300 transition-all cursor-zoom-in"
+                          onClick={() => window.open(req.zeroMeterPhoto)}
+                        />
+                        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 bg-black/60 text-[8px] text-white px-2 py-0.5 rounded-full font-bold uppercase">Zero Meter</span>
+                      </div>
+                      <div className="relative group/img">
+                        <img 
+                          src={req.receiptPhoto} 
+                          alt="Receipt" 
+                          className="w-24 h-24 object-cover rounded-2xl border-2 border-slate-100 hover:border-orange-300 transition-all cursor-zoom-in"
+                          onClick={() => window.open(req.receiptPhoto)}
+                        />
+                        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 bg-black/60 text-[8px] text-white px-2 py-0.5 rounded-full font-bold uppercase">Receipt</span>
+                      </div>
+                    </div>
+
+                    <div className="flex-1">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h4 className="text-lg font-black text-slate-900">{req.driverName}</h4>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md uppercase tracking-wider">{req.tractorName}</span>
+                            <span className="text-[10px] font-bold text-slate-400 capitalize">{req.date}</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xl font-black text-slate-900">{formatCurrency(req.amount)}</div>
+                          <div className="text-xs font-bold text-slate-400">{req.liters} Liters</div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => {
+                            setNewDiesel({ 
+                              date: req.date, 
+                              tractorId: req.tractorId, 
+                              liters: req.liters, 
+                              amount: req.amount, 
+                              description: `Approved request from ${req.driverName}`, 
+                              paymentMode: 'Udhaar', 
+                              pendingRequestId: req.id 
+                            });
+                            setIsAddingDiesel(true);
+                          }}
+                          className="flex-1 h-12 bg-orange-500 text-white font-black text-xs rounded-xl hover:bg-orange-600 transition-all shadow-lg shadow-orange-100 active:scale-95"
+                        >
+                          Approve entry
+                        </button>
+                        <button 
+                          onClick={async () => {
+                            if(window.confirm('Reject and delete this entry?')) {
+                              await deleteDoc(doc(db, 'dieselRequests', req.id));
+                            }
+                          }}
+                          className="px-4 h-12 bg-slate-50 text-slate-400 font-bold text-xs rounded-xl hover:bg-slate-100 transition-all active:scale-95"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Fleet Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

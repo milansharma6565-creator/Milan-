@@ -1,5 +1,5 @@
 {
-  "name": "Rajhans steel and Water",
-  "description": "Professional water tanker management system for billing, live driver tracking, attendance, ledger, and phone call/SMS synchronization.",
+  "name": "TankerWala Powered by Rajhans",
+  "description": "Smart water tanker management system for billing, live driver tracking, attendance, ledger, and phone call/SMS synchronization.",
   "requestFramePermissions": ["geolocation"]
 }

@@ -1,4 +1,4 @@
-# Security Specification for Rajhans steel and Water
+# Security Specification for TankerWala Powered by Rajhans
 
 ## Data Invariants
 1. Only authenticated users can access the database.

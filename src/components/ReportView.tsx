@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, updateDoc, doc, where, getDoc, runTransaction, orderBy } from 'firebase/firestore';
 import { Customer, Bill } from '../types';
-import { Download, Calendar, CheckSquare, ListFilter, AlertCircle, Printer, XCircle } from 'lucide-react';
+import { Download, Calendar, CheckSquare, ListFilter, MapPin, AlertCircle, Printer, XCircle } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { formatCurrency } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
-import { useReactToPrint } from 'react-to-print';
+import { generatePDF } from '../lib/pdfUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { useRef } from 'react';
 
@@ -124,11 +124,18 @@ export function ReportView() {
     alert('All tokens posted to ledger successfully!');
   };
 
-  const handlePrint = useReactToPrint({
-    contentRef: printRef,
-    documentTitle: `Token_${selectedBillForPrint?.billNumber || 'Order'}`,
-    onAfterPrint: () => setSelectedBillForPrint(null)
-  });
+  const handlePrint = async () => {
+    if (printRef.current) {
+      try {
+        const fileName = `Token_${selectedBillForPrint?.billNumber || 'Order'}`;
+        await generatePDF(printRef.current, fileName);
+        setSelectedBillForPrint(null);
+      } catch (err) {
+        console.error("PDF Export Error:", err);
+        alert("Failed to generate PDF. Please try again.");
+      }
+    }
+  };
 
   if (!reportData) return null;
 
@@ -157,7 +164,13 @@ export function ReportView() {
               </div>
               <div className="p-4 bg-white border-t">
                 <button 
-                  onClick={() => handlePrint()} 
+                  onClick={async () => {
+                    try {
+                      await handlePrint();
+                    } catch (err) {
+                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+                    }
+                  }} 
                   className="w-full material-btn material-btn-primary flex items-center justify-center gap-2 py-4 shadow-xl shadow-blue-100"
                 >
                   <Printer size={20} /> Confirm Re-print
@@ -252,8 +265,13 @@ export function ReportView() {
                     <Printer size={18} />
                   </button>
                   <div>
-                    <div className="font-bold text-sm tracking-tight text-slate-800">{bill.customerName}</div>
-                    <div className="text-[10px] text-slate-400 font-medium">
+                    <div className="font-bold text-sm tracking-tight text-slate-800 flex items-center gap-2">
+                      {bill.customerName}
+                      <span className="text-[9px] font-medium text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 flex items-center gap-1">
+                        <MapPin size={8} /> {bill.customerAddress || 'No Address'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-medium mt-0.5">
                       {bill.createdAt?.toDate 
                         ? format(bill.createdAt.toDate(), 'dd MMM yyyy, hh:mm a') 
                         : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}

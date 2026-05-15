@@ -5,12 +5,13 @@ import { Customer, Bill, LedgerEntry, Account } from '../types';
 import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
-import { useReactToPrint } from 'react-to-print';
+import { generatePDF } from '../lib/pdfUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { ConfirmationModal } from './ConfirmationModal';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { startOfMonth, endOfMonth, format } from 'date-fns';
+import { ledgerAutomation } from '../services/ledgerAutomation';
 
 export function CustomerManagement() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -216,7 +217,7 @@ export function CustomerManagement() {
     }
     
     const doc = new jsPDF();
-    const title = onlyPending ? 'Rajhans steel and Water - Pending Dues List' : 'Rajhans steel and Water - Customer List';
+    const title = onlyPending ? 'TankerWala Powered by Rajhans - Pending Dues List' : 'TankerWala Powered by Rajhans - Customer List';
     doc.text(title, 14, 15);
     
     const pdfFormatCurrency = (val: number) => `Rs. ${val.toLocaleString('en-IN')}`;
@@ -240,7 +241,7 @@ export function CustomerManagement() {
       styles: { fontSize: 9 }
     });
 
-    const fileName = onlyPending ? `Rajhans_Pending_Dues_${format(new Date(), 'dd_MMM')}.pdf` : 'Rajhans_Steel_Water_Customer_List.pdf';
+    const fileName = onlyPending ? `TankerWala_Pending_Dues_${format(new Date(), 'dd_MMM')}.pdf` : 'TankerWala_Steel_Water_Customer_List.pdf';
     doc.save(fileName);
   };
 
@@ -360,7 +361,7 @@ export function CustomerManagement() {
 
   const shareCurrentBalance = (c: Customer) => {
     const phone = c.mobile.startsWith('91') ? c.mobile : `91${c.mobile}`;
-    const message = `*Account Summary - Rajhans steel and Water* 🚛\n\n` +
+    const message = `*Account Summary - TankerWala Powered by Rajhans* 🚛\n\n` +
       `Dear ${c.name},\n` +
       `Your current account status as of ${format(new Date(), 'dd MMM yyyy')}:\n\n` +
       `*Total Outstanding Balance:* ₹${c.pendingAmount}\n\n` +
@@ -938,7 +939,7 @@ function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClos
       // Header
       doc.setFontSize(20);
       doc.setTextColor(30, 41, 59); // Slate 800
-      doc.text('Rajhans steel and Water - Customer Ledger', 14, 20);
+      doc.text('TankerWala Powered by Rajhans - Customer Ledger', 14, 20);
       
       doc.setFontSize(10);
       doc.setTextColor(100, 116, 139); // Slate 500
@@ -1001,13 +1002,13 @@ function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClos
         await navigator.share({
           files: [file],
           title: `Hisab - ${customer.name}`,
-          text: `Dear ${customer.name}, please find attached your ledger (hisab) from Rajhans steel and Water. Total Outstanding: ₹${runningBalance}.`
+          text: `Dear ${customer.name}, please find attached your ledger (hisab) from TankerWala Powered by Rajhans. Total Outstanding: ₹${runningBalance}.`
         });
       } else {
         // Fallback: Download and WhatsApp text
         doc.save(fileName);
         const phone = customer.mobile.startsWith('91') ? customer.mobile : `91${customer.mobile}`;
-        const message = `*Hisab - Rajhans steel and Water* 🚛\n\n` +
+        const message = `*Hisab - TankerWala Powered by Rajhans* 🚛\n\n` +
           `Dear ${customer.name},\n` +
           `Your ledger PDF has been downloaded. Please check and share it here.\n\n` +
           `*Period:* ${format(start, 'dd MMM')} to ${format(end, 'dd MMM')}\n` +
@@ -1115,11 +1116,18 @@ function CustomerHistoryModal({
     );
   }, [customer.id]);
 
-  const handlePrint = useReactToPrint({
-    contentRef: printRef,
-    documentTitle: `Token_${selectedBillForPrint?.billNumber || 'Order'}`,
-    onAfterPrint: () => setSelectedBillForPrint(null)
-  });
+  const handlePrint = async () => {
+    if (printRef.current) {
+      try {
+        const fileName = `Token_${selectedBillForPrint?.billNumber || 'Order'}`;
+        await generatePDF(printRef.current, fileName);
+        setSelectedBillForPrint(null);
+      } catch (err) {
+        console.error("PDF Export Error:", err);
+        alert("Failed to generate PDF. Please try again.");
+      }
+    }
+  };
 
   const [payingAmount, setPayingAmount] = useState<string>('');
   const [paymentMode, setPaymentMode] = useState<'Cash' | 'UPI' | 'Bank Transfer'>('Cash');
@@ -1131,34 +1139,25 @@ function CustomerHistoryModal({
     
     setIsProcessingPayment(true);
     try {
-      await runTransaction(db, async (transaction) => {
-        const customerRef = doc(db, 'customers', customer.id!);
-        const ledgerRef = collection(db, 'ledger');
+      // Use Automation to post to professional ledger
+      await ledgerAutomation.postPaymentToLedger(
+        { 
+          id: 'manual', 
+          billNumber: 'Manual Pay', 
+          customerName: customer.name 
+        }, 
+        amount, 
+        paymentMode
+      );
 
-        const custDoc = await transaction.get(customerRef);
-        if (custDoc.exists()) {
-          const currentPending = custDoc.data().pendingAmount || 0;
-          transaction.update(customerRef, {
-            pendingAmount: Math.max(0, currentPending - amount)
-          });
-        }
-
-        const newLedgerDoc = {
-          date: new Date().toISOString(),
-          type: 'Income',
-          category: 'Customer Collection',
-          partyName: customer.name,
-          partyId: customer.id,
-          description: `Manual Payment received from customer`,
-          amount: amount,
-          paymentMode: paymentMode,
-          createdAt: serverTimestamp()
-        };
-        transaction.set(doc(ledgerRef), newLedgerDoc);
+      // Update pendingAmount for local UI consistency
+      await updateDoc(doc(db, 'customers', customer.id!), {
+        pendingAmount: Math.max(0, (customer.pendingAmount || 0) - amount),
+        updatedAt: serverTimestamp()
       });
 
       setPayingAmount('');
-      alert('Payment recorded successfully');
+      alert('Payment recorded and synced with Ledger!');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'transaction');
     } finally {
@@ -1262,6 +1261,9 @@ function CustomerHistoryModal({
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-mono text-xs font-bold text-slate-400 py-1 px-2 bg-slate-100 rounded-lg">#{bill.billNumber}</span>
+                        <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+                           <MapPin size={10} /> {bill.customerAddress || 'No Address'}
+                        </span>
                         <span className={`text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider ${
                           bill.status === 'Delivered' ? 'bg-green-100 text-green-700' : 
                           bill.status === 'Pending' ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700'
@@ -1355,7 +1357,13 @@ function CustomerHistoryModal({
               </div>
               <div className="p-4 bg-white border-t">
                 <button 
-                  onClick={() => handlePrint()} 
+                  onClick={async () => {
+                    try {
+                      await handlePrint();
+                    } catch (err) {
+                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+                    }
+                  }} 
                   className="w-full material-btn material-btn-primary flex items-center justify-center gap-2 py-4"
                 >
                   <Printer size={20} /> Confirm Re-print

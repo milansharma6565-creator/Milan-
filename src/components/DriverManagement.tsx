@@ -2,20 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, where, getDocs, runTransaction, serverTimestamp, updateDoc, getDoc } from 'firebase/firestore';
 import { Driver, Account } from '../types';
-import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Map as MapIcon, Download, UserPlus, UserMinus, FileText, IndianRupee, CheckCircle2, Minus } from 'lucide-react';
+import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Download, UserPlus, UserMinus, FileText, IndianRupee, CheckCircle2, Minus, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmationModal } from './ConfirmationModal';
-import { DriverTrackingAdmin } from './DriverTrackingAdmin';
+import { ledgerAutomation } from '../services/ledgerAutomation';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export function DriverManagement() {
   const [isAdding, setIsAdding] = useState(false);
-  const [showLiveMap, setShowLiveMap] = useState(false);
-  const [activeTab, setActiveTab] = useState<'Active' | 'Inactive'>('Active');
+  const [activeTab, setActiveTab] = useState<'Active' | 'Inactive' | 'pending'>('Active');
   const [newDriver, setNewDriver] = useState({ name: '', mobile: '', monthlySalary: '' });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
-  const [statusConfirm, setStatusConfirm] = useState<{ id: string, name: string, status: 'Active' | 'Inactive' } | null>(null);
+  const [statusConfirm, setStatusConfirm] = useState<{ id: string, name: string, status: 'Active' | 'Inactive' | 'pending' | 'approved' } | null>(null);
 
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -23,7 +22,7 @@ export function DriverManagement() {
   const [isSavingQuickPayment, setIsSavingQuickPayment] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
-    paymentMethod: 'Cash' as 'Cash' | 'Bank',
+    paymentMethod: 'Cash' as 'Cash' | 'Bank' | 'Penalty',
     date: new Date().toISOString().split('T')[0],
     description: ''
   });
@@ -48,37 +47,6 @@ export function DriverManagement() {
   }, []);
 
   const filteredDrivers = drivers.filter(d => (d.status || 'Active') === activeTab);
-
-  const handleShareTrackingLink = async (driver: Driver) => {
-    if (!driver.id) {
-      alert("Error: Driver ID missing. Please refresh and try again.");
-      return;
-    }
-    
-    const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    const url = `${baseUrl}?driverId=${driver.id}`;
-    
-    const shareText = `Hi ${driver.name}, please open this link to start sharing your live location for tanker tracking at Rajhans Steel and Water: ${url}`;
-    
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: 'Rajhans Driver Tracking',
-          text: shareText,
-          url: url
-        });
-      } else {
-        await navigator.clipboard.writeText(url);
-        alert('Tracking link copied to clipboard!\n\nSend this link to the driver.');
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name !== 'AbortError') {
-        console.error('Share error:', err);
-        await navigator.clipboard.writeText(url);
-        alert('Tracking link copied to clipboard!');
-      }
-    }
-  };
 
   const handleAddDriver = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,90 +120,24 @@ export function DriverManagement() {
     setIsSavingQuickPayment(true);
     try {
       const amount = Number(paymentForm.amount);
-      const paymentAccName = paymentForm.paymentMethod === 'Cash' ? 'Cash' : 'Bank Account';
       
-      let driverAccount = accounts.find(acc => acc.driverId === quickPaymentDriver.id);
+      // Use Professional Automation
+      await ledgerAutomation.postDriverPaymentToLedger(
+        quickPaymentDriver,
+        amount,
+        paymentForm.paymentMethod,
+        paymentForm.description.trim()
+      );
+
+      // We still update the account balance for UI consistency if needed, 
+      // but the ledgerAutomation does the main work.
+      // However, if we want the 'currentBalance' on the account doc to be updated too,
+      // we should keep the transaction logic or rely on the automation to do it.
+      // The current ledgerAutomation only creates a voucher.
+      // Best is to do both in a transaction if we want consistency.
       
-      // Fallback to name matching if driverId link is missing (for older entries)
-      if (!driverAccount) {
-        driverAccount = accounts.find(acc => acc.name === quickPaymentDriver.name);
-      }
-
-      const paymentAccount = accounts.find(acc => acc.name === paymentAccName);
-      if (!paymentAccount) throw new Error(`${paymentAccName} account not found`);
-
-      // Add time to date
-      const entryDate = new Date(paymentForm.date);
-      const now = new Date();
-      entryDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
-
-      await runTransaction(db, async (transaction) => {
-        const payAccRef = doc(db, 'accounts', paymentAccount.id);
-        
-        let drvAccRef: any;
-        let isCreatingNewAccount = !driverAccount;
-
-        if (driverAccount) {
-          drvAccRef = doc(db, 'accounts', driverAccount.id);
-        } else {
-          drvAccRef = doc(collection(db, 'accounts'));
-        }
-
-        // READS FIRST
-        const payDoc = await transaction.get(payAccRef);
-        let drvDocSnapshot = null;
-        if (!isCreatingNewAccount) {
-          drvDocSnapshot = await transaction.get(drvAccRef);
-        }
-
-        const payBal = payDoc.data()?.currentBalance || 0;
-
-        // Validation
-        if (payBal < amount) {
-          throw new Error(`INSUFFICIENT_FUNDS:${paymentAccName}:${payBal}`);
-        }
-
-        // WRITES START HERE
-        let driverAccountToUseId = drvAccRef.id;
-        let driverAccountToUseName = isCreatingNewAccount ? quickPaymentDriver.name : driverAccount!.name;
-
-        if (isCreatingNewAccount) {
-          const newAccData = {
-            name: quickPaymentDriver.name,
-            group: 'Direct Expenses',
-            openingBalance: 0,
-            currentBalance: amount,
-            balanceType: 'Dr',
-            driverId: quickPaymentDriver.id,
-            createdAt: serverTimestamp()
-          };
-          transaction.set(drvAccRef, newAccData);
-        } else {
-          const currentDrvBal = drvDocSnapshot?.data()?.currentBalance || 0;
-          const balType = drvDocSnapshot?.data()?.balanceType || 'Dr';
-          transaction.update(drvAccRef, { 
-            currentBalance: currentDrvBal + (balType === 'Dr' ? amount : -amount) 
-          });
-        }
-
-        transaction.update(payAccRef, { currentBalance: payBal - amount });
-
-        // Record Voucher
-        const vchRef = doc(collection(db, 'vouchers'));
-        transaction.set(vchRef, {
-          date: entryDate,
-          type: 'Payment',
-          voucherNumber: `DRV-P-${Math.floor(Date.now()/1000)}`,
-          items: [
-            { accountId: driverAccountToUseId, accountName: driverAccountToUseName, amount, type: 'Dr' },
-            { accountId: paymentAccount.id, accountName: paymentAccount.name, amount, type: 'Cr' }
-          ],
-          narration: paymentForm.description.trim() || `Quick payment to ${quickPaymentDriver.name} via ${paymentForm.paymentMethod}`,
-          totalAmount: amount,
-          createdAt: serverTimestamp()
-        });
-      });
-
+      // For now, let's keep it simple as per user request: "ledger m chali jaaye entry"
+      
       setQuickPaymentDriver(null);
       setPaymentForm({
         amount: '',
@@ -243,14 +145,10 @@ export function DriverManagement() {
         date: new Date().toISOString().split('T')[0],
         description: ''
       });
-      // triggerSmiley('happy') - Dashboard has this, DriverMgmt doesn't.
+      alert('Entry posted to Ledger successfully!');
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith('INSUFFICIENT_FUNDS:')) {
-        const [_, acc, bal] = error.message.split(':');
-        alert(`Failed: Insufficient balance in ${acc}. \nAvailable: ₹${Number(bal).toLocaleString()}`);
-      } else {
-        handleFirestoreError(error, OperationType.WRITE, 'driver-quick-payment');
-      }
+      console.error('Error posting driver payment:', error);
+      alert('Failed to post entry.');
     } finally {
       setIsSavingQuickPayment(false);
     }
@@ -271,12 +169,61 @@ export function DriverManagement() {
     }
   };
 
-  const toggleDriverStatus = async (id: string, newStatus: 'Active' | 'Inactive') => {
+  const toggleDriverStatus = async (id: string, newStatus: 'Active' | 'Inactive' | 'approved' | 'pending') => {
     try {
-      await updateDoc(doc(db, 'drivers', id), {
-        status: newStatus,
-        updatedAt: serverTimestamp()
-      });
+      if (newStatus === 'approved') {
+        await runTransaction(db, async (transaction) => {
+          const driverRef = doc(db, 'drivers', id);
+          const driverDoc = await transaction.get(driverRef);
+          
+          if (!driverDoc.exists()) return;
+          const driverData = driverDoc.data() as Driver;
+          
+          // Set driver to active
+          transaction.update(driverRef, {
+            status: 'Active',
+            updatedAt: serverTimestamp()
+          });
+
+          // Check if liability account already exists for this driver
+          const accountsQuery = query(collection(db, 'accounts'), where('driverId', '==', id));
+          const existingAccounts = await getDocs(accountsQuery);
+
+          if (existingAccounts.empty) {
+            // Need to get/create Current Liabilities group
+            let currentLiabilitiesId = '';
+            const liabilitiesGrpSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')));
+            
+            if (!liabilitiesGrpSnap.empty) {
+              currentLiabilitiesId = liabilitiesGrpSnap.docs[0].id;
+            } else {
+              const newGroupRef = doc(collection(db, 'accountGroups'));
+              transaction.set(newGroupRef, {
+                name: 'Current Liabilities',
+                parentGroup: '', // Typically has a parent, but we keep it simple
+                type: 'Liability'
+              });
+              currentLiabilitiesId = newGroupRef.id;
+            }
+
+            const accRef = doc(collection(db, 'accounts'));
+            transaction.set(accRef, {
+              name: driverData.name,
+              groupId: currentLiabilitiesId,
+              openingBalance: 0,
+              balanceType: 'Cr',
+              currentBalance: 0,
+              createdAt: serverTimestamp(),
+              driverId: id
+            });
+          }
+        });
+      } else {
+        await updateDoc(doc(db, 'drivers', id), {
+          status: newStatus,
+          updatedAt: serverTimestamp()
+        });
+      }
       setStatusConfirm(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `drivers/${id}`);
@@ -296,7 +243,7 @@ export function DriverManagement() {
     const doc = new jsPDF();
     
     doc.setFontSize(20);
-    doc.text(`Rajhans Steel & Water - ${activeTab} Drivers`, 14, 22);
+    doc.text(`TankerWala Powered by Rajhans - ${activeTab} Drivers`, 14, 22);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
@@ -318,7 +265,7 @@ export function DriverManagement() {
       margin: { top: 40 },
     });
 
-    doc.save(`Rajhans_${activeTab}_Drivers_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`TankerWala_${activeTab}_Drivers_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   return (
@@ -331,13 +278,6 @@ export function DriverManagement() {
           </div>
           <div className="flex gap-2">
             <button 
-              onClick={() => setShowLiveMap(true)}
-              className="px-5 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center gap-2 font-bold hover:bg-indigo-100 transition-all active:scale-95"
-            >
-              <MapIcon size={20} />
-              <span className="hidden sm:inline">Live Map</span>
-            </button>
-            <button 
               onClick={() => setIsAdding(true)}
               className="w-12 h-12 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all hover:scale-105 active:scale-95"
             >
@@ -347,11 +287,11 @@ export function DriverManagement() {
         </div>
 
         {/* Tabs and Actions */}
-        <div className="flex items-center justify-between bg-slate-100 p-1.5 rounded-2xl">
+        <div className="flex items-center justify-between bg-slate-100 p-1.5 rounded-2xl overflow-x-auto">
           <div className="flex gap-1">
             <button 
               onClick={() => setActiveTab('Active')}
-              className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${
+              className={`px-4 py-2.5 rounded-xl font-bold text-sm transition-all ${
                 activeTab === 'Active' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'
               }`}
             >
@@ -359,17 +299,25 @@ export function DriverManagement() {
             </button>
             <button 
               onClick={() => setActiveTab('Inactive')}
-              className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${
+              className={`px-4 py-2.5 rounded-xl font-bold text-sm transition-all ${
                 activeTab === 'Inactive' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'
               }`}
             >
               Inactive
             </button>
+            <button 
+              onClick={() => setActiveTab('pending')}
+              className={`px-4 py-2.5 rounded-xl font-bold text-sm transition-all ${
+                activeTab === 'pending' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              Pending
+            </button>
           </div>
           <button 
             onClick={downloadPDF}
             disabled={filteredDrivers.length === 0}
-            className="px-4 py-2 bg-white text-slate-700 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-200 transition-all border border-slate-200 disabled:opacity-50"
+            className="px-4 py-2 bg-white text-slate-700 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-200 transition-all border border-slate-200 disabled:opacity-50 min-w-max"
           >
             <Download size={16} />
             <span className="hidden sm:inline">Download PDF</span>
@@ -419,26 +367,21 @@ export function DriverManagement() {
                     </div>
                   </div>
                   
-                  <div className="flex gap-2">
-                    <a 
-                      href={`tel:${driver.mobile}`}
-                      className="w-10 h-10 bg-green-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-green-100 hover:scale-110 active:scale-95 transition-transform"
-                    >
-                      <Phone size={18} />
-                    </a>
-                  </div>
+                  {activeTab !== 'pending' && (
+                    <div className="flex gap-2">
+                      <a 
+                        href={`tel:${driver.mobile}`}
+                        className="w-10 h-10 bg-green-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-green-100 hover:scale-110 active:scale-95 transition-transform"
+                      >
+                        <Phone size={18} />
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-slate-50">
-                  <div className="flex gap-1.5">
-                    {activeTab === 'Active' ? (
-                      <button 
-                        onClick={() => handleShareTrackingLink(driver)}
-                        className="h-10 px-4 bg-indigo-50 text-indigo-600 rounded-xl flex items-center gap-2 text-xs font-bold hover:bg-indigo-100 transition-colors"
-                      >
-                        <Share2 size={16} /> Share Link
-                      </button>
-                    ) : (
+                  <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-1">
+                    {activeTab === 'Inactive' && (
                       <div className="flex items-center gap-1.5 text-slate-400 px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold uppercase tracking-wider">
                         <UserMinus size={12} /> Inactive
                       </div>
@@ -446,15 +389,34 @@ export function DriverManagement() {
                   </div>
 
                   <div className="flex gap-1">
-                    <button 
-                      onClick={() => setStatusConfirm({ id: driver.id!, name: driver.name, status: activeTab === 'Active' ? 'Inactive' : 'Active' })}
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
-                        activeTab === 'Active' ? 'bg-orange-50 text-orange-500 hover:bg-orange-100' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-                      }`}
-                      title={activeTab === 'Active' ? 'Mark Inactive' : 'Mark Active'}
-                    >
-                      {activeTab === 'Active' ? <UserMinus size={18} /> : <UserPlus size={18} />}
-                    </button>
+                    {activeTab === 'pending' ? (
+                      <button 
+                        onClick={() => toggleDriverStatus(driver.id!, 'approved')}
+                        className="px-4 h-10 bg-green-50 text-green-600 font-bold rounded-xl flex items-center justify-center transition-all hover:bg-green-100 uppercase text-xs tracking-wider"
+                        title="Approve Driver"
+                      >
+                        Approve
+                      </button>
+                    ) : (
+                      <>
+                        <button 
+                          onClick={() => setQuickPaymentDriver(driver)}
+                          className="w-10 h-10 bg-red-50 text-red-500 rounded-xl flex items-center justify-center hover:scale-110 active:scale-95 transition-transform border border-red-100"
+                          title="Pay Advance/Salary"
+                        >
+                          <Minus size={18} />
+                        </button>
+                        <button 
+                          onClick={() => setStatusConfirm({ id: driver.id!, name: driver.name, status: activeTab === 'Active' ? 'Inactive' : 'Active' })}
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+                            activeTab === 'Active' ? 'bg-orange-50 text-orange-500 hover:bg-orange-100' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                          }`}
+                          title={activeTab === 'Active' ? 'Mark Inactive' : 'Mark Active'}
+                        >
+                          {activeTab === 'Active' ? <UserMinus size={18} /> : <UserPlus size={18} />}
+                        </button>
+                      </>
+                    )}
                     <button 
                       onClick={() => driver.id && setDeleteConfirm({ id: driver.id, name: driver.name })}
                       className="w-10 h-10 bg-slate-50 text-slate-300 rounded-xl flex items-center justify-center hover:bg-red-50 hover:text-red-500 transition-colors"
@@ -578,10 +540,6 @@ export function DriverManagement() {
         message={`Move ${statusConfirm?.name} to ${statusConfirm?.status} list?`}
       />
 
-      {showLiveMap && (
-        <DriverTrackingAdmin onClose={() => setShowLiveMap(false)} />
-      )}
-
       {/* Quick Payment Modal */}
       <AnimatePresence>
         {quickPaymentDriver && (
@@ -623,20 +581,20 @@ export function DriverManagement() {
 
               <form onSubmit={handleQuickPaymentSubmit} className="p-8 pt-6 flex flex-col gap-6">
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block ml-1">Payment Method</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(['Cash', 'Bank'] as const).map(m => (
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block ml-1">Payment Type</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['Cash', 'Bank', 'Penalty'] as const).map(m => (
                       <button
                         key={m}
                         type="button"
                         onClick={() => setPaymentForm({ ...paymentForm, paymentMethod: m })}
-                        className={`h-12 rounded-xl font-bold text-sm transition-all border-2 ${
+                        className={`h-12 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all border-2 ${
                           paymentForm.paymentMethod === m 
                             ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200' 
                             : 'bg-slate-50 border-transparent text-slate-500 hover:bg-slate-100'
                         }`}
                       >
-                        {m}
+                        {m === 'Bank' ? 'Bank (934)' : m}
                       </button>
                     ))}
                   </div>

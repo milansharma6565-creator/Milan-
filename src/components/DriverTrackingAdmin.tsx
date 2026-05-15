@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { DriverLocation } from '../types';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -63,7 +63,7 @@ export function DriverTrackingAdmin({ onClose, isTab = false }: DriverTrackingAd
       .sort((a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime());
       
       setLocations(locs);
-    });
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'driverLocations'));
   }, []);
 
   const handleSelectDriver = (loc: DriverLocation) => {

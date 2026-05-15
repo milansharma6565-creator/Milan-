@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Phone, MessageSquare, RefreshCw, CheckCircle, XCircle, Settings, Smartphone } from 'lucide-react';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { format } from 'date-fns';
 
 interface SyncLog {
@@ -32,7 +32,7 @@ const PhoneSync: React.FC = () => {
         ...doc.data()
       })) as SyncLog[];
       setLogs(newLogs);
-    });
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'phone_sync_logs'));
 
     return () => unsubscribe();
   }, []);

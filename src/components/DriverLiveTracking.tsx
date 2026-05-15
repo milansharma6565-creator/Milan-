@@ -168,7 +168,7 @@ export function DriverLiveTracking({ driverId }: DriverLiveTrackingProps) {
             <Navigation size={32} className="text-blue-600" />
           </div>
           <h1 className="text-2xl font-display font-bold text-slate-900">Driver Portal</h1>
-          <p className="text-slate-500 font-medium">Rajhans Steel and Water</p>
+          <p className="text-slate-500 font-medium">TankerWala Powered by Rajhans</p>
         </header>
 
         <motion.div 

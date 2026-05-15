@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { 
   collection, 
@@ -47,6 +47,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { format } from 'date-fns';
 import { ConfirmationModal } from './ConfirmationModal';
+import { generatePDF } from '../lib/pdfUtils';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 type AccountingTab = 'vouchers' | 'daybook' | 'ledgers' | 'reports' | 'accounts';
 
@@ -158,6 +161,7 @@ export function Ledger() {
         { name: 'Salary Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
         { name: 'Salary Payable', group: 'Current Liabilities', opening: 0, type: 'Cr' },
         { name: 'Service Income', group: 'Direct Income', opening: 0, type: 'Cr' },
+        { name: 'Penalty Recovery', group: 'Direct Income', opening: 0, type: 'Cr' },
       ];
 
       for (const acc of defaultAccounts) {
@@ -200,6 +204,12 @@ export function Ledger() {
     });
     return balance;
   };
+
+  const sortedAccounts = useMemo(() => {
+    return [...accounts]
+      .filter(a => !a.isHidden) // Hide hidden accounts from common selection
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [accounts]);
 
   const stats = useMemo(() => {
     const cashId = accounts.find(a => a.name === 'Cash')?.id;
@@ -288,16 +298,60 @@ function AccountingTabButton({ active, onClick, icon, label }: { active: boolean
 /** Daybook View */
 function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher: () => void }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [dateFilter, setDateFilter] = useState<'All' | 'Today' | 'Custom'>('Today');
+  const [customDate, setCustomDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   
-  const filtered = vouchers.filter(v => 
-    v.narration.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    v.voucherNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    v.type.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    return vouchers.filter(v => {
+      let dateMatch = true;
+      if (dateFilter === 'Today') {
+        dateMatch = format(v.date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+      } else if (dateFilter === 'Custom') {
+        dateMatch = format(v.date, 'yyyy-MM-dd') === customDate;
+      }
+      
+      const searchMatch = v.narration.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        v.voucherNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        v.type.toLowerCase().includes(searchTerm.toLowerCase());
+        
+      return dateMatch && searchMatch;
+    }).sort((a, b) => b.date.getTime() - a.date.getTime());
+  }, [vouchers, searchTerm, dateFilter, customDate]);
+
+  const componentRef = useRef<HTMLDivElement>(null);
+  const handlePrint = async () => {
+    const doc = new jsPDF();
+    doc.setFontSize(20);
+    doc.text('TankerWala Powered by Rajhans', 14, 20);
+    doc.setFontSize(10);
+    doc.text('Daybook / Journal', 14, 28);
+    doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 34);
+
+    const tableData = filtered.map(v => [
+      format(v.date, 'dd/MM/yyyy'),
+      v.voucherNumber,
+      v.type,
+      v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName,
+      v.totalAmount.toLocaleString('en-IN')
+    ]);
+
+    autoTable(doc, {
+      head: [['Date', 'Vch No.', 'Type', 'Particulars', 'Amount']],
+      body: tableData,
+      startY: 40,
+      theme: 'grid',
+      headStyles: { fillColor: [15, 23, 42] },
+      columnStyles: {
+        4: { halign: 'right' }
+      }
+    });
+
+    doc.save(`Daybook_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
+  };
 
   return (
     <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-      <div className="p-6 border-b border-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="p-6 border-b border-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
@@ -307,16 +361,54 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
             onChange={e => setSearchTerm(e.target.value)}
           />
         </div>
-        <button 
-          onClick={onAddVoucher}
-          className="h-12 px-6 bg-slate-900 text-white rounded-2xl flex items-center gap-2 text-sm font-bold shadow-lg shadow-slate-200 active:scale-95 transition-all"
-        >
-          <Plus size={18} />
-          <span>New Voucher</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex bg-slate-100 p-1 rounded-2xl">
+            {(['All', 'Today', 'Custom'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setDateFilter(f)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${dateFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+          {dateFilter === 'Custom' && (
+            <input
+              type="date"
+              value={customDate}
+              onChange={(e) => setCustomDate(e.target.value)}
+              className="h-10 px-4 bg-slate-50 border outline-none rounded-2xl text-xs font-bold text-slate-700"
+            />
+          )}
+          <button 
+            onClick={async () => {
+              try {
+                await handlePrint();
+              } catch (err) {
+                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+              }
+            }}
+            className="h-12 px-6 bg-slate-100 text-slate-700 rounded-2xl flex items-center gap-2 text-sm font-bold shadow-sm active:scale-95 transition-all"
+          >
+            <Printer size={18} />
+            <span>Print</span>
+          </button>
+          <button 
+            onClick={onAddVoucher}
+            className="h-12 px-6 bg-slate-900 text-white rounded-2xl flex items-center gap-2 text-sm font-bold shadow-lg shadow-slate-200 active:scale-95 transition-all"
+          >
+            <Plus size={18} />
+            <span>New Voucher</span>
+          </button>
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto p-4 pt-0 print:p-8" ref={componentRef}>
+        <div className="hidden print:block mb-8 mt-4 text-center">
+          <h2 className="text-2xl font-black mb-2">TankerWala Powered by Rajhans</h2>
+          <p className="text-sm text-slate-500 uppercase tracking-widest">Daybook / Journal</p>
+        </div>
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
@@ -389,6 +481,10 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
   const [narration, setNarration] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const sortedAccounts = useMemo(() => {
+    return [...accounts].sort((a, b) => a.name.localeCompare(b.name));
+  }, [accounts]);
+
   const totals = useMemo(() => {
     return items.reduce((acc, item) => {
       if (item.type === 'Dr') acc.dr += item.amount;
@@ -406,11 +502,16 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
     setSubmitting(true);
     try {
       await runTransaction(db, async (transaction) => {
-        // --- 1. CALCULATE & UPDATE BALANCES ---
-        for (const item of items) {
+        // --- 1. ALL READS FIRST ---
+        const accDocs = await Promise.all(items.map(async (item) => {
           const accRef = doc(db, 'accounts', item.accountId);
           const accDoc = await transaction.get(accRef);
-          
+          return { item, accRef, accDoc };
+        }));
+
+        // --- 2. VALIDATE & CALCULATE BALANCES ---
+        const updates: { ref: any, newBalance: number }[] = [];
+        for (const { item, accDoc } of accDocs) {
           if (accDoc.exists()) {
             const accData = accDoc.data();
             let newBalance = accData.currentBalance || 0;
@@ -427,12 +528,16 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
                 throw new Error(`INSUFFICIENT_FUNDS:${accData.name}:${accData.currentBalance || 0}`);
               }
             }
-
-            transaction.update(accRef, { currentBalance: newBalance });
+            updates.push({ ref: accDoc.ref, newBalance });
           }
         }
 
-        // --- 2. SAVE VOUCHER ---
+        // --- 3. EXECUTE WRITES ---
+        for (const update of updates) {
+          transaction.update(update.ref, { currentBalance: update.newBalance });
+        }
+
+        // --- 4. SAVE VOUCHER ---
         const vchRef = doc(collection(db, 'vouchers'));
         transaction.set(vchRef, {
           date: new Date(date),
@@ -579,7 +684,7 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
                     onChange={e => updateItem(idx, { accountId: e.target.value })}
                   >
                     <option value="">Select Account...</option>
-                    {accounts.map(acc => (
+                    {sortedAccounts.map(acc => (
                       <option key={acc.id} value={acc.id}>{acc.name}</option>
                     ))}
                   </select>
@@ -777,6 +882,12 @@ function AccountEntryModal({ onClose, groups }: { onClose: () => void, groups: A
 /** Ledger Statements View */
 function LedgerStatements({ accounts, vouchers }: { accounts: Account[], vouchers: Voucher[] }) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [hiddenRows, setHiddenRows] = useState<Set<number>>(new Set());
+
+  const sortedAccounts = useMemo(() => {
+    return [...accounts].sort((a, b) => a.name.localeCompare(b.name));
+  }, [accounts]);
 
   const statement = useMemo(() => {
     if (!selectedAccountId) return [];
@@ -788,13 +899,15 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
     
     // 1. Opening Balance
     lines.push({
+      id: 'OP',
       date: null,
       particulars: 'Opening Balance',
       dr: acc.balanceType === 'Dr' ? acc.openingBalance : 0,
       cr: acc.balanceType === 'Cr' ? acc.openingBalance : 0,
       vchType: 'OP',
       balance: acc.openingBalance,
-      balType: acc.balanceType
+      balType: acc.balanceType,
+      isHidden: false
     });
 
     // 2. Transactions
@@ -808,10 +921,16 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
       const item = v.items.find(i => i.accountId === selectedAccountId)!;
       const otherItems = v.items.filter(i => i.accountId !== selectedAccountId);
       
-      if (item.type === 'Dr') runningBalance += item.amount;
-      else runningBalance -= item.amount;
+      const isActuallyHidden = v.isHidden === true;
+
+      // Only update balance if NOT hidden
+      if (!isActuallyHidden) {
+        if (item.type === 'Dr') runningBalance += item.amount;
+        else runningBalance -= item.amount;
+      }
 
       lines.push({
+        id: v.id,
         date: v.date,
         particulars: otherItems.map(oi => oi.accountName).join(', ') || 'Various',
         dr: item.type === 'Dr' ? item.amount : 0,
@@ -819,12 +938,81 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
         vchType: v.type,
         vchNo: v.voucherNumber,
         balance: Math.abs(runningBalance),
-        balType: runningBalance >= 0 ? 'Dr' : 'Cr'
+        balType: runningBalance >= 0 ? 'Dr' : 'Cr',
+        isHidden: isActuallyHidden
       });
     });
 
     return lines;
   }, [selectedAccountId, accounts, vouchers]);
+
+  // Clear index when changing account
+  useEffect(() => {
+    setSelectedRowIndex(null);
+  }, [selectedAccountId]);
+
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // Ctrl + M to toggle hide status for selected row
+      if (e.ctrlKey && (e.key === 'm' || e.key === 'M') && selectedRowIndex !== null) {
+        e.preventDefault();
+        const row = statement[selectedRowIndex];
+        if (!row || !row.id || row.vchType === 'OP') return;
+
+        try {
+          await updateDoc(doc(db, 'vouchers', row.id), {
+            isHidden: !row.isHidden,
+            updatedAt: serverTimestamp()
+          });
+          if (navigator.vibrate) navigator.vibrate(50);
+        } catch (error) {
+          console.error("Error toggling hide status:", error);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedRowIndex, statement]);
+
+  const componentRef = useRef<HTMLDivElement>(null);
+  const handlePrint = async () => {
+    if (!selectedAccountId) return;
+    const acc = accounts.find(a => a.id === selectedAccountId);
+    if (!acc) return;
+
+    const doc = new jsPDF();
+    doc.setFontSize(20);
+    doc.text('TankerWala Powered by Rajhans', 14, 20);
+    doc.setFontSize(12);
+    doc.text(`Ledger Account: ${acc.name}`, 14, 30);
+    doc.setFontSize(10);
+    doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 36);
+
+    const tableData = statement
+      .filter(row => !row.isHidden)
+      .map(row => [
+        row.date ? format(row.date, 'dd/MM/yyyy') : '-',
+        row.particulars + (row.vchNo ? ` (${row.vchType} #${row.vchNo})` : ''),
+        row.dr > 0 ? row.dr.toLocaleString('en-IN') : '',
+        row.cr > 0 ? row.cr.toLocaleString('en-IN') : '',
+        `${row.balance.toLocaleString('en-IN')} ${row.balType}`
+      ]);
+
+    autoTable(doc, {
+      head: [['Date', 'Particulars', 'Debit', 'Credit', 'Balance']],
+      body: tableData,
+      startY: 42,
+      theme: 'grid',
+      headStyles: { fillColor: [15, 23, 42] },
+      columnStyles: {
+        2: { halign: 'right' },
+        3: { halign: 'right' },
+        4: { halign: 'right' }
+      }
+    });
+
+    doc.save(`Ledger_${acc.name}_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -833,7 +1021,7 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
         <div className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm space-y-4">
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Select Account</label>
           <div className="space-y-1">
-            {accounts.map(acc => (
+            {sortedAccounts.map(acc => (
               <button
                 key={acc.id}
                 onClick={() => setSelectedAccountId(acc.id!)}
@@ -852,17 +1040,28 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
       <div className="lg:col-span-3">
         {selectedAccountId ? (
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-            <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+            <div className="p-8 border-b border-slate-50 flex items-center justify-between print:hidden">
               <div>
                 <h3 className="text-2xl font-display font-black text-slate-900">
                   {accounts.find(a => a.id === selectedAccountId)?.name}
                 </h3>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Account Statement (Historical)</p>
               </div>
-              <button className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-slate-900"><Printer size={20} /></button>
+              <button onClick={async () => {
+                try {
+                  await handlePrint();
+                } catch (err) {
+                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+                }
+              }} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-slate-900"><Printer size={20} /></button>
             </div>
             
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto p-8 pt-0 outline-none print:p-8" ref={componentRef}>
+              <div className="hidden print:block mb-8 mt-4 text-center">
+                <h2 className="text-2xl font-black mb-2">{accounts.find(a => a.id === selectedAccountId)?.name}</h2>
+                <p className="text-sm text-slate-500 uppercase tracking-widest">Account Statement</p>
+                {hiddenRows.size > 0 && <p className="text-xs text-slate-400 mt-1 italic">Note: Some entries have been hidden</p>}
+              </div>
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50/50">
@@ -875,8 +1074,15 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {statement.map((row, i) => (
-                    <tr key={i} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 pl-8 text-sm font-bold text-slate-500">
+                    <tr 
+                      key={i} 
+                      onClick={() => setSelectedRowIndex(i)}
+                      className={`hover:bg-slate-50/50 transition-colors cursor-pointer ${
+                        row.isHidden ? 'opacity-30 line-through' : ''
+                      } ${selectedRowIndex === i ? 'bg-indigo-50/50' : ''}`}
+                    >
+                      <td className="p-4 pl-8 text-sm font-bold text-slate-500 flex items-center gap-2">
+                         {row.isHidden && <Filter size={10} className="text-slate-400" />}
                         {row.date ? format(row.date, 'dd MMM yy') : '-'}
                       </td>
                       <td className="p-4">
@@ -928,7 +1134,7 @@ function AccountSetup({ accounts, groups, onAddAccount }: { accounts: Account[],
 
        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
          {groups.map(g => {
-           const groupAccounts = accounts.filter(a => a.groupId === g.id);
+           const groupAccounts = accounts.filter(a => a.groupId === g.id).sort((a,b) => a.name.localeCompare(b.name));
            return (
              <div key={g.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-50 pb-3">
@@ -978,15 +1184,24 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
         dr: bal >= 0 ? Math.abs(bal) : 0,
         cr: bal < 0 ? Math.abs(bal) : 0
       };
-    }).filter(a => a.dr > 0 || a.cr > 0);
+    })
+    .filter(a => a.dr > 0 || a.cr > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
   }, [accounts, vouchers]);
 
   const plData = useMemo(() => {
     const incomeGroups = groups.filter(g => g.type === 'Income').map(g => g.id);
     const expenseGroups = groups.filter(g => g.type === 'Expense').map(g => g.id);
     
-    const incomes = accounts.filter(a => incomeGroups.includes(a.groupId)).map(a => ({ name: a.name, amount: Math.abs(getBal(a.id!)) }));
-    const expenses = accounts.filter(a => expenseGroups.includes(a.groupId)).map(a => ({ name: a.name, amount: Math.abs(getBal(a.id!)) }));
+    const incomes = accounts
+      .filter(a => incomeGroups.includes(a.groupId))
+      .map(a => ({ name: a.name, amount: Math.abs(getBal(a.id!)) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    
+    const expenses = accounts
+      .filter(a => expenseGroups.includes(a.groupId))
+      .map(a => ({ name: a.name, amount: Math.abs(getBal(a.id!)) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
     
     const totalIncome = incomes.reduce((s, i) => s + i.amount, 0);
     const totalExpense = expenses.reduce((s, e) => s + e.amount, 0);
@@ -994,15 +1209,163 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
     return { incomes, expenses, totalIncome, totalExpense, net: totalIncome - totalExpense };
   }, [accounts, vouchers, groups]);
 
+  const componentRef = useRef<HTMLDivElement>(null);
+  const handlePrint = async () => {
+    const doc = new jsPDF();
+    doc.setFontSize(20);
+    doc.text('TankerWala Powered by Rajhans', 14, 20);
+    
+    const title = reportType === 'trial' ? 'Trial Balance' : 
+                  reportType === 'pl' ? 'Profit & Loss Statement' : 
+                  'Balance Sheet';
+    
+    doc.setFontSize(12);
+    doc.text(title, 14, 30);
+    doc.setFontSize(10);
+    doc.text(`As on ${format(new Date(), 'dd MMM yyyy')}`, 14, 36);
+
+    if (reportType === 'trial') {
+      const tableData = trialBalance.map(a => [
+        a.name,
+        a.dr > 0 ? a.dr.toLocaleString('en-IN') : '',
+        a.cr > 0 ? a.cr.toLocaleString('en-IN') : ''
+      ]);
+      
+      const totalDr = trialBalance.reduce((s, a) => s + a.dr, 0);
+      const totalCr = trialBalance.reduce((s, a) => s + a.cr, 0);
+      
+      tableData.push(['Grand Total', totalDr.toLocaleString('en-IN'), totalCr.toLocaleString('en-IN')]);
+
+      autoTable(doc, {
+        head: [['Account Name', 'Debit (Dr)', 'Credit (Cr)']],
+        body: tableData,
+        startY: 42,
+        theme: 'grid',
+        headStyles: { fillColor: [15, 23, 42] },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+        columnStyles: {
+          1: { halign: 'right' },
+          2: { halign: 'right' }
+        }
+      });
+    } else if (reportType === 'pl') {
+      const tableData: any[] = [];
+      const maxLength = Math.max(plData.incomes.length, plData.expenses.length);
+      
+      for (let i = 0; i < maxLength; i++) {
+        const income = plData.incomes[i];
+        const expense = plData.expenses[i];
+        tableData.push([
+          expense?.name || '',
+          expense?.amount ? expense.amount.toLocaleString('en-IN') : '',
+          income?.name || '',
+          income?.amount ? income.amount.toLocaleString('en-IN') : ''
+        ]);
+      }
+      
+      tableData.push([
+        'Total Expenses', plData.totalExpense.toLocaleString('en-IN'),
+        'Total Income', plData.totalIncome.toLocaleString('en-IN')
+      ]);
+      
+      tableData.push([
+        plData.net >= 0 ? 'Net Profit' : '',
+        plData.net >= 0 ? plData.net.toLocaleString('en-IN') : '',
+        plData.net < 0 ? 'Net Loss' : '',
+        plData.net < 0 ? Math.abs(plData.net).toLocaleString('en-IN') : ''
+      ]);
+
+      autoTable(doc, {
+        head: [['Expenses', 'Amount', 'Income', 'Amount']],
+        body: tableData,
+        startY: 42,
+        theme: 'grid',
+        headStyles: { fillColor: [15, 23, 42] },
+        columnStyles: {
+          1: { halign: 'right' },
+          3: { halign: 'right' }
+        }
+      });
+    } else {
+      // Balance Sheet
+      const liabilities = groups.filter(g => g.type === 'Liability' || g.type === 'Equity');
+      const assets = groups.filter(g => g.type === 'Asset');
+      
+      const libItems: any[] = [];
+      liabilities.forEach(g => {
+        const bal = accounts.filter(a => a.groupId === g.id).reduce((s, a) => s + Math.abs(getBal(a.id!)), 0);
+        if (bal > 0) libItems.push({ name: g.name, bal });
+      });
+      if (plData.net > 0) libItems.push({ name: 'Profit & Loss A/c (Profit)', bal: plData.net });
+      
+      const assetItems: any[] = [];
+      assets.forEach(g => {
+        const bal = accounts.filter(a => a.groupId === g.id).reduce((s, a) => s + Math.abs(getBal(a.id!)), 0);
+        if (bal > 0) assetItems.push({ name: g.name, bal });
+      });
+      if (plData.net < 0) assetItems.push({ name: 'Profit & Loss A/c (Loss)', bal: Math.abs(plData.net) });
+      
+      const maxLength = Math.max(libItems.length, assetItems.length);
+      const tableData = [];
+      for (let i = 0; i < maxLength; i++) {
+        tableData.push([
+          libItems[i]?.name || '',
+          libItems[i]?.bal ? libItems[i].bal.toLocaleString('en-IN') : '',
+          assetItems[i]?.name || '',
+          assetItems[i]?.bal ? assetItems[i].bal.toLocaleString('en-IN') : ''
+        ]);
+      }
+      
+      const totalLib = libItems.reduce((s, i) => s + i.bal, 0);
+      const totalAssets = assetItems.reduce((s, i) => s + i.bal, 0);
+      
+      tableData.push(['Total Liabilities', totalLib.toLocaleString('en-IN'), 'Total Assets', totalAssets.toLocaleString('en-IN')]);
+
+      autoTable(doc, {
+        head: [['Liabilities', 'Amount', 'Assets', 'Amount']],
+        body: tableData,
+        startY: 42,
+        theme: 'grid',
+        headStyles: { fillColor: [15, 23, 42] },
+        columnStyles: {
+          1: { halign: 'right' },
+          3: { halign: 'right' }
+        }
+      });
+    }
+
+    doc.save(`${reportType.toUpperCase()}_Report_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
+  };
+
   return (
     <div className="space-y-6">
-       <div className="flex bg-slate-100 p-1 rounded-2xl w-fit">
-          <button onClick={() => setReportType('trial')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'trial' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Trial Balance</button>
-          <button onClick={() => setReportType('pl')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'pl' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Profit & Loss</button>
-          <button onClick={() => setReportType('bs')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'bs' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Balance Sheet</button>
+       <div className="flex justify-between items-center print:hidden">
+         <div className="flex bg-slate-100 p-1 rounded-2xl w-fit">
+            <button onClick={() => setReportType('trial')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'trial' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Trial Balance</button>
+            <button onClick={() => setReportType('pl')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'pl' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Profit & Loss</button>
+            <button onClick={() => setReportType('bs')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'bs' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Balance Sheet</button>
+         </div>
+         <button onClick={async () => {
+           try {
+             await handlePrint();
+           } catch (err) {
+             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+           }
+         }} className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold shadow-lg shadow-slate-200 text-sm active:scale-95 transition-all">
+           <Printer size={18} /> Print Report
+         </button>
        </div>
 
-       {reportType === 'trial' && (
+       <div ref={componentRef} className="print:p-8">
+         <div className="hidden print:block mb-8 text-center">
+           <h2 className="text-3xl font-black mb-2">TankerWala Powered by Rajhans</h2>
+           <p className="text-sm text-slate-500 uppercase tracking-widest">{
+             reportType === 'trial' ? 'Trial Balance' : 
+             reportType === 'pl' ? 'Profit & Loss Statement' : 
+             'Balance Sheet'
+           }</p>
+         </div>
+         {reportType === 'trial' && (
          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden p-8">
             <h3 className="text-xl font-display font-black text-slate-900 mb-6">Trial Balance</h3>
             <table className="w-full text-left">
@@ -1085,8 +1448,8 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 space-y-6">
               <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-4">Liabilities & Capital</h4>
               <div className="space-y-4">
-                {groups.filter(g => g.type === 'Liability' || g.type === 'Equity').map(g => {
-                  const grpAccs = accounts.filter(a => a.groupId === g.id);
+                {groups.filter(g => g.type === 'Liability' || g.type === 'Equity').sort((a, b) => a.name.localeCompare(b.name)).map(g => {
+                  const grpAccs = accounts.filter(a => a.groupId === g.id).sort((a, b) => a.name.localeCompare(b.name));
                   const bal = grpAccs.reduce((s, a) => s + Math.abs(getBal(a.id!)), 0);
                   if (bal === 0) return null;
                   return (
@@ -1122,8 +1485,8 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 space-y-6">
               <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-4">Assets</h4>
               <div className="space-y-4">
-                {groups.filter(g => g.type === 'Asset').map(g => {
-                  const grpAccs = accounts.filter(a => a.groupId === g.id);
+                {groups.filter(g => g.type === 'Asset').sort((a, b) => a.name.localeCompare(b.name)).map(g => {
+                  const grpAccs = accounts.filter(a => a.groupId === g.id).sort((a, b) => a.name.localeCompare(b.name));
                   const bal = grpAccs.reduce((s, a) => s + Math.abs(getBal(a.id!)), 0);
                   if (bal === 0) return null;
                   return (
@@ -1157,6 +1520,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
             </div>
          </div>
        )}
+       </div>
     </div>
   );
 }

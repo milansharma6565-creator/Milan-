@@ -1,3 +1,17 @@
+export const PRODUCT_CATEGORIES = [
+  { label: 'Water Tanker (Trip)', value: 'TANKER' },
+  { label: 'Standby Tanker (Daily)', value: 'STANDBY_TANKER' },
+  { label: 'Monthly Tanker', value: 'MONTHLY_TANKER' },
+  { label: 'Packaged Bottle', value: 'BOTTLE' },
+  { label: '20L Water Can', value: 'CAN' },
+] as const;
+
+export const BOTTLE_SIZES = [
+  { label: '500ml', value: '500ml', defaultRate: 10 },
+  { label: '1 Litre', value: '1L', defaultRate: 20 },
+  { label: '2 Litre', value: '2L', defaultRate: 35 },
+] as const;
+
 export const TANKER_SIZES = [
   { label: '5000L', value: '5000', defaultRate: 400 },
   { label: '7500L', value: '7500', defaultRate: 600 },

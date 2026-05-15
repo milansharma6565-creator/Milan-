@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc, runTransaction } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc, runTransaction, orderBy, limit } from 'firebase/firestore';
 import { Customer, Driver, Bill } from '../types';
 import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber } from '../constants';
-import { useReactToPrint } from 'react-to-print';
+import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES } from '../constants';
 import { ThermalInvoice } from './ThermalInvoice';
 import { format } from 'date-fns';
 import { toJpeg } from 'html-to-image';
+import { ledgerAutomation } from '../services/ledgerAutomation';
+import { LocationPicker } from './LocationPicker';
 
 export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -52,13 +53,16 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
   const [form, setForm] = useState({
     billNumber: '',
     date: new Date().toISOString().slice(0, 16),
+    category: 'TANKER' as any,
     tankerSize: TANKER_SIZES[0].value,
+    bottleSize: BOTTLE_SIZES[1].value,
     quantity: 1,
     rate: TANKER_SIZES[0].defaultRate,
     extraCharges: 0,
     discount: 0,
     status: 'Pending' as typeof BILL_STATUSES[number],
     customAddress: '',
+    driverId: '',
     driverName: '',
     paymentMethod: 'Store' as 'Cash' | 'Bank' | 'Store',
     remarks: '',
@@ -81,10 +85,17 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
   useEffect(() => {
     async function initBillNumber() {
       try {
-        const snapshot = await getDocs(collection(db, 'bills'));
-        setForm(prev => ({ ...prev, billNumber: generateBillNumber(snapshot.size + 1) }));
+        const q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
+        const snapshot = await getDocs(q);
+        let nextNum = 1;
+        if (!snapshot.empty) {
+          const lastNumStr = snapshot.docs[0].data().billNumber;
+          const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
+          if (!isNaN(parsed)) nextNum = parsed + 1;
+        }
+        setForm(prev => ({ ...prev, billNumber: generateBillNumber(nextNum) }));
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'bills');
+        handleFirestoreError(error, OperationType.GET, 'bills-init-number');
       }
     }
     initBillNumber();
@@ -143,13 +154,33 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
   const grandTotal = subtotal + form.extraCharges - form.discount;
 
   useEffect(() => {
-    const size = TANKER_SIZES.find(s => s.value === form.tankerSize);
-    if (size) {
-      setForm(prev => ({ ...prev, rate: size.defaultRate }));
+    if (form.category === 'TANKER') {
+      const size = TANKER_SIZES.find(s => s.value === form.tankerSize);
+      if (size) setForm(prev => ({ ...prev, rate: size.defaultRate }));
+    } else if (form.category === 'STANDBY_TANKER') {
+      // Day 1: 900, Day 2+: 600
+      let calcRate = 900;
+      if (form.quantity > 1) {
+        // We'll store the logic in the rate for simplicity or handle in total
+        // For billing, it's easier to set total manually or calculate here
+        const total = 900 + (form.quantity - 1) * 600;
+        setForm(prev => ({ ...prev, rate: total / form.quantity })); 
+      } else {
+        setForm(prev => ({ ...prev, rate: 900 }));
+      }
+    } else if (form.category === 'MONTHLY_TANKER') {
+      setForm(prev => ({ ...prev, rate: 10000 }));
+    } else if (form.category === 'BOTTLE') {
+      const size = BOTTLE_SIZES.find(s => s.value === form.bottleSize);
+      if (size) setForm(prev => ({ ...prev, rate: size.defaultRate }));
+    } else if (form.category === 'CAN') {
+      setForm(prev => ({ ...prev, rate: 80 })); // Assuming ₹80 for CAN
     }
-  }, [form.tankerSize]);
+  }, [form.category, form.tankerSize, form.bottleSize, form.quantity]);
 
   const [showStatusSelection, setShowStatusSelection] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const [deliveryLocation, setDeliveryLocation] = useState<{lat: number, lng: number, address: string} | null>(null);
 
   const shareBillImage = async (bill: any) => {
     if (!selectedCustomer || !thermalRef.current) return;
@@ -172,7 +203,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
           await navigator.share({
             files: [file],
             title: `Token #${bill.billNumber}`,
-            text: `Trip Token from Rajhans steel and Water for amount ₹${bill.grandTotal}`
+            text: `Trip Token from TankerWala Powered by Rajhans for amount ₹${bill.grandTotal}`
           });
           return;
         } catch (shareErr: any) {
@@ -202,16 +233,38 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
 
   const sendWhatsApp = (bill: any) => {
     if (!selectedCustomer) return;
-    const rebookUrl = `${window.location.origin}/?o=${bill.id}`;
-    const message = `*Order Token - Rajhans* 🚛\n\n` +
+    const urlObj = new URL(window.location.href);
+    urlObj.search = ''; // Clear current params
+    urlObj.searchParams.set('o', bill.id);
+    const rebookUrl = urlObj.toString();
+    
+    const message = `*Order Token - TankerWala* 🚛\n\n` +
       `Token: #${bill.billNumber}\n` +
       `Amt: ₹${bill.grandTotal}\n` +
-      `Size: ${bill.tankerSize}\n\n` +
+      `Category: ${bill.category}\n` +
+      `Size: ${bill.category === 'TANKER' ? bill.tankerSize : bill.bottleSize || '20L'}\n\n` +
       `Rebook: ${rebookUrl}\n\n` +
-      `Rajhans Steel & Water`;
+      `TankerWala Powered by Rajhans`;
     
     // Using international format for mobile if needed, but assuming 10 digit Indian number
     const phone = selectedCustomer.mobile.startsWith('91') ? selectedCustomer.mobile : `91${selectedCustomer.mobile}`;
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
+  const sendDriverWhatsApp = (bill: any, driver: Driver) => {
+    if (!deliveryLocation) return;
+    
+    const mapLink = `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`;
+    const message = `*New Trip Assigned - TankerWala* 🚛\n\n` +
+      `Token: #${bill.billNumber}\n` +
+      `Customer: ${bill.customerName}\n` +
+      `Mobile: ${bill.customerMobile}\n` +
+      `Location: ${deliveryLocation.address}\n\n` +
+      `📍 *Navigation Link:* ${mapLink}\n\n` +
+      `TankerWala Powered by Rajhans`;
+    
+    const phone = driver.mobile.startsWith('91') ? driver.mobile : `91${driver.mobile}`;
     const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
   };
@@ -246,7 +299,15 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         customerName: selectedCustomer.name,
         customerMobile: selectedCustomer.mobile,
         customerAddress: form.customAddress || selectedCustomer.address,
-        tankerSize: form.tankerSize,
+        category: form.category,
+        ...(deliveryLocation && {
+          deliveryLocation: {
+            ...deliveryLocation,
+            mapLink: `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`
+          }
+        }),
+        tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
+        bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
         quantity: form.quantity,
         rate: form.rate,
         totalAmount: subtotal,
@@ -257,12 +318,50 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         driverName: form.driverName,
         status: 'Pending',
         isSettled: false,
+        driverId: form.driverId,
         remarks: form.remarks.trim(),
         createdAt: serverTimestamp()
       };
 
       const docRef = await addDoc(collection(db, 'bills'), billData);
-      setBookedBill({ ...billData, id: docRef.id });
+      const bookedBillWithId = { ...billData, id: docRef.id };
+      setBookedBill(bookedBillWithId);
+
+      // Automatically post to Ledger (Automation)
+      ledgerAutomation.postBillToLedger(bookedBillWithId);
+
+      // If a driver is assigned, create an active trip for them
+      if (form.driverId) {
+        const driver = drivers.find(d => d.id === form.driverId);
+        
+        await addDoc(collection(db, 'trips'), {
+          billId: docRef.id,
+          billNumber: form.billNumber,
+          driverId: form.driverId,
+          driverName: form.driverName,
+          customerName: selectedCustomer.name,
+          customerMobile: selectedCustomer.mobile,
+          siteLocation: form.customAddress || selectedCustomer.address,
+          category: form.category,
+          ...(deliveryLocation && {
+            deliveryLocation: {
+              ...deliveryLocation,
+              mapLink: `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`
+            }
+          }),
+          quantity: form.quantity,
+          tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
+          bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
+          tankerNumber: 'T-01', // Default or could be dynamic
+          status: 'Active',
+          createdAt: serverTimestamp()
+        });
+
+        // Share with driver if assigned
+        if (driver) {
+          sendDriverWhatsApp(bookedBillWithId, driver);
+        }
+      }
 
       setShowBookingSuccess(true);
       
@@ -274,9 +373,12 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         quantity: 1,
         extraCharges: 0,
         discount: 0,
+        driverId: '',
         driverName: '',
         remarks: ''
       }));
+      setDeliveryLocation(null);
+      setShowMap(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'bills');
     }
@@ -491,7 +593,30 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
                 </button>
               </div>
               <div className="mt-4 pt-4 border-t border-blue-200/50">
-                <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1 block">Delivery Location</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[10px] font-black text-blue-400 uppercase tracking-widest block">Delivery Location</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowMap(!showMap)}
+                    className="flex items-center gap-1.5 text-[10px] font-bold text-blue-600 bg-white px-2 py-1 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+                  >
+                    <MapPin size={12} />
+                    {showMap ? 'Hide Map' : 'Select on Map'}
+                  </button>
+                </div>
+
+                {showMap && (
+                  <div className="mb-4">
+                    <LocationPicker 
+                      onLocationSelect={(lat, lng, address) => {
+                        setDeliveryLocation({ lat, lng, address });
+                        setForm(prev => ({ ...prev, customAddress: address }));
+                      }} 
+                    />
+                    <p className="mt-2 text-[10px] text-blue-500 font-medium">Click on the map to pick exact delivery point. 5km radius shown.</p>
+                  </div>
+                )}
+
                 <textarea
                   className="w-full bg-transparent border-0 p-0 text-sm focus:ring-0 resize-none text-blue-900 font-medium"
                   value={form.customAddress}
@@ -506,21 +631,52 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         {/* Bill Details */}
         <div className="material-card">
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Trip Configuration</label>
-          <div className="grid grid-cols-2 gap-4">
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Tanker Size</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Category</label>
               <select 
                 className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 px-4 font-bold transition-all text-sm"
-                value={form.tankerSize}
-                onChange={e => setForm({...form, tankerSize: e.target.value})}
+                value={form.category}
+                onChange={e => setForm({...form, category: e.target.value as any})}
               >
-                {TANKER_SIZES.map(s => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
+                {PRODUCT_CATEGORIES.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Quantity</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">{form.category === 'TANKER' ? 'Tanker Size' : 'Bottle Size / 20L'}</label>
+              {form.category === 'TANKER' ? (
+                <select 
+                  className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 px-4 font-bold transition-all text-sm"
+                  value={form.tankerSize}
+                  onChange={e => setForm({...form, tankerSize: e.target.value})}
+                >
+                  {TANKER_SIZES.map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              ) : form.category === 'BOTTLE' ? (
+                <select 
+                  className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 px-4 font-bold transition-all text-sm"
+                  value={form.bottleSize}
+                  onChange={e => setForm({...form, bottleSize: e.target.value as any})}
+                >
+                  {BOTTLE_SIZES.map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="w-full bg-slate-100 rounded-xl py-3 px-4 font-bold text-sm text-slate-500">20L Standard</div>
+              )}
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">
+                {form.category === 'STANDBY_TANKER' ? 'Duration (Days)' : 
+                 form.category === 'MONTHLY_TANKER' ? 'Duration (Months)' : 
+                 'Quantity'}
+              </label>
               <input
                 type="number"
                 min="1"
@@ -544,6 +700,34 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
                 />
               </div>
             </div>
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Assign Driver</label>
+              <select 
+                className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 px-4 font-bold transition-all text-sm"
+                value={form.driverId}
+                onChange={async (e) => {
+                  const dId = e.target.value;
+                  if (dId) {
+                    const qTrp = query(collection(db, 'trips'), where('driverId', '==', dId), where('status', 'in', ['Active', 'Filling', 'On the way', 'Reached']));
+                    const snap = await getDocs(qTrp);
+                    if (!snap.empty) {
+                       alert('Driver is already on an active trip! Please wait until they finish.');
+                       return;
+                    }
+                  }
+                  const driver = drivers.find(d => d.id === dId);
+                  setForm({...form, driverId: dId, driverName: driver?.name || ''});
+                }}
+              >
+                <option value="">Select Driver</option>
+                {drivers.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mt-4">
             <div>
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Extra / Discount (₹)</label>
               <div className="relative">
