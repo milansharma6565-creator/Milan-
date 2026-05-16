@@ -9,7 +9,7 @@ import { ledgerAutomation } from '../services/ledgerAutomation';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export function DriverManagement() {
+export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [isAdding, setIsAdding] = useState(false);
   const [activeTab, setActiveTab] = useState<'Active' | 'Inactive' | 'pending'>('Active');
   const [newDriver, setNewDriver] = useState({ name: '', mobile: '', monthlySalary: '', pin: '' });
@@ -29,13 +29,20 @@ export function DriverManagement() {
   const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'drivers'));
+    let q = query(collection(db, 'drivers'));
+    if (!isSuperAdmin && franchiseId) {
+      q = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
+    }
     const unsubDrivers = onSnapshot(q, 
       (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'drivers')
     );
 
-    const unsubAccounts = onSnapshot(collection(db, 'accounts'), 
+    let qAccounts = query(collection(db, 'accounts'));
+    if (!isSuperAdmin && franchiseId) {
+      qAccounts = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    }
+    const unsubAccounts = onSnapshot(qAccounts, 
       (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts-drivers')
     );
@@ -44,7 +51,7 @@ export function DriverManagement() {
       unsubDrivers();
       unsubAccounts();
     };
-  }, []);
+  }, [franchiseId, isSuperAdmin]);
 
   const filteredDrivers = drivers.filter(d => (d.status || 'Active') === activeTab);
 
@@ -66,6 +73,7 @@ export function DriverManagement() {
           const driverRef = doc(collection(db, 'drivers'));
           const driverData = {
             ...newDriver,
+            franchiseId: franchiseId || null,
             mobile: newDriver.mobile.replace(/\D/g, ''),
             monthlySalary: Number(newDriver.monthlySalary) || 0,
             pin: newDriver.pin || Math.floor(1000 + Math.random() * 9000).toString(),
@@ -96,6 +104,7 @@ export function DriverManagement() {
           const accRef = doc(collection(db, 'accounts'));
           transaction.set(accRef, {
             name: newDriver.name,
+            franchiseId: franchiseId || null,
             groupId: currentLiabilitiesId,
             openingBalance: 0,
             balanceType: 'Cr',
@@ -210,6 +219,7 @@ export function DriverManagement() {
             const accRef = doc(collection(db, 'accounts'));
             transaction.set(accRef, {
               name: driverData.name,
+              franchiseId: franchiseId || null,
               groupId: currentLiabilitiesId,
               openingBalance: 0,
               balanceType: 'Cr',

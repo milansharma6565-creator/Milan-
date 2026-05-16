@@ -19,7 +19,9 @@ import {
   Navigation,
   CheckCircle2,
   Droplets,
-  Smartphone
+  Smartphone,
+  ShieldCheck,
+  LayoutGrid
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dashboard } from './components/Dashboard';
@@ -36,15 +38,17 @@ import { CustomerOrderView } from './components/CustomerOrderView';
 import { HydrantFilling } from './components/HydrantFilling';
 import PhoneSync from './components/PhoneSync';
 import { DocumentVault } from './components/DocumentVault';
+import { FranchiseManagement } from './components/FranchiseManagement';
 import { Logo } from './components/Logo';
 import { GoodMorningGreeting } from './components/GoodMorningGreeting';
 import { DriverApp } from './components/DriverApp';
 import { CustomerBookingPortal } from './components/CustomerBookingPortal';
 import { auth, googleProvider, signInWithPopup, onAuthStateChanged, db } from './firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, doc } from 'firebase/firestore';
 import { User } from 'firebase/auth';
+import { Franchise } from './types';
 
-type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance' | 'filling' | 'sync' | 'documents';
+type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance' | 'filling' | 'sync' | 'documents' | 'franchise';
 
 import { format } from 'date-fns';
 import { formatCurrency, getPublicAppUrl, copyToClipboard } from './constants';
@@ -69,22 +73,82 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [loginInProgress, setLoginInProgress] = useState(false);
   const [pendingFuelCount, setPendingFuelCount] = useState(0);
+  const [currentFranchise, setCurrentFranchise] = useState<Franchise | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [inspectedFranchiseId, setInspectedFranchiseId] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'dieselRequests'), where('status', '==', 'Pending')), (snap) => {
-      setPendingFuelCount(snap.size);
-    }, (err) => {
-      console.warn("Diesel requests count check failed (likely unauthenticated):", err.message);
-    });
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    return onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    return onAuthStateChanged(auth, async (authUser) => {
+      if (authUser) {
+        setUser(authUser);
+        const email = authUser.email || '';
+        
+        // Super Admin Check
+        if (email === 'milan.sharma6565@gmail.com') {
+          setIsSuperAdmin(true);
+          // If we are already inspecting someone, keep it, otherwise null
+        } else {
+          setInspectedFranchiseId(null);
+          // Check if Franchisee
+          const q = query(collection(db, 'franchises'), where('email', '==', email.toLowerCase()));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+             const fData = { id: snap.docs[0].id, ...snap.docs[0].data() } as Franchise;
+             setCurrentFranchise(fData);
+             setIsSuperAdmin(false);
+          } else {
+             // Fallback for explicitly mentioned fallback
+             if (email === 'rajhanssikar@gmail.com') {
+                setCurrentFranchise({ id: 'legacy-rajhans', name: 'Rajhans Sikar', email: 'rajhanssikar@gmail.com', commissionPercentage: 5, authorizedBy: 'System', status: 'Active', createdAt: new Date() });
+             } else {
+                setCurrentFranchise(null);
+             }
+             setIsSuperAdmin(false);
+          }
+        }
+      } else {
+        setUser(null);
+        setCurrentFranchise(null);
+        setIsSuperAdmin(false);
+        setInspectedFranchiseId(null);
+      }
       setLoading(false);
     });
   }, []);
+
+  // Sync currentFranchise when inspectedFranchiseId changes for Super Admin
+  useEffect(() => {
+    if (isSuperAdmin && inspectedFranchiseId) {
+      const unsub = onSnapshot(doc(db, 'franchises', inspectedFranchiseId), (snap) => {
+        if (snap.exists()) {
+          setCurrentFranchise({ id: snap.id, ...snap.data() } as Franchise);
+        }
+      });
+      return () => unsub();
+    } else if (isSuperAdmin && !inspectedFranchiseId) {
+      setCurrentFranchise(null);
+    }
+  }, [isSuperAdmin, inspectedFranchiseId]);
+
+  useEffect(() => {
+    const q = isSuperAdmin 
+      ? query(collection(db, 'dieselRequests'), where('status', '==', 'Pending'))
+      : currentFranchise
+        ? query(collection(db, 'dieselRequests'), where('status', '==', 'Pending'), where('franchiseId', '==', currentFranchise.id))
+        : null;
+
+    if (!q) {
+      setPendingFuelCount(0);
+      return;
+    }
+
+    const unsub = onSnapshot(q, (snap) => {
+      setPendingFuelCount(snap.size);
+    }, (err) => {
+      console.warn("Diesel requests count check failed:", err.message);
+    });
+    return () => unsub();
+  }, [isSuperAdmin, currentFranchise]);
 
   let driverId: string | null = null;
   let orderId: string | null = null;
@@ -106,17 +170,20 @@ export default function App() {
     setLoginInProgress(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const authorizedEmails = ['rajhanssikar@gmail.com', 'milan.sharma6565@gmail.com'];
+      const email = result.user.email || '';
       
-      // If NOT an admin, check if they are a registered driver
-      if (!authorizedEmails.includes(result.user.email || '')) {
-        // We will check during the next render if they have a driver profile
-        // but for now, if they are NOT on the driver portal and NOT an admin, reject
-        if (!isDriverMode) {
-          await auth.signOut();
-          alert(`ACCESS DENIED: Only authorized administrative accounts can access this system.`);
-          return;
-        }
+      if (email === 'milan.sharma6565@gmail.com' || email === 'rajhanssikar@gmail.com') {
+        return;
+      }
+
+      // Check if they are a registered franchisee
+      const qFranchise = query(collection(db, 'franchises'), where('email', '==', email.toLowerCase()), where('status', '==', 'Active'));
+      const snapFranchise = await getDocs(qFranchise);
+      
+      if (snapFranchise.empty && !isDriverMode) {
+        await auth.signOut();
+        alert(`ACCESS DENIED: No authorized franchise found for ${email}. Please contact the administrator.`);
+        return;
       }
     } catch (error: any) {
       console.error('Login failed:', error?.message || String(error));
@@ -210,20 +277,71 @@ export default function App() {
   }
 
   const renderContent = () => {
+    // Check if franchise is suspended
+    if (currentFranchise && currentFranchise.status === 'Suspended' && !isSuperAdmin) {
+      return (
+        <div className="flex flex-col items-center justify-center p-20 text-center bg-white rounded-[3rem] border border-red-100 shadow-xl shadow-red-50">
+          <div className="w-24 h-24 bg-red-50 rounded-[2rem] flex items-center justify-center text-red-500 mb-6 animate-bounce">
+            <X size={48} />
+          </div>
+          <h2 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">Account Suspended</h2>
+          <p className="text-slate-500 font-medium max-w-md mx-auto">
+            Access to this franchise console has been restricted. Please contact the Super Admin for payment information or to restore access.
+          </p>
+          <div className="mt-8 pt-8 border-t border-slate-100 w-full max-w-xs mx-auto">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Contact Support</p>
+            <p className="text-sm font-bold text-slate-900">milan.sharma6565@gmail.com</p>
+          </div>
+        </div>
+      );
+    }
+
+    // Check if granular feature is locked
+    if (activeTab !== 'dashboard' && currentFranchise?.lockedFeatures?.includes(activeTab) && !isSuperAdmin) {
+      return (
+        <div className="flex flex-col items-center justify-center p-20 text-center bg-white rounded-[3rem] border border-orange-100 shadow-xl shadow-orange-50">
+          <div className="w-24 h-24 bg-orange-50 rounded-[2rem] flex items-center justify-center text-orange-500 mb-6 animate-pulse">
+            <ShieldCheck size={48} />
+          </div>
+          <h2 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">Feature Locked</h2>
+          <p className="text-slate-500 font-medium max-w-md mx-auto">
+            This module has been restricted for your regional branch. Please clear pending dues or contact the admin to unlock these capabilities.
+          </p>
+        </div>
+      );
+    }
+
+    const props = { 
+      franchiseId: currentFranchise?.id, 
+      isSuperAdmin,
+      commissionPercentage: currentFranchise?.commissionPercentage 
+    };
     switch (activeTab) {
-      case 'dashboard': return <Dashboard />;
-      case 'customers': return <CustomerManagement />;
-      case 'billing': return <Billing onBillCreated={() => setActiveTab('reports')} />;
-      case 'drivers': return <DriverManagement />;
-      case 'attendance': return <DriverAttendance />;
-      case 'live-map': return <DriverTrackingAdmin isTab />;
-      case 'reports': return <ReportView />;
-      case 'ledger': return <Ledger />;
-      case 'tractors': return <TractorDiesel />;
-      case 'filling': return <HydrantFilling />;
+      case 'dashboard': return <Dashboard {...props} />;
+      case 'customers': return <CustomerManagement {...props} />;
+      case 'billing': return <Billing onBillCreated={() => setActiveTab('reports')} {...props} />;
+      case 'drivers': return <DriverManagement {...props} />;
+      case 'attendance': return <DriverAttendance {...props} />;
+      case 'live-map': return <DriverTrackingAdmin isTab {...props} />;
+      case 'reports': return <ReportView {...props} />;
+      case 'ledger': return <Ledger {...props} />;
+      case 'tractors': return <TractorDiesel {...props} />;
+      case 'filling': return <HydrantFilling {...props} />;
       case 'sync': return <PhoneSync />;
       case 'documents': return <DocumentVault userEmail={user?.email || ''} />;
-      default: return <Dashboard />;
+      case 'franchise': return isSuperAdmin ? (
+        <FranchiseManagement 
+          onSelectFranchise={(f) => {
+            if (f) {
+              setInspectedFranchiseId(f.id!);
+              setActiveTab('dashboard');
+            } else {
+              setInspectedFranchiseId(null);
+            }
+          }} 
+        />
+      ) : <Dashboard {...props} />;
+      default: return <Dashboard {...props} />;
     }
   };
 
@@ -264,16 +382,19 @@ export default function App() {
 
         <nav className="flex flex-col gap-2 flex-1 scrollbar-hide overflow-y-auto">
           <SidebarButton icon={<LayoutDashboard size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<Navigation size={20} />} label="Live Map" active={activeTab === 'live-map'} onClick={() => { setActiveTab('live-map'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<CheckCircle2 size={20} />} label="Attendance" active={activeTab === 'attendance'} onClick={() => { setActiveTab('attendance'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<Users size={20} />} label="Customers" active={activeTab === 'customers'} onClick={() => { setActiveTab('customers'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<Ticket size={20} />} label="Create Token" active={activeTab === 'billing'} onClick={() => { setActiveTab('billing'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<Truck size={20} />} label="Drivers" active={activeTab === 'drivers'} onClick={() => { setActiveTab('drivers'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<ClipboardList size={20} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => { setActiveTab('ledger'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<Droplets size={20} />} label="Hydrant Filling" active={activeTab === 'filling'} onClick={() => { setActiveTab('filling'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<Smartphone size={20} />} label="Phone Sync" active={activeTab === 'sync'} onClick={() => { setActiveTab('sync'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<FileBox size={20} />} label="Documents" active={activeTab === 'documents'} onClick={() => { setActiveTab('documents'); setIsSidebarOpen(false); }} />
-          <SidebarButton icon={<Fuel size={20} />} label="Fleet & Fuel" active={activeTab === 'tractors'} onClick={() => { setActiveTab('tractors'); setIsSidebarOpen(false); }} badgeCount={pendingFuelCount} />
+          {!currentFranchise?.lockedFeatures?.includes('live-map') && <SidebarButton icon={<Navigation size={20} />} label="Live Map" active={activeTab === 'live-map'} onClick={() => { setActiveTab('live-map'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('attendance') && <SidebarButton icon={<CheckCircle2 size={20} />} label="Attendance" active={activeTab === 'attendance'} onClick={() => { setActiveTab('attendance'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('customers') && <SidebarButton icon={<Users size={20} />} label="Customers" active={activeTab === 'customers'} onClick={() => { setActiveTab('customers'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('billing') && <SidebarButton icon={<Ticket size={20} />} label="Create Token" active={activeTab === 'billing'} onClick={() => { setActiveTab('billing'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('drivers') && <SidebarButton icon={<Truck size={20} />} label="Drivers" active={activeTab === 'drivers'} onClick={() => { setActiveTab('drivers'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('ledger') && <SidebarButton icon={<ClipboardList size={20} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => { setActiveTab('ledger'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('filling') && <SidebarButton icon={<Droplets size={20} />} label="Hydrant Filling" active={activeTab === 'filling'} onClick={() => { setActiveTab('filling'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('sync') && <SidebarButton icon={<Smartphone size={20} />} label="Phone Sync" active={activeTab === 'sync'} onClick={() => { setActiveTab('sync'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('documents') && <SidebarButton icon={<FileBox size={20} />} label="Documents" active={activeTab === 'documents'} onClick={() => { setActiveTab('documents'); setIsSidebarOpen(false); }} />}
+          {!currentFranchise?.lockedFeatures?.includes('tractors') && <SidebarButton icon={<Fuel size={20} />} label="Fleet & Fuel" active={activeTab === 'tractors'} onClick={() => { setActiveTab('tractors'); setIsSidebarOpen(false); }} badgeCount={pendingFuelCount} />}
+          {isSuperAdmin && (
+            <SidebarButton icon={<ShieldCheck size={20} />} label="Franchises" active={activeTab === 'franchise'} onClick={() => { setActiveTab('franchise'); setIsSidebarOpen(false); }} />
+          )}
         </nav>
 
         <div className="pt-6 border-t border-slate-100 mt-auto">
@@ -286,6 +407,9 @@ export default function App() {
                      const url = getPublicAppUrl();
                      url.searchParams.set('mode', 'booking');
                      url.searchParams.delete('tab');
+                     if (currentFranchise?.id) {
+                       url.searchParams.set('f', currentFranchise.id);
+                     }
                      const link = url.toString();
                      await copyToClipboard(link);
                      alert('Portal Link Copied! You can now share this URL with your customers.');
@@ -299,6 +423,9 @@ export default function App() {
                       const url = getPublicAppUrl();
                       url.searchParams.set('mode', 'driver');
                       url.searchParams.delete('tab');
+                      if (currentFranchise?.id) {
+                        url.searchParams.set('f', currentFranchise.id);
+                      }
                       const link = url.toString();
                       await copyToClipboard(link);
                       alert('Driver App Link Copied! You can now share this URL with your drivers.');
@@ -331,7 +458,9 @@ export default function App() {
             </div>
             <div className="flex-1 overflow-hidden">
               <p className="text-sm font-bold text-slate-900 truncate">{user.displayName || 'Administrator'}</p>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Admin Staff</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                {isSuperAdmin ? 'Super Admin' : (currentFranchise ? `Franchise: ${currentFranchise.name}` : 'Staff')}
+              </p>
             </div>
           </div>
           <button 
@@ -353,6 +482,26 @@ export default function App() {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
           >
+            {isSuperAdmin && inspectedFranchiseId && currentFranchise && (
+              <div className="mb-6 bg-slate-900 text-white rounded-[2rem] p-6 flex flex-col md:flex-row items-center justify-between gap-4 border-4 border-blue-600 animate-in fade-in slide-in-from-top duration-500">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center">
+                    <ShieldCheck size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black tracking-tight leading-tight">Inspection Mode: {currentFranchise.name}</h3>
+                    <p className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">You are viewing all data for this regional partner</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setInspectedFranchiseId(null)}
+                  className="bg-white text-slate-900 px-6 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2"
+                >
+                  <X size={16} strokeWidth={3} />
+                  Exit View
+                </button>
+              </div>
+            )}
             {renderContent()}
           </motion.div>
         </AnimatePresence>
@@ -374,12 +523,12 @@ export default function App() {
 
       {/* Bottom Navigation (Mobile Only) */}
       <nav className="fixed bottom-0 left-0 right-0 md:hidden bg-white/80 backdrop-blur-xl border-t border-slate-100 h-20 flex items-center justify-around px-4 z-[40]">
-        <NavButton icon={<CheckCircle2 size={24} />} label="Atten." active={activeTab === 'attendance'} onClick={() => setActiveTab('attendance')} />
+        {!currentFranchise?.lockedFeatures?.includes('attendance') && <NavButton icon={<CheckCircle2 size={24} />} label="Atten." active={activeTab === 'attendance'} onClick={() => setActiveTab('attendance')} />}
         <NavButton icon={<LayoutDashboard size={24} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-        <NavButton icon={<Users size={24} />} label="Customers" active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} />
+        {!currentFranchise?.lockedFeatures?.includes('customers') && <NavButton icon={<Users size={24} />} label="Customers" active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} />}
         <div className="w-16" />
-        <NavButton icon={<Fuel size={24} />} label="Fleet" active={activeTab === 'tractors'} onClick={() => setActiveTab('tractors')} badgeCount={pendingFuelCount} />
-        <NavButton icon={<BookOpen size={24} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => setActiveTab('ledger')} />
+        {!currentFranchise?.lockedFeatures?.includes('tractors') && <NavButton icon={<Fuel size={24} />} label="Fleet" active={activeTab === 'tractors'} onClick={() => setActiveTab('tractors')} badgeCount={pendingFuelCount} />}
+        {!currentFranchise?.lockedFeatures?.includes('ledger') && <NavButton icon={<BookOpen size={24} />} label="Ledger" active={activeTab === 'ledger'} onClick={() => setActiveTab('ledger')} />}
       </nav>
     </div>
   );

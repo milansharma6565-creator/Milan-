@@ -407,7 +407,8 @@ export function DriverApp() {
               longitude,
               speed: (speed || 0) * 3.6, // km/h
               lastUpdated: serverTimestamp(),
-              isActive: true
+              isActive: true,
+              franchiseId: driver?.franchiseId || 'legacy-rajhans'
             }, { merge: true });
           } catch (e: any) {
             console.error("Tracking Error:", e?.message || String(e));
@@ -475,7 +476,8 @@ export function DriverApp() {
         receiptPhoto: photoAmount,
         status: 'Pending',
         createdAt: serverTimestamp(),
-        date: format(new Date(), 'yyyy-MM-dd')
+        date: format(new Date(), 'yyyy-MM-dd'),
+        franchiseId: driver?.franchiseId || 'legacy-rajhans'
       });
       alert('Fuel entry submitted for Admin approval!');
       setShowDieselModal(false);
@@ -493,6 +495,7 @@ export function DriverApp() {
 
   const handleAttendanceAndLedger = async (driverId: string, driverName: string, salary: number) => {
     const today = format(new Date(), 'yyyy-MM-dd');
+    const fId = driver?.franchiseId || 'legacy-rajhans';
     const qAtt = query(collection(db, 'attendance'), where('driverId', '==', driverId), where('date', '==', today));
     const attSnap = await getDocs(qAtt);
 
@@ -503,7 +506,8 @@ export function DriverApp() {
         driverName,
         date: today,
         status: 'Full Day',
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        franchiseId: fId
       });
 
       // Create Ledger Entry for 1 day's salary
@@ -517,7 +521,8 @@ export function DriverApp() {
         description: `Automatic daily salary credit (Attendance)`,
         amount: dailyRate,
         paymentMode: 'Cash', // Placeholder
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        franchiseId: fId
       });
     }
   };

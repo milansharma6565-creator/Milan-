@@ -288,8 +288,26 @@
         "liters": { "type": "number" },
         "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
         "date": { "type": "string" },
+        "franchiseId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "Franchise": {
+      "title": "Franchise",
+      "description": "Franchise partner details",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "ownerMobile": { "type": "string" },
+        "commissionPercentage": { "type": "number" },
+        "status": { "type": "string", "enum": ["Active", "Suspended", "Pending"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerEmail", "status"]
     }
   },
   "firestore": {
@@ -308,6 +326,7 @@
     "attendance": { "schema": "AttendanceRecord", "description": "Daily driver attendance" },
     "hydrantFillings": { "schema": "HydrantFilling", "description": "Tanker fillings tracker" },
     "trips": { "schema": "Trip", "description": "Collection of active trips" },
-    "dieselRequests": { "schema": "DieselRequest", "description": "Fuel requests from drivers" }
+    "dieselRequests": { "schema": "DieselRequest", "description": "Fuel requests from drivers" },
+    "franchises": { "schema": "Franchise", "description": "Collection of franchise partners" }
   }
 }

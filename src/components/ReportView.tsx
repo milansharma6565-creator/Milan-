@@ -10,7 +10,7 @@ import { generatePDF } from '../lib/pdfUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { useRef } from 'react';
 
-export function ReportView() {
+export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [selectedBillForPrint, setSelectedBillForPrint] = useState<Bill | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -24,11 +24,15 @@ export function ReportView() {
   const [unsettledBills, setUnsettledBills] = useState<Bill[]>([]);
 
   useEffect(() => {
-    const q = query(
+    let q = query(
       collection(db, 'bills'),
       where('date', '>=', dateRange.start),
       where('date', '<=', dateRange.end + 'T23:59:59')
     );
+
+    if (!isSuperAdmin && franchiseId) {
+      q = query(q, where('franchiseId', '==', franchiseId));
+    }
 
     return onSnapshot(q, 
       (snapshot) => {
@@ -59,19 +63,23 @@ export function ReportView() {
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'bills-history')
     );
-  }, [dateRange]);
+  }, [dateRange, franchiseId, isSuperAdmin]);
 
   useEffect(() => {
-    const q = query(
+    let q = query(
       collection(db, 'bills'),
       where('isSettled', '==', false)
     );
+
+    if (!isSuperAdmin && franchiseId) {
+      q = query(q, where('franchiseId', '==', franchiseId));
+    }
 
     return onSnapshot(q, 
       (snapshot) => setUnsettledBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'unsettled-bills')
     );
-  }, []);
+  }, [franchiseId, isSuperAdmin]);
 
   const handleSettle = async (bill: Bill) => {
     if (bill.id && !bill.isSettled) {

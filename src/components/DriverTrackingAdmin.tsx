@@ -24,6 +24,8 @@ L.Marker.prototype.options.icon = DefaultIcon;
 interface DriverTrackingAdminProps {
   onClose?: () => void;
   isTab?: boolean;
+  franchiseId?: string;
+  isSuperAdmin?: boolean;
 }
 
 // Component to handle map centering
@@ -37,7 +39,7 @@ function ChangeView({ center, zoom }: { center: [number, number], zoom: number }
   return null;
 }
 
-export function DriverTrackingAdmin({ onClose, isTab = false }: DriverTrackingAdminProps) {
+export function DriverTrackingAdmin({ onClose, isTab = false, franchiseId, isSuperAdmin }: DriverTrackingAdminProps) {
   const [locations, setLocations] = useState<DriverLocation[]>([]);
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState<[number, number]>([27.6094, 75.1398]); // Sikar
@@ -48,10 +50,19 @@ export function DriverTrackingAdmin({ onClose, isTab = false }: DriverTrackingAd
     const twelveHoursAgo = new Date();
     twelveHoursAgo.setHours(twelveHoursAgo.getHours() - 12);
 
-    const q = query(
-      collection(db, 'driverLocations'),
-      where('isActive', '==', true)
-    );
+    let q;
+    if (isSuperAdmin) {
+      q = query(
+        collection(db, 'driverLocations'),
+        where('isActive', '==', true)
+      );
+    } else {
+      q = query(
+        collection(db, 'driverLocations'),
+        where('isActive', '==', true),
+        where('franchiseId', '==', franchiseId)
+      );
+    }
 
     return onSnapshot(q, (snapshot) => {
       const locs = snapshot.docs.map(doc => ({

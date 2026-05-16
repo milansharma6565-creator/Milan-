@@ -1,10 +1,6 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
@@ -14,17 +10,16 @@ async function startServer() {
 
   // API Sample routes
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", message: "TankerWala Server is running" });
+    res.status(200).json({ status: "ok", message: "TankerWala Server is running" });
   });
 
   // Phone Sync endpoint mentioned in PhoneSync.tsx
   app.post("/api/sync", (req, res) => {
     console.log("Received sync request:", req.body);
-    // In a real app, this would verify the sync key and save to Firestore
-    // For now we just return success
-    res.json({ status: "PROCESSED", received: true });
+    res.status(200).json({ status: "PROCESSED", received: true });
   });
 
+  console.log("NODE ENV is", process.env.NODE_ENV);
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -35,8 +30,13 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.get("*all", (req, res) => {
+      try {
+        res.sendFile(path.join(distPath, "index.html"));
+      } catch (err) {
+        console.error("Error serving index.html:", err);
+        res.status(500).send("Internal Server Error");
+      }
     });
   }
 
@@ -45,4 +45,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});

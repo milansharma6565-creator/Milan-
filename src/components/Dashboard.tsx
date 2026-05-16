@@ -39,6 +39,7 @@ import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
 import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
+import { X as LucideX } from 'lucide-react';
 
 function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void }) {
    const [text, setText] = useState('');
@@ -122,7 +123,11 @@ function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void
 
 import { Logo } from './Logo';
 
-export function Dashboard() {
+export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: { 
+  franchiseId?: string, 
+  isSuperAdmin?: boolean,
+  commissionPercentage?: number
+}) {
   const todayStart = startOfDay(new Date());
   
   const [bills, setBills] = useState<Bill[]>([]);
@@ -194,6 +199,13 @@ export function Dashboard() {
     const busyDrivers = new Set(bills.filter(b => ['Assigned', 'Filling'].includes(b.status)).map(b => b.driverId));
     const busyTractors = new Set(bills.filter(b => ['Assigned', 'Filling'].includes(b.status)).map(b => b.tractorId));
 
+    let commissionTotal = 0;
+    if (franchiseId && commissionPercentage) {
+      commissionTotal = bills
+        .filter(b => b.status === 'Delivered')
+        .reduce((sum, b) => sum + (b.commissionAmount || (b.grandTotal * commissionPercentage) / 100), 0);
+    }
+
     const allBillsSorted = [...bills].sort((a, b) => {
       // First sort by status: Pending should be on top
       if (a.status === 'Pending' && b.status !== 'Pending') return -1;
@@ -219,9 +231,10 @@ export function Dashboard() {
       busyDrivers,
       busyTractors,
       driverStats: driverStatsList,
+      commissionTotal,
       recentBills: allBillsSorted.slice(0, 10)
     };
-  }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts]);
+  }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts, franchiseId, commissionPercentage]);
 
   const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
   const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -311,34 +324,52 @@ export function Dashboard() {
 
   useEffect(() => {
     const sixtyDaysAgo = subDays(new Date(), 60);
-    const unsubBills = onSnapshot(query(collection(db, 'bills'), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000)), 
+    
+    // Base Queries
+    let billsQ = query(collection(db, 'bills'), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
+    let requestsQ = query(collection(db, 'bookingRequests'), where('status', '==', 'Pending'), orderBy('requestedAt', 'desc'));
+    let dieselQ = query(collection(db, 'dieselRequests'), where('status', '==', 'Pending'));
+    let customersQ = query(collection(db, 'customers'));
+    let driversQ = query(collection(db, 'drivers'));
+    let tractorsQ = query(collection(db, 'tractors'));
+    let accountsQ = query(collection(db, 'accounts'));
+
+    // Apply Franchise Filter if NOT Super Admin
+    if (!isSuperAdmin && franchiseId) {
+      billsQ = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
+      requestsQ = query(collection(db, 'bookingRequests'), where('franchiseId', '==', franchiseId), where('status', '==', 'Pending'), orderBy('requestedAt', 'desc'));
+      dieselQ = query(collection(db, 'dieselRequests'), where('franchiseId', '==', franchiseId), where('status', '==', 'Pending'));
+      customersQ = query(collection(db, 'customers'), where('franchiseId', '==', franchiseId));
+      driversQ = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
+      tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', franchiseId));
+      accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    }
+
+    const unsubBills = onSnapshot(billsQ, 
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'bills-dashboard')
     );
-    const unsubRequests = onSnapshot(
-      query(collection(db, 'bookingRequests'), where('status', '==', 'Pending'), orderBy('requestedAt', 'desc')),
+    const unsubRequests = onSnapshot(requestsQ,
       (snapshot) => setBookingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       (error) => console.log('Requests err:', error?.message || error)
     );
-    const unsubDiesel = onSnapshot(
-      query(collection(db, 'dieselRequests'), where('status', '==', 'Pending')),
+    const unsubDiesel = onSnapshot(dieselQ,
       (snapshot) => setPendingDieselRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       (error) => console.log('Diesel Requests err:', error?.message || error)
     );
-    const unsubCustomers = onSnapshot(collection(db, 'customers'), 
+    const unsubCustomers = onSnapshot(customersQ, 
       (snapshot) => setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'customers-dashboard')
     );
-    const unsubDrivers = onSnapshot(collection(db, 'drivers'), 
+    const unsubDrivers = onSnapshot(driversQ, 
       (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'drivers-dashboard')
     );
-    const unsubTractors = onSnapshot(collection(db, 'tractors'), 
+    const unsubTractors = onSnapshot(tractorsQ, 
       (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tractor))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'tractors-dashboard')
     );
-
-    const unsubAccounts = onSnapshot(collection(db, 'accounts'), 
+    const unsubAccounts = onSnapshot(accountsQ, 
       (snapshot) => {
         const accs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account));
         setAccounts(accs);
@@ -361,7 +392,7 @@ export function Dashboard() {
       unsubTractors();
       unsubAccounts();
     };
-  }, []);
+  }, [franchiseId, isSuperAdmin]);
 
   const filteredTokenBills = useMemo(() => {
     let baseBills = [...bills];
@@ -513,8 +544,8 @@ export function Dashboard() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, number: string } | null>(null);
 
   const [isWiping, setIsWiping] = useState(false);
-  const isAdmin = auth.currentUser?.email === 'milan.sharma6565@gmail.com' || auth.currentUser?.email === 'rajhanssikar@gmail.com';
-  const isMilan = auth.currentUser?.email === 'milan.sharma6565@gmail.com';
+  const isAdmin = isSuperAdmin || !!franchiseId;
+  const isMilan = isSuperAdmin;
 
   const handleMasterReset = async () => {
     if (!isMilan) {
@@ -1709,6 +1740,37 @@ export function Dashboard() {
             <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Updates direct to ledger accounts</p>
           </div>
         </motion.div>
+
+        {franchiseId && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }} 
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+            className="relative bg-white p-5 rounded-[2.5rem] border border-blue-100 shadow-xl overflow-hidden group min-h-[200px]"
+          >
+            <div className="absolute inset-0 pointer-events-none opacity-5">
+              <div className="absolute -right-4 -bottom-4 animate-spin-slow">
+                <RefreshCw size={150} />
+              </div>
+            </div>
+            <div className="relative z-10">
+              <div className="bg-blue-50 text-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
+                <Coins size={24} />
+              </div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[11px] uppercase font-black tracking-widest text-slate-400">Franchise commission</div>
+                <div className="bg-blue-100 text-blue-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase">
+                  {commissionPercentage}% Tier
+                </div>
+              </div>
+              <div className="text-4xl font-display font-black text-slate-900 tracking-tight flex items-baseline">
+                <span className="text-2xl mr-1 text-blue-400">₹</span>
+                {Math.floor(stats.commissionTotal).toLocaleString()}
+              </div>
+              <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Estimated earnings from delivered trips</p>
+            </div>
+          </motion.div>
+        )}
 
         {/* Bank Bubbles Row */}
         <motion.div 

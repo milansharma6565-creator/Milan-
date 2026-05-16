@@ -13,7 +13,7 @@ import autoTable from 'jspdf-autotable';
 import { startOfMonth, endOfMonth, format } from 'date-fns';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 
-export function CustomerManagement() {
+export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -101,7 +101,10 @@ export function CustomerManagement() {
   }, [editingCustomer?.name, editingCustomer?.mobile]);
 
   useEffect(() => {
-    const q = query(collection(db, 'customers'), orderBy('name'));
+    let q = query(collection(db, 'customers'), orderBy('name'));
+    if (!isSuperAdmin && franchiseId) {
+      q = query(collection(db, 'customers'), where('franchiseId', '==', franchiseId), orderBy('name'));
+    }
     const unsubCustomers = onSnapshot(q, 
       (snapshot) => {
         const all = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
@@ -120,7 +123,11 @@ export function CustomerManagement() {
       (error) => handleFirestoreError(error, OperationType.LIST, 'customers')
     );
 
-    const unsubAccounts = onSnapshot(collection(db, 'accounts'), 
+    let qAccounts = query(collection(db, 'accounts'));
+    if (!isSuperAdmin && franchiseId) {
+      qAccounts = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    }
+    const unsubAccounts = onSnapshot(qAccounts, 
       (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts-customers')
     );
@@ -129,7 +136,7 @@ export function CustomerManagement() {
       unsubCustomers();
       unsubAccounts();
     };
-  }, [searchTerm]);
+  }, [searchTerm, franchiseId, isSuperAdmin]);
 
   const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,8 +144,13 @@ export function CustomerManagement() {
     
     try {
       // Check for duplicate mobile or name
-      const qMobile = query(collection(db, 'customers'), where('mobile', '==', newCustomer.mobile));
-      const qName = query(collection(db, 'customers'), where('name', '==', newCustomer.name.trim()));
+      let qMobile = query(collection(db, 'customers'), where('mobile', '==', newCustomer.mobile));
+      let qName = query(collection(db, 'customers'), where('name', '==', newCustomer.name.trim()));
+      
+      if (!isSuperAdmin && franchiseId) {
+        qMobile = query(collection(db, 'customers'), where('franchiseId', '==', franchiseId), where('mobile', '==', newCustomer.mobile));
+        qName = query(collection(db, 'customers'), where('franchiseId', '==', franchiseId), where('name', '==', newCustomer.name.trim()));
+      }
       
       const [mobileSnap, nameSnap] = await Promise.all([getDocs(qMobile), getDocs(qName)]);
       
@@ -154,6 +166,7 @@ export function CustomerManagement() {
 
       await addDoc(collection(db, 'customers'), {
         ...newCustomer,
+        franchiseId: franchiseId || null,
         name: newCustomer.name.trim(),
         pin: newCustomer.pin || Math.floor(1000 + Math.random() * 9000).toString(),
         pendingAmount: 0,
@@ -327,6 +340,7 @@ export function CustomerManagement() {
         const vchRef = doc(collection(db, 'vouchers'));
         transaction.set(vchRef, {
           date: entryDate,
+          franchiseId: franchiseId || null,
           type: 'Receipt',
           voucherNumber: `CUST-R-${Math.floor(Date.now()/1000)}`,
           items: [
@@ -579,6 +593,8 @@ export function CustomerManagement() {
         {selectedHistoryCustomer && (
           <CustomerHistoryModal 
             customer={selectedHistoryCustomer} 
+            franchiseId={franchiseId}
+            isSuperAdmin={isSuperAdmin}
             onClose={() => setSelectedHistoryCustomer(null)}
             onShareLedger={setShareLedgerCustomer}
           />
@@ -923,6 +939,8 @@ export function CustomerManagement() {
         {shareLedgerCustomer && (
           <WhatsAppLedgerModal 
             customer={shareLedgerCustomer}
+            franchiseId={franchiseId}
+            isSuperAdmin={isSuperAdmin}
             onClose={() => setShareLedgerCustomer(null)}
           />
         )}
@@ -931,7 +949,12 @@ export function CustomerManagement() {
   );
 }
 
-function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClose: () => void }) {
+function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: { 
+  customer: Customer, 
+  onClose: () => void,
+  franchiseId?: string,
+  isSuperAdmin?: boolean 
+}) {
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [isGenerating, setIsGenerating] = useState(false);
@@ -945,22 +968,40 @@ function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClos
       end.setHours(23, 59, 59, 999);
 
       // 1. Fetch Bills
-      const billsQ = query(
+      let billsQ = query(
         collection(db, 'bills'),
         where('customerId', '==', customer.id),
         where('date', '>=', startDate),
         where('date', '<=', endDate)
       );
+      if (!isSuperAdmin && franchiseId) {
+        billsQ = query(
+          collection(db, 'bills'),
+          where('franchiseId', '==', franchiseId),
+          where('customerId', '==', customer.id),
+          where('date', '>=', startDate),
+          where('date', '<=', endDate)
+        );
+      }
       const billsSnap = await getDocs(billsQ);
       const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
 
       // 2. Fetch Ledger Entries
-      const ledgerQ = query(
+      let ledgerQ = query(
         collection(db, 'ledger'),
         where('partyId', '==', customer.id),
         where('date', '>=', start.toISOString()),
         where('date', '<=', end.toISOString())
       );
+      if (!isSuperAdmin && franchiseId) {
+        ledgerQ = query(
+          collection(db, 'ledger'),
+          where('franchiseId', '==', franchiseId),
+          where('partyId', '==', customer.id),
+          where('date', '>=', start.toISOString()),
+          where('date', '<=', end.toISOString())
+        );
+      }
       const ledgerSnap = await getDocs(ledgerQ);
       const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
 
@@ -1166,27 +1207,39 @@ function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClos
 function CustomerHistoryModal({ 
   customer, 
   onClose, 
-  onShareLedger 
+  onShareLedger,
+  franchiseId,
+  isSuperAdmin 
 }: { 
   customer: Customer, 
   onClose: () => void, 
-  onShareLedger: (c: Customer) => void 
+  onShareLedger: (c: Customer) => void,
+  franchiseId?: string,
+  isSuperAdmin?: boolean 
 }) {
   const [selectedBillForPrint, setSelectedBillForPrint] = useState<Bill | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const [bills, setBills] = useState<Bill[]>([]);
 
   useEffect(() => {
-    const q = query(
+    let q = query(
       collection(db, 'bills'), 
       where('customerId', '==', customer.id),
       orderBy('createdAt', 'desc')
     );
+    if (!isSuperAdmin && franchiseId) {
+      q = query(
+        collection(db, 'bills'),
+        where('franchiseId', '==', franchiseId),
+        where('customerId', '==', customer.id),
+        orderBy('createdAt', 'desc')
+      );
+    }
     return onSnapshot(q, 
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, `bills?customerId=${customer.id}`)
     );
-  }, [customer.id]);
+  }, [customer.id, franchiseId, isSuperAdmin]);
 
   const handlePrint = async () => {
     if (printRef.current) {

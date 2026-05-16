@@ -33,7 +33,7 @@ import { ConfirmationModal } from './ConfirmationModal';
 
 import { Logo } from './Logo';
 
-export function TractorDiesel() {
+export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [activeView, setActiveView] = useState<'diesel' | 'maintenance'>('diesel');
   const [isAddingDiesel, setIsAddingDiesel] = useState(false);
   const [isAddingMaintenance, setIsAddingMaintenance] = useState(false);
@@ -62,28 +62,46 @@ export function TractorDiesel() {
   const [dieselRequests, setDieselRequests] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsubTractors = onSnapshot(collection(db, 'tractors'), 
+    let qTractors = query(collection(db, 'tractors'));
+    let qDiesel = query(collection(db, 'dieselLogs'), orderBy('date', 'desc'));
+    let qMaint = query(collection(db, 'maintenanceLogs'), orderBy('date', 'desc'));
+    let qAccounts = query(collection(db, 'accounts'));
+    let qRequests = query(collection(db, 'dieselRequests'));
+
+    if (!isSuperAdmin && franchiseId) {
+      qTractors = query(collection(db, 'tractors'), where('franchiseId', '==', franchiseId));
+      qDiesel = query(collection(db, 'dieselLogs'), where('franchiseId', '==', franchiseId), orderBy('date', 'desc'));
+      qMaint = query(collection(db, 'maintenanceLogs'), where('franchiseId', '==', franchiseId), orderBy('date', 'desc'));
+      qAccounts = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+      qRequests = query(collection(db, 'dieselRequests'), where('franchiseId', '==', franchiseId));
+    }
+
+    const unsubTractors = onSnapshot(qTractors, 
       (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tractor))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'tractors')
     );
-    const unsubDiesel = onSnapshot(query(collection(db, 'dieselLogs'), orderBy('date', 'desc')), 
+    const unsubDiesel = onSnapshot(qDiesel, 
       (snapshot) => setDieselLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DieselLog))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'dieselLogs')
     );
-    const unsubMaint = onSnapshot(query(collection(db, 'maintenanceLogs'), orderBy('date', 'desc')), 
+    const unsubMaint = onSnapshot(qMaint, 
       (snapshot) => setMaintenanceLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MaintenanceLog))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'maintenanceLogs')
     );
     const ninetyDaysAgo = subDays(new Date(), 90);
-    const unsubBills = onSnapshot(query(collection(db, 'bills'), where('createdAt', '>=', ninetyDaysAgo), orderBy('createdAt', 'desc')), 
+    let qBills = query(collection(db, 'bills'), where('createdAt', '>=', ninetyDaysAgo), orderBy('createdAt', 'desc'));
+    if (!isSuperAdmin && franchiseId) {
+      qBills = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), where('createdAt', '>=', ninetyDaysAgo), orderBy('createdAt', 'desc'));
+    }
+    const unsubBills = onSnapshot(qBills, 
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'bills')
     );
-    const unsubAcc = onSnapshot(collection(db, 'accounts'),
+    const unsubAcc = onSnapshot(qAccounts,
       (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts')
     );
-    const unsubRequests = onSnapshot(collection(db, 'dieselRequests'),
+    const unsubRequests = onSnapshot(qRequests,
       (snapshot) => {
         const pending = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() }))
@@ -101,7 +119,7 @@ export function TractorDiesel() {
       unsubAcc();
       unsubRequests();
     };
-  }, []);
+  }, [franchiseId, isSuperAdmin]);
 
   const [reportConfig, setReportConfig] = useState({
     period: 'monthly' as 'daily' | 'weekly' | 'monthly',
@@ -154,16 +172,30 @@ export function TractorDiesel() {
     const tractor = tractors?.find(t => t.id === newDiesel.tractorId);
     if (!tractor) return;
 
+    const mode = newDiesel.paymentMode;
+    const accountName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : 'Shrinath Petrol Pump';
+    
+    let qFuel = query(collection(db, 'accounts'), where('name', '==', 'Fuel Expense'));
+    let qPay = query(collection(db, 'accounts'), where('name', '==', accountName));
+    let qAssets = query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'));
+    let qExp = query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'));
+    let qLiab = query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities'));
+
+    if (!isSuperAdmin && franchiseId) {
+      qFuel = query(qFuel, where('franchiseId', '==', franchiseId));
+      qPay = query(qPay, where('franchiseId', '==', franchiseId));
+      qAssets = query(qAssets, where('franchiseId', '==', franchiseId));
+      qExp = query(qExp, where('franchiseId', '==', franchiseId));
+      qLiab = query(qLiab, where('franchiseId', '==', franchiseId));
+    }
+
     try {
-      const mode = newDiesel.paymentMode;
-      const accountName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : 'Shrinath Petrol Pump';
-      
       const [fuelAccSnap, paymentAccSnap, assetsGrpSnap, expGrpSnap, liabGrpSnap] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Fuel Expense'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', accountName))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')))
+        getDocs(qFuel),
+        getDocs(qPay),
+        getDocs(qAssets),
+        getDocs(qExp),
+        getDocs(qLiab)
       ]);
       
       let fuelAccId = fuelAccSnap.docs[0]?.id;
@@ -194,7 +226,7 @@ export function TractorDiesel() {
         // Ensure Groups & Accounts
         if (!expGrpId) {
           const newGrp = doc(collection(db, 'accountGroups'));
-          transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense' });
+          transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense', franchiseId: franchiseId || null });
           expGrpId = newGrp.id;
         }
 
@@ -203,6 +235,7 @@ export function TractorDiesel() {
           const newAcc = doc(collection(db, 'accounts'));
           transaction.set(newAcc, { 
             name: 'Fuel Expense', 
+            franchiseId: franchiseId || null,
             groupId: expGrpId, 
             openingBalance: 0, 
             balanceType: 'Dr', 
@@ -220,13 +253,14 @@ export function TractorDiesel() {
         if (mode === 'Udhaar') {
           if (!liabGrpId) {
             const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability' });
+            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability', franchiseId: franchiseId || null });
             liabGrpId = newGrp.id;
           }
           if (!paymentAccId) {
             const newAcc = doc(collection(db, 'accounts'));
             transaction.set(newAcc, {
               name: 'Shrinath Petrol Pump',
+              franchiseId: franchiseId || null,
               groupId: liabGrpId,
               openingBalance: 0,
               balanceType: 'Cr',
@@ -242,13 +276,14 @@ export function TractorDiesel() {
         } else {
           if (!assetsGrpId) {
             const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset', franchiseId: franchiseId || null });
             assetsGrpId = newGrp.id;
           }
           if (!paymentAccId) {
             const newAcc = doc(collection(db, 'accounts'));
             transaction.set(newAcc, {
               name: accountName,
+              franchiseId: franchiseId || null,
               groupId: assetsGrpId,
               openingBalance: 0,
               balanceType: 'Dr',
@@ -267,6 +302,7 @@ export function TractorDiesel() {
         const dieselRef = doc(collection(db, 'dieselLogs'));
         transaction.set(dieselRef, {
           tractorId: tractor.id!,
+          franchiseId: franchiseId || null,
           tractorName: tractor.name,
           date: newDiesel.date,
           liters: Number(newDiesel.liters),
@@ -280,6 +316,7 @@ export function TractorDiesel() {
         const voucherRef = doc(collection(db, 'vouchers'));
         transaction.set(voucherRef, {
           date: new Date(newDiesel.date),
+          franchiseId: franchiseId || null,
           type: mode === 'Udhaar' ? 'Journal' : 'Payment',
           voucherNumber: `FL-${Math.floor(Date.now()/1000)}`,
           items: [
@@ -319,16 +356,30 @@ export function TractorDiesel() {
     const tractor = tractors?.find(t => t.id === newMaintenance.tractorId);
     if (!tractor) return;
 
+    const mode = newMaintenance.paymentMode;
+    const accountName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : 'Shrinath Petrol Pump';
+    
+    let qMaint = query(collection(db, 'accounts'), where('name', '==', 'Maintenance'));
+    let qPay = query(collection(db, 'accounts'), where('name', '==', accountName));
+    let qAssets = query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'));
+    let qExp = query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'));
+    let qLiab = query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities'));
+
+    if (!isSuperAdmin && franchiseId) {
+      qMaint = query(qMaint, where('franchiseId', '==', franchiseId));
+      qPay = query(qPay, where('franchiseId', '==', franchiseId));
+      qAssets = query(qAssets, where('franchiseId', '==', franchiseId));
+      qExp = query(qExp, where('franchiseId', '==', franchiseId));
+      qLiab = query(qLiab, where('franchiseId', '==', franchiseId));
+    }
+
     try {
-      const mode = newMaintenance.paymentMode;
-      const accountName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : 'Shrinath Petrol Pump';
-      
       const [maintAccSnap, paymentAccSnap, assetsGrpSnap, expGrpSnap, liabGrpSnap] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Maintenance'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', accountName))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')))
+        getDocs(qMaint),
+        getDocs(qPay),
+        getDocs(qAssets),
+        getDocs(qExp),
+        getDocs(qLiab)
       ]);
       
       let maintAccId = maintAccSnap.docs[0]?.id;
@@ -359,7 +410,7 @@ export function TractorDiesel() {
         // Ensure Groups & Accounts
         if (!expGrpId) {
           const newGrp = doc(collection(db, 'accountGroups'));
-          transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense' });
+          transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense', franchiseId: franchiseId || null });
           expGrpId = newGrp.id;
         }
 
@@ -368,6 +419,7 @@ export function TractorDiesel() {
           const newAcc = doc(collection(db, 'accounts'));
           transaction.set(newAcc, { 
             name: 'Maintenance', 
+            franchiseId: franchiseId || null,
             groupId: expGrpId, 
             openingBalance: 0, 
             balanceType: 'Dr', 
@@ -385,13 +437,14 @@ export function TractorDiesel() {
         if (mode === 'Udhaar') {
           if (!liabGrpId) {
             const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability' });
+            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability', franchiseId: franchiseId || null });
             liabGrpId = newGrp.id;
           }
           if (!paymentAccId) {
             const newAcc = doc(collection(db, 'accounts'));
             transaction.set(newAcc, {
               name: 'Shrinath Petrol Pump',
+              franchiseId: franchiseId || null,
               groupId: liabGrpId,
               openingBalance: 0,
               balanceType: 'Cr',
@@ -407,13 +460,14 @@ export function TractorDiesel() {
         } else {
           if (!assetsGrpId) {
             const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset', franchiseId: franchiseId || null });
             assetsGrpId = newGrp.id;
           }
           if (!paymentAccId) {
             const newAcc = doc(collection(db, 'accounts'));
             transaction.set(newAcc, {
               name: accountName,
+              franchiseId: franchiseId || null,
               groupId: assetsGrpId,
               openingBalance: 0,
               balanceType: 'Dr',
@@ -432,6 +486,7 @@ export function TractorDiesel() {
         const maintRef = doc(collection(db, 'maintenanceLogs'));
         transaction.set(maintRef, {
           tractorId: tractor.id!,
+          franchiseId: franchiseId || null,
           tractorName: tractor.name,
           date: newMaintenance.date,
           amount: Number(newMaintenance.amount),
@@ -444,6 +499,7 @@ export function TractorDiesel() {
         const voucherRef = doc(collection(db, 'vouchers'));
         transaction.set(voucherRef, {
           date: new Date(newMaintenance.date),
+          franchiseId: franchiseId || null,
           type: mode === 'Udhaar' ? 'Journal' : 'Payment',
           voucherNumber: `MT-${Math.floor(Date.now()/1000)}`,
           items: [
@@ -481,12 +537,26 @@ export function TractorDiesel() {
       
       const [expAccName, expAccGroup] = type === 'Diesel' ? ['Fuel Expense', 'Direct Expenses'] : ['Maintenance', 'Direct Expenses'];
 
+      let qExpAcc = query(collection(db, 'accounts'), where('name', '==', expAccName));
+      let qPayAcc = query(collection(db, 'accounts'), where('name', '==', finalAccountName));
+      let qAssetsAcc = query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'));
+      let qExpGrpAcc = query(collection(db, 'accountGroups'), where('name', '==', expAccGroup));
+      let qLiabGrpAcc = query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities'));
+
+      if (!isSuperAdmin && franchiseId) {
+        qExpAcc = query(qExpAcc, where('franchiseId', '==', franchiseId));
+        qPayAcc = query(qPayAcc, where('franchiseId', '==', franchiseId));
+        qAssetsAcc = query(qAssetsAcc, where('franchiseId', '==', franchiseId));
+        qExpGrpAcc = query(qExpGrpAcc, where('franchiseId', '==', franchiseId));
+        qLiabGrpAcc = query(qLiabGrpAcc, where('franchiseId', '==', franchiseId));
+      }
+
       const [expenseAccSnap, paymentAccSnap, assetsGrpSnap, expGrpSnap, liabGrpSnap] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', expAccName))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', finalAccountName))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', expAccGroup))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')))
+        getDocs(qExpAcc),
+        getDocs(qPayAcc),
+        getDocs(qAssetsAcc),
+        getDocs(qExpGrpAcc),
+        getDocs(qLiabGrpAcc)
       ]);
       
       let expenseAccId = expenseAccSnap.docs[0]?.id;
@@ -513,7 +583,7 @@ export function TractorDiesel() {
 
         if (!expGrpId) {
           const newGrp = doc(collection(db, 'accountGroups'));
-          transaction.set(newGrp, { name: expAccGroup, type: 'Expense' });
+          transaction.set(newGrp, { name: expAccGroup, type: 'Expense', franchiseId: franchiseId || null });
           expGrpId = newGrp.id;
         }
 
@@ -522,6 +592,7 @@ export function TractorDiesel() {
           const newAcc = doc(collection(db, 'accounts'));
           transaction.set(newAcc, { 
             name: expAccName, 
+            franchiseId: franchiseId || null,
             groupId: expGrpId, 
             openingBalance: 0, 
             balanceType: 'Dr', 
@@ -540,13 +611,14 @@ export function TractorDiesel() {
           // If udhaar, we use the selected account (already fetched above or provided by user)
           if (!liabGrpId) {
             const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability' });
+            transaction.set(newGrp, { name: 'Current Liabilities', type: 'Liability', franchiseId: franchiseId || null });
             liabGrpId = newGrp.id;
           }
           if (!paymentAccId) {
             const newAcc = doc(collection(db, 'accounts'));
             transaction.set(newAcc, {
               name: finalAccountName,
+              franchiseId: franchiseId || null,
               groupId: liabGrpId,
               openingBalance: 0,
               balanceType: 'Cr',
@@ -562,13 +634,14 @@ export function TractorDiesel() {
         } else {
           if (!assetsGrpId) {
             const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+            transaction.set(newGrp, { name: 'Current Assets', type: 'Asset', franchiseId: franchiseId || null });
             assetsGrpId = newGrp.id;
           }
           if (!paymentAccId) {
             const newAcc = doc(collection(db, 'accounts'));
             transaction.set(newAcc, {
               name: finalAccountName,
+              franchiseId: franchiseId || null,
               groupId: assetsGrpId,
               openingBalance: 0,
               balanceType: 'Dr',
@@ -587,6 +660,7 @@ export function TractorDiesel() {
         const logRef = doc(collection(db, type === 'Diesel' ? 'dieselLogs' : 'maintenanceLogs'));
         transaction.set(logRef, {
           tractorId: tractor.id!,
+          franchiseId: franchiseId || null,
           tractorName: tractor.name,
           date: new Date().toISOString().split('T')[0],
           ...(type === 'Diesel' ? { liters: litersNum } : {}),
@@ -601,6 +675,7 @@ export function TractorDiesel() {
         const voucherRef = doc(collection(db, 'vouchers'));
         transaction.set(voucherRef, {
           date: new Date(),
+          franchiseId: franchiseId || null,
           type: mode === 'Udhaar' ? 'Journal' : 'Payment',
           voucherNumber: `${type === 'Diesel' ? 'FL' : 'MT'}-${Math.floor(Date.now()/1000)}`,
           items: [
@@ -799,6 +874,7 @@ export function TractorDiesel() {
     try {
       await addDoc(collection(db, 'tractors'), {
         ...newTractor,
+        franchiseId: franchiseId || null,
         createdAt: serverTimestamp()
       });
       setShowTractorModal(false);

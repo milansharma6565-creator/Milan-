@@ -35,7 +35,7 @@ import { formatCurrency } from '../constants';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export function DriverAttendance() {
+export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -44,7 +44,11 @@ export function DriverAttendance() {
 
   useEffect(() => {
     // Fetch drivers
-    const driversUnsub = onSnapshot(query(collection(db, 'drivers')), (snapshot) => {
+    let qDrivers = query(collection(db, 'drivers'));
+    if (!isSuperAdmin && franchiseId) {
+      qDrivers = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
+    }
+    const driversUnsub = onSnapshot(qDrivers, (snapshot) => {
       setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'drivers'));
 
@@ -53,11 +57,19 @@ export function DriverAttendance() {
     const end = endOfMonth(selectedDate);
     
     // We fetch broader range to handle month views
-    const attendanceQuery = query(
+    let attendanceQuery = query(
       collection(db, 'attendance'),
       where('date', '>=', Timestamp.fromDate(start)),
       where('date', '<=', Timestamp.fromDate(end))
     );
+    if (!isSuperAdmin && franchiseId) {
+      attendanceQuery = query(
+        collection(db, 'attendance'),
+        where('franchiseId', '==', franchiseId),
+        where('date', '>=', Timestamp.fromDate(start)),
+        where('date', '<=', Timestamp.fromDate(end))
+      );
+    }
 
     const attendanceUnsub = onSnapshot(attendanceQuery, (snapshot) => {
       setAttendance(snapshot.docs.map(doc => ({ 
@@ -72,7 +84,7 @@ export function DriverAttendance() {
       driversUnsub();
       attendanceUnsub();
     };
-  }, [selectedDate]);
+  }, [selectedDate, franchiseId, isSuperAdmin]);
 
   const todayStatus = useMemo(() => {
     const records: Record<string, AttendanceStatus> = {};
@@ -92,6 +104,7 @@ export function DriverAttendance() {
     try {
       await setDoc(docRef, {
         driverId: driver.id,
+        franchiseId: franchiseId || null,
         driverName: driver.name,
         date: Timestamp.fromDate(selectedDate),
         status,
@@ -133,18 +146,31 @@ export function DriverAttendance() {
 
       // 2. Status is Full or Half Day - Update or Create Voucher
       // Find or Create Salary Expense account
-      const expSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', 'Salary Expense')));
+      let qExp = query(collection(db, 'accounts'), where('name', '==', 'Salary Expense'));
+      if (!isSuperAdmin && franchiseId) {
+        qExp = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId), where('name', '==', 'Salary Expense'));
+      }
+      const expSnap = await getDocs(qExp);
       let expId = expSnap.docs[0]?.id;
 
       if (!expId) {
-        const groupSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Indirect Expenses')));
+        let qGrp = query(collection(db, 'accountGroups'), where('name', '==', 'Indirect Expenses'));
+        if (!isSuperAdmin && franchiseId) {
+          qGrp = query(collection(db, 'accountGroups'), where('franchiseId', '==', franchiseId), where('name', '==', 'Indirect Expenses'));
+        }
+        const groupSnap = await getDocs(qGrp);
         let groupId = groupSnap.docs[0]?.id;
         if (!groupId) {
-          const newGroup = await addDoc(collection(db, 'accountGroups'), { name: 'Indirect Expenses', type: 'Expense' });
+          const newGroup = await addDoc(collection(db, 'accountGroups'), { 
+            name: 'Indirect Expenses', 
+            type: 'Expense',
+            franchiseId: franchiseId || null 
+          });
           groupId = newGroup.id;
         }
         const newAcc = await addDoc(collection(db, 'accounts'), {
           name: 'Salary Expense',
+          franchiseId: franchiseId || null,
           groupId: groupId,
           openingBalance: 0,
           balanceType: 'Dr',
@@ -155,18 +181,31 @@ export function DriverAttendance() {
       }
 
       // Find or Create Driver Account
-      const driverAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', driver.name)));
+      let qDrvAcc = query(collection(db, 'accounts'), where('name', '==', driver.name));
+      if (!isSuperAdmin && franchiseId) {
+        qDrvAcc = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId), where('name', '==', driver.name));
+      }
+      const driverAccSnap = await getDocs(qDrvAcc);
       let driverAccId = driverAccSnap.docs[0]?.id;
 
       if (!driverAccId) {
-        const groupSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities')));
+        let qGrpLiab = query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities'));
+        if (!isSuperAdmin && franchiseId) {
+          qGrpLiab = query(collection(db, 'accountGroups'), where('franchiseId', '==', franchiseId), where('name', '==', 'Current Liabilities'));
+        }
+        const groupSnap = await getDocs(qGrpLiab);
         let groupId = groupSnap.docs[0]?.id;
         if (!groupId) {
-          const newGroup = await addDoc(collection(db, 'accountGroups'), { name: 'Current Liabilities', type: 'Liability' });
+          const newGroup = await addDoc(collection(db, 'accountGroups'), { 
+            name: 'Current Liabilities', 
+            type: 'Liability',
+            franchiseId: franchiseId || null 
+          });
           groupId = newGroup.id;
         }
         const newAcc = await addDoc(collection(db, 'accounts'), {
           name: driver.name,
+          franchiseId: franchiseId || null,
           groupId: groupId, openingBalance: 0, balanceType: 'Cr', currentBalance: 0,
           createdAt: serverTimestamp(), driverId: driver.id
         });
@@ -189,6 +228,7 @@ export function DriverAttendance() {
 
           transaction.set(vchRef, {
             date: selectedDate,
+            franchiseId: franchiseId || null,
             type: 'Journal',
             voucherNumber: vchNo,
             items: [
@@ -275,10 +315,16 @@ export function DriverAttendance() {
     setSaving(true);
     try {
       // Find Salary Account
-      const accSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', 'Salary Payable')));
+      let qPay = query(collection(db, 'accounts'), where('name', '==', 'Salary Payable'));
+      let qCash = query(collection(db, 'accounts'), where('name', '==', 'Cash'));
+      if (!isSuperAdmin && franchiseId) {
+        qPay = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId), where('name', '==', 'Salary Payable'));
+        qCash = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId), where('name', '==', 'Cash'));
+      }
+      const accSnap = await getDocs(qPay);
       const payId = accSnap.docs[0]?.id;
 
-      const cashSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash')));
+      const cashSnap = await getDocs(qCash);
       const cashAccId = cashSnap.docs[0]?.id;
 
       if (!payId || !cashAccId) {
@@ -288,6 +334,7 @@ export function DriverAttendance() {
 
       await addDoc(collection(db, 'vouchers'), {
         date: new Date(),
+        franchiseId: franchiseId || null,
         type: 'Payment',
         voucherNumber: `SLY-${format(new Date(), 'HHmm')}`,
         items: [

@@ -77,22 +77,37 @@ export interface FirestoreErrorInfo {
 
 export const safeJson = (obj: any) => {
   try {
-    const cache = new Set();
+    const cache = new WeakSet();
     return JSON.stringify(obj, (key, value) => {
       if (typeof value === 'object' && value !== null) {
-        if (cache.has(value)) return '[Circular]';
+        if (cache.has(value)) {
+          return '[Circular]';
+        }
         cache.add(value);
       }
       return value;
     });
   } catch (e) {
-    return "[Serialization Failed]";
+    try {
+      // Fallback for objects that might fail with WeakSet (rare) or other issues
+      const simpleCache: any[] = [];
+      return JSON.stringify(obj, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (simpleCache.includes(value)) return '[Circular]';
+          simpleCache.push(value);
+        }
+        return value;
+      });
+    } catch (innerError) {
+      return "[Serialization Failed]";
+    }
   }
 };
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const currentUser = auth.currentUser;
   
+  // Extract only needed data to avoid circular references in the first place
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -108,10 +123,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     },
     operationType,
     path
-  }
+  };
   
   const jsonString = safeJson(errInfo);
   console.error(`Firestore Error [${operationType}] at [${path || 'unknown'}]:`, jsonString);
   
-  throw new Error(jsonString || `Firestore ${operationType} failed at ${path}`);
+  // For the throw message, we'll try to use the JSON but fallback to a simple message if needed
+  const finalMessage = jsonString && jsonString !== "[Serialization Failed]" 
+    ? jsonString 
+    : `Firestore ${operationType} failed at ${path}. Error: ${errInfo.error}`;
+    
+  throw new Error(finalMessage);
 }

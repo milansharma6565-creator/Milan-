@@ -11,7 +11,12 @@ import { toJpeg } from 'html-to-image';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 import { LocationPicker } from './LocationPicker';
 
-export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
+export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPercentage }: { 
+  onBillCreated?: () => void, 
+  franchiseId?: string, 
+  isSuperAdmin?: boolean,
+  commissionPercentage?: number
+}) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showInvoice, setShowInvoice] = useState(false);
@@ -75,17 +80,23 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
   const [searchResults, setSearchResults] = useState<Customer[]>([]);
 
   useEffect(() => {
-    const q = query(collection(db, 'drivers'));
+    let q = query(collection(db, 'drivers'));
+    if (!isSuperAdmin && franchiseId) {
+      q = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
+    }
     return onSnapshot(q, 
       (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'drivers')
     );
-  }, []);
+  }, [franchiseId, isSuperAdmin]);
 
   useEffect(() => {
     async function initBillNumber() {
       try {
-        const q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
+        let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
+        if (!isSuperAdmin && franchiseId) {
+          q = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), orderBy('billNumber', 'desc'), limit(1));
+        }
         const snapshot = await getDocs(q);
         let nextNum = 1;
         if (!snapshot.empty) {
@@ -99,7 +110,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
       }
     }
     initBillNumber();
-  }, []);
+  }, [franchiseId, isSuperAdmin]);
 
   useEffect(() => {
     if (searchTerm.length < 2) {
@@ -107,10 +118,10 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
       return;
     }
 
-    // Since Firestore doesn't support 'contains', we fetch all and filter client-side 
-    // or use prefix search. For now, let's fetch all customers and filter.
-    // In a real production app with thousands of customers, we'd use Algolia or prefix search.
-    const q = query(collection(db, 'customers'));
+    let q = query(collection(db, 'customers'));
+    if (!isSuperAdmin && franchiseId) {
+      q = query(collection(db, 'customers'), where('franchiseId', '==', franchiseId));
+    }
     return onSnapshot(q, 
       (snapshot) => {
         const term = searchTerm.toLowerCase();
@@ -125,7 +136,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'customers')
     );
-  }, [searchTerm]);
+  }, [searchTerm, franchiseId, isSuperAdmin]);
 
   const handleCustomerSelect = async (c: Customer) => {
     setSelectedCustomer(c);
@@ -316,8 +327,18 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         updatedAt: serverTimestamp()
       });
 
+      const subtotal = form.quantity * form.rate;
+      const grandTotal = subtotal + form.extraCharges - form.discount;
+      
+      let commissionAmount = 0;
+      if (franchiseId && commissionPercentage) {
+        commissionAmount = (grandTotal * commissionPercentage) / 100;
+      }
+
       const billData = {
         billNumber: form.billNumber,
+        franchiseId: franchiseId || null,
+        commissionAmount,
         date: form.date,
         customerId: selectedCustomer.id!,
         customerName: selectedCustomer.name,
@@ -360,6 +381,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         
         await addDoc(collection(db, 'trips'), {
           billId: docRef.id,
+          franchiseId: franchiseId || null,
           billNumber: form.billNumber,
           driverId: form.driverId,
           driverName: form.driverName,
@@ -455,6 +477,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
         name: quickAddForm.name.trim(),
         mobile: quickAddForm.mobile,
         address: quickAddForm.address,
+        franchiseId: franchiseId || null,
         pendingAmount: 0,
         createdAt: serverTimestamp()
       };

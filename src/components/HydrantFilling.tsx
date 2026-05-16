@@ -29,7 +29,7 @@ import { toPng } from 'html-to-image';
 
 import { Logo } from './Logo';
 
-export function HydrantFilling() {
+export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [fillings, setFillings] = useState<HydrantFillingType[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [tractors, setTractors] = useState<any[]>([]);
@@ -206,20 +206,34 @@ export function HydrantFilling() {
   });
 
   useEffect(() => {
-    const unsubFillings = onSnapshot(query(collection(db, 'hydrantFillings'), orderBy('date', 'desc')), 
+    let fillingsQuery = query(collection(db, 'hydrantFillings'), orderBy('date', 'desc'));
+    if (!isSuperAdmin && franchiseId) {
+      fillingsQuery = query(collection(db, 'hydrantFillings'), where('franchiseId', '==', franchiseId), orderBy('date', 'desc'));
+    }
+    const unsubFillings = onSnapshot(fillingsQuery, 
       (snapshot) => setFillings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HydrantFillingType))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'hydrantFillings')
     );
-    const unsubAcc = onSnapshot(collection(db, 'accounts'),
+
+    let accountsQuery = query(collection(db, 'accounts'));
+    if (!isSuperAdmin && franchiseId) {
+      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    }
+    const unsubAcc = onSnapshot(accountsQuery,
       (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts')
     );
-    const unsubTractors = onSnapshot(collection(db, 'tractors'),
+
+    let tractorsQuery = query(collection(db, 'tractors'));
+    if (!isSuperAdmin && franchiseId) {
+      tractorsQuery = query(collection(db, 'tractors'), where('franchiseId', '==', franchiseId));
+    }
+    const unsubTractors = onSnapshot(tractorsQuery,
       (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'tractors')
     );
     return () => { unsubFillings(); unsubAcc(); unsubTractors(); };
-  }, []);
+  }, [isSuperAdmin, franchiseId]);
 
   useEffect(() => {
     // Generate suggestions based on mode and history
@@ -260,11 +274,11 @@ export function HydrantFilling() {
         const expenseAccName = 'Tanker Filling Expense';
         
         const [incomeAccSnap, expenseAccSnap, assetsGrpSnap, incGrpSnap, expGrpSnap] = await Promise.all([
-          getDocs(query(collection(db, 'accounts'), where('name', '==', incomeAccName))),
-          getDocs(query(collection(db, 'accounts'), where('name', '==', expenseAccName))),
-          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
-          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Indirect Incomes'))),
-          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses')))
+          getDocs(query(collection(db, 'accounts'), where('name', '==', incomeAccName), where('franchiseId', '==', franchiseId || null))),
+          getDocs(query(collection(db, 'accounts'), where('name', '==', expenseAccName), where('franchiseId', '==', franchiseId || null))),
+          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'), where('franchiseId', '==', franchiseId || null))),
+          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Indirect Incomes'), where('franchiseId', '==', franchiseId || null))),
+          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'), where('franchiseId', '==', franchiseId || null)))
         ]);
 
         let incomeAccId = incomeAccSnap.docs[0]?.id;
@@ -274,7 +288,7 @@ export function HydrantFilling() {
         
         const mode = formData.paymentMode;
         let paymentAccName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : formData.partyName;
-        const paymentAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName)));
+        const paymentAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', franchiseId || null)));
         let paymentAccId = paymentAccSnap.docs[0]?.id;
 
         // Perform all TRANSACTIONAL READS first
@@ -294,32 +308,63 @@ export function HydrantFilling() {
         if (!incomeAccId) {
           if (!incGrpId) {
             const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { name: 'Indirect Incomes', type: 'Income' });
+            transaction.set(newGrp, { 
+              name: 'Indirect Incomes', 
+              type: 'Income',
+              franchiseId: franchiseId || null,
+              createdAt: serverTimestamp()
+            });
             incGrpId = newGrp.id;
           }
           const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { name: incomeAccName, groupId: incGrpId, openingBalance: 0, balanceType: 'Cr', currentBalance: incomeAccId ? (incAccDoc?.data()?.currentBalance || 0) : 0, createdAt: serverTimestamp() });
+          transaction.set(newAcc, { 
+            name: incomeAccName, 
+            groupId: incGrpId, 
+            openingBalance: 0, 
+            balanceType: 'Cr', 
+            currentBalance: incomeAccId ? (incAccDoc?.data()?.currentBalance || 0) : 0, 
+            franchiseId: franchiseId || null,
+            createdAt: serverTimestamp() 
+          });
           incomeAccId = newAcc.id;
         }
 
         if (!expenseAccId) {
           if (!expGrpId) {
             const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense' });
+            transaction.set(newGrp, { 
+              name: 'Direct Expenses', 
+              type: 'Expense',
+              franchiseId: franchiseId || null,
+              createdAt: serverTimestamp()
+            });
             expGrpId = newGrp.id;
           }
           const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { name: expenseAccName, groupId: expGrpId, openingBalance: 0, balanceType: 'Dr', currentBalance: expenseAccId ? (expAccDoc?.data()?.currentBalance || 0) : 0, createdAt: serverTimestamp() });
+          transaction.set(newAcc, { 
+            name: expenseAccName, 
+            groupId: expGrpId, 
+            openingBalance: 0, 
+            balanceType: 'Dr', 
+            currentBalance: expenseAccId ? (expAccDoc?.data()?.currentBalance || 0) : 0, 
+            franchiseId: franchiseId || null,
+            createdAt: serverTimestamp() 
+          });
           expenseAccId = newAcc.id;
         }
 
         if (!paymentAccId && mode === 'Udhaar') {
            const grpName = formData.type === 'Inward' ? 'Sundry Debtors' : 'Sundry Creditors';
-           const grpSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', grpName)));
+           const grpSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', grpName), where('franchiseId', '==', franchiseId || null)));
            let grpId = grpSnap.docs[0]?.id;
            if (!grpId) {
              const newG = doc(collection(db, 'accountGroups'));
-             transaction.set(newG, { name: grpName, type: formData.type === 'Inward' ? 'Asset' : 'Liability' });
+             transaction.set(newG, { 
+               name: grpName, 
+               type: formData.type === 'Inward' ? 'Asset' : 'Liability',
+               franchiseId: franchiseId || null,
+               createdAt: serverTimestamp()
+             });
              grpId = newG.id;
            }
            const newA = doc(collection(db, 'accounts'));
@@ -329,6 +374,7 @@ export function HydrantFilling() {
              openingBalance: 0, 
              balanceType: formData.type === 'Inward' ? 'Dr' : 'Cr', 
              currentBalance: 0, 
+             franchiseId: franchiseId || null,
              createdAt: serverTimestamp() 
            });
            paymentAccId = newA.id;
@@ -347,6 +393,7 @@ export function HydrantFilling() {
           paymentAccountId: paymentAccId || 'CASH_FALLBACK',
           status: 'Completed',
           remarks: formData.remarks,
+          franchiseId: franchiseId || null,
           createdAt: serverTimestamp()
         };
 
@@ -363,6 +410,7 @@ export function HydrantFilling() {
             ],
             narration: `Hydrant filling for ${formData.partyName} (${formData.vehicleNumber}) [Token: ${tokenNumber}]`,
             totalAmount: amount,
+            franchiseId: franchiseId || null,
             createdAt: serverTimestamp()
           });
           
@@ -387,6 +435,7 @@ export function HydrantFilling() {
             ],
             narration: `Self tanker filling @ ${formData.partyName} (${formData.vehicleNumber}) [Token: ${tokenNumber}]`,
             totalAmount: amount,
+            franchiseId: franchiseId || null,
             createdAt: serverTimestamp()
           });
 

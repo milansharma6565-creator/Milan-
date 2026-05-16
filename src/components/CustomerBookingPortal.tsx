@@ -141,10 +141,28 @@ function LiveChatModal({ bill, onClose, customerName }: { bill: Bill, onClose: (
 }
 
 export function CustomerBookingPortal() {
+  const [franchiseId, setFranchiseId] = useState<string | null>(null);
+  const [franchises, setFranchises] = useState<any[]>([]);
+  
   const [mobileNumber, setMobileNumber] = useState('');
   const [loginStep, setLoginStep] = useState<'MOBILE' | 'PIN_LOGIN' | 'PIN_SETUP' | 'NEW_REGISTER'>('MOBILE');
   const [pin, setPin] = useState('');
   const [newName, setNewName] = useState('');
+
+  useEffect(() => {
+    // Detect franchise from URL
+    const params = new URLSearchParams(window.location.search);
+    const fId = params.get('f');
+    if (fId) {
+      setFranchiseId(fId);
+    }
+
+    // Fetch active franchises
+    const unsub = onSnapshot(query(collection(db, 'franchises'), where('status', '==', 'Active')), (snap) => {
+      setFranchises(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, []);
   
   const [isLogged, setIsLogged] = useState(false);
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -369,7 +387,8 @@ export function CustomerBookingPortal() {
           pendingAmount: 0,
           totalAdvance: 0,
           createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
+          franchiseId: franchiseId // Link to detected franchise
         };
         const docRef = await addDoc(collection(db, 'customers'), newCustData);
         completeLogin({ id: docRef.id, ...newCustData } as Customer);
@@ -501,7 +520,8 @@ export function CustomerBookingPortal() {
         totalEstimate: totalEstimate,
         status: 'Pending',
         requestedAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        franchiseId: franchiseId || customer?.franchiseId || null
       });
       
       setBookingSuccess(true);

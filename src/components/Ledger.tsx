@@ -68,7 +68,7 @@ const DEFAULT_GROUPS: Partial<AccountGroup>[] = [
   { name: 'Direct Expenses', parentGroupId: 'Expenses', type: 'Expense' },
 ];
 
-export function Ledger() {
+export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [activeTab, setActiveTab] = useState<AccountingTab>('daybook');
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [groups, setGroups] = useState<AccountGroup[]>([]);
@@ -84,7 +84,11 @@ export function Ledger() {
 
   useEffect(() => {
     // 1. Fetch Groups
-    const groupsUnsub = onSnapshot(collection(db, 'accountGroups'), 
+    let groupsQuery = query(collection(db, 'accountGroups'));
+    if (!isSuperAdmin && franchiseId) {
+      groupsQuery = query(collection(db, 'accountGroups'), where('franchiseId', '==', franchiseId));
+    }
+    const groupsUnsub = onSnapshot(groupsQuery, 
       (snapshot) => {
         const g = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AccountGroup));
         setGroups(g);
@@ -96,7 +100,11 @@ export function Ledger() {
     );
 
     // 2. Fetch Accounts
-    const accountsUnsub = onSnapshot(collection(db, 'accounts'), 
+    let accountsQuery = query(collection(db, 'accounts'));
+    if (!isSuperAdmin && franchiseId) {
+      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    }
+    const accountsUnsub = onSnapshot(accountsQuery, 
       (snapshot) => {
         setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account)));
       },
@@ -104,7 +112,11 @@ export function Ledger() {
     );
 
     // 3. Fetch Vouchers
-    const vouchersUnsub = onSnapshot(query(collection(db, 'vouchers'), orderBy('date', 'desc'), limit(500)), 
+    let vouchersBaseQuery = query(collection(db, 'vouchers'));
+    if (!isSuperAdmin && franchiseId) {
+      vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', franchiseId));
+    }
+    const vouchersUnsub = onSnapshot(query(vouchersBaseQuery, orderBy('date', 'desc'), limit(500)), 
       (snapshot) => {
         const docs = snapshot.docs.map(doc => {
           const data = doc.data();
@@ -148,7 +160,11 @@ export function Ledger() {
       const groupRefs: Record<string, string> = {};
       for (const gData of DEFAULT_GROUPS) {
         const ref = doc(collection(db, 'accountGroups'));
-        batch.set(ref, gData);
+        batch.set(ref, { 
+          ...gData,
+          franchiseId: franchiseId || null,
+          createdAt: serverTimestamp()
+        });
         groupRefs[gData.name!] = ref.id;
       }
 
@@ -172,6 +188,7 @@ export function Ledger() {
           openingBalance: acc.opening,
           balanceType: acc.type,
           currentBalance: acc.opening,
+          franchiseId: franchiseId || null,
           createdAt: serverTimestamp()
         });
       }
@@ -264,12 +281,14 @@ export function Ledger() {
           <VoucherEntryModal 
             onClose={() => setIsAddingVoucher(false)} 
             accounts={accounts} 
+            franchiseId={franchiseId}
           />
         )}
         {isAddingAccount && (
           <AccountEntryModal 
             onClose={() => setIsAddingAccount(false)} 
             groups={groups} 
+            franchiseId={franchiseId}
           />
         )}
       </AnimatePresence>
@@ -479,7 +498,7 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
 }
 
 /** Voucher Entry Modal */
-function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, accounts: Account[] }) {
+function VoucherEntryModal({ onClose, accounts, franchiseId }: { onClose: () => void, accounts: Account[], franchiseId?: string }) {
   const [vchType, setVchType] = useState<VoucherType>('Payment');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [vchNo, setVchNo] = useState(`V-${Math.floor(1000 + Math.random() * 9000)}`);
@@ -555,6 +574,7 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
           items,
           narration,
           totalAmount: totals.dr,
+          franchiseId: franchiseId || null,
           createdAt: serverTimestamp()
         });
       });
@@ -773,7 +793,7 @@ function VoucherEntryModal({ onClose, accounts }: { onClose: () => void, account
 }
 
 /** Account Entry Modal */
-function AccountEntryModal({ onClose, groups }: { onClose: () => void, groups: AccountGroup[] }) {
+function AccountEntryModal({ onClose, groups, franchiseId }: { onClose: () => void, groups: AccountGroup[], franchiseId?: string }) {
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState('');
   const [opening, setOpening] = useState(0);
@@ -792,6 +812,7 @@ function AccountEntryModal({ onClose, groups }: { onClose: () => void, groups: A
         openingBalance: opening,
         balanceType: type,
         currentBalance: opening,
+        franchiseId: franchiseId || null,
         createdAt: serverTimestamp()
       });
       onClose();

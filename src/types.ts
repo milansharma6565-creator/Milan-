@@ -1,5 +1,18 @@
+export interface Franchise {
+  id?: string;
+  email: string;
+  name: string;
+  location?: string;
+  commissionPercentage: number;
+  authorizedBy: string;
+  status: 'Active' | 'Inactive' | 'Suspended';
+  lockedFeatures?: string[];
+  createdAt: any;
+}
+
 export interface Customer {
   id?: string;
+  franchiseId?: string;
   name: string;
   mobile: string;
   secondaryMobiles?: string[];
@@ -17,6 +30,7 @@ export type ProductCategory = 'TANKER' | 'STANDBY_TANKER' | 'MONTHLY_TANKER' | '
 
 export interface Bill {
   id?: string;
+  franchiseId?: string;
   billNumber: string;
   date: any;
   customerId: string;
@@ -32,6 +46,7 @@ export interface Bill {
   extraCharges: number;
   discount: number;
   grandTotal: number;
+  commissionAmount?: number; // Calculated commission for this bill
   paymentMode: 'Cash' | 'UPI' | 'Bank Transfer' | 'Pending' | 'Split';
   splitPayments?: {
     cash: number;
@@ -58,6 +73,7 @@ export interface Bill {
 
 export interface Trip {
   id?: string;
+  franchiseId?: string;
   billId: string;
   billNumber: string;
   driverId: string;
@@ -83,6 +99,7 @@ export interface Trip {
 
 export interface BookingRequest {
   id?: string;
+  franchiseId?: string;
   billId: string | null;
   customerId: string;
   customerName: string;
@@ -106,6 +123,7 @@ export interface BookingRequest {
 
 export interface Tractor {
   id?: string;
+  franchiseId?: string;
   name: string;
   vehicleNumber: string;
   insuranceExpiry: any;
@@ -114,6 +132,7 @@ export interface Tractor {
 
 export interface DieselLog {
   id?: string;
+  franchiseId?: string;
   tractorId: string;
   tractorName: string;
   date: any;
@@ -127,6 +146,7 @@ export interface DieselLog {
 
 export interface MaintenanceLog {
   id?: string;
+  franchiseId?: string;
   tractorId: string;
   tractorName: string;
   date: any;
@@ -139,6 +159,7 @@ export interface MaintenanceLog {
 
 export interface LedgerEntry {
   id?: string;
+  franchiseId?: string;
   date: any;
   type: 'Income' | 'Expense';
   category: string;
@@ -154,6 +175,7 @@ export type AccountMainType = 'Asset' | 'Liability' | 'Income' | 'Expense' | 'Eq
 
 export interface AccountGroup {
   id?: string;
+  franchiseId?: string;
   name: string;
   parentGroupId?: string;
   type: AccountMainType;
@@ -161,6 +183,7 @@ export interface AccountGroup {
 
 export interface Account {
   id?: string;
+  franchiseId?: string;
   name: string;
   groupId: string;
   openingBalance: number;
@@ -183,6 +206,7 @@ export interface VoucherItem {
 
 export interface Voucher {
   id?: string;
+  franchiseId?: string;
   voucherNumber: string;
   date: any;
   type: VoucherType;
@@ -195,6 +219,7 @@ export interface Voucher {
 
 export interface Driver {
   id?: string;
+  franchiseId?: string;
   name: string;
   mobile: string;
   monthlySalary: number;
@@ -207,6 +232,7 @@ export type AttendanceStatus = 'Full Day' | 'Half Day' | 'Absent';
 
 export interface AttendanceRecord {
   id?: string;
+  franchiseId?: string;
   driverId: string;
   driverName: string;
   date: any;
@@ -217,6 +243,7 @@ export interface AttendanceRecord {
 
 export interface DriverLocation {
   id?: string;
+  franchiseId?: string;
   driverId: string;
   driverName: string;
   latitude: number;
@@ -227,6 +254,7 @@ export interface DriverLocation {
 
 export interface HydrantFilling {
   id?: string;
+  franchiseId?: string;
   tokenNumber: string;
   date: any;
   type: 'Inward' | 'Outward';

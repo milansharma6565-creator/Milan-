@@ -6,19 +6,36 @@ service cloud.firestore {
     // ---------------------------------------------------------
     function isSignedIn() { 
       return request.auth != null && 
-             request.auth.token.email_verified == true &&
-             (request.auth.token.email == 'rajhanssikar@gmail.com' || 
-              request.auth.token.email == 'milan.sharma6565@gmail.com' ||
+             request.auth.token.email_verified == true;
+    }
+    function isAuthorizedUser() {
+      return isSignedIn() && 
+             (request.auth.token.email.lower() == 'rajhanssikar@gmail.com' || 
+              request.auth.token.email.lower() == 'milan.sharma6565@gmail.com' ||
               request.auth.uid == 'R3YQrAUh1tTGp0ghlwT7hgQ4Nm52'); 
     }
     function isAdmin() { 
-      return isSignedIn(); 
+      return isAuthorizedUser(); 
     }
     function isSuperAdmin() {
       return request.auth != null && 
-             request.auth.token.email_verified == true &&
-             (request.auth.token.email == 'milan.sharma6565@gmail.com' ||
+             (request.auth.token.email.lower() == 'milan.sharma6565@gmail.com' ||
               request.auth.uid == 'R3YQrAUh1tTGp0ghlwT7hgQ4Nm52');
+    }
+    function isFranchiseOwner(fId) {
+      return isSignedIn() && 
+             (isSuperAdmin() || 
+              (fId != null && exists(/databases/$(database)/documents/franchises/$(fId)) && 
+               get(/databases/$(database)/documents/franchises/$(fId)).data.email.lower() == request.auth.token.email.lower() &&
+               get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active'));
+    }
+    function isFranchiseActive(fId) {
+      return fId == null || 
+             (exists(/databases/$(database)/documents/franchises/$(fId)) && 
+              get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active');
+    }
+    function isFranchiseAuthorized(fId) {
+      return isSuperAdmin() || isFranchiseOwner(fId);
     }
     function isValidId(id) { 
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
@@ -36,6 +53,12 @@ service cloud.firestore {
     // ---------------------------------------------------------
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    match /franchises/{fId} {
+      allow get: if true; 
+      allow list: if isSuperAdmin() || (isSignedIn() && (resource.data.status == 'Active' || resource.data.email.lower() == request.auth.token.email.lower()));
+      allow create, update, delete: if isSuperAdmin();
     }
 
     // ---------------------------------------------------------
@@ -202,8 +225,8 @@ service cloud.firestore {
     match /bills/{billId} {
       allow get: if isValidId(billId); // Allow public view for rebooking
       allow list: if true; // Allowed for customer portal
-      allow create: if isAdmin() && isValidBill(incoming());
-      allow update: if isAdmin() && (
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidBill(incoming());
+      allow update: if isFranchiseAuthorized(existing().get('franchiseId', null)) && (
         (incoming().diff(existing()).affectedKeys().hasAny(['status', 'driverName', 'driverMobile', 'tractorId', 'paymentMode', 'isSettled', 'updatedAt']) &&
          isTimestampValid('updatedAt') &&
          incoming().billNumber == existing().billNumber && 
@@ -214,13 +237,14 @@ service cloud.firestore {
 
     match /trips/{tripId} {
       allow read: if true;
-      allow create: if isAdmin() && isValidTrip(incoming());
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidTrip(incoming());
       allow update: if true; // Both admin and driver might update status (delivered)
       allow delete: if isSuperAdmin();
     }
 
     match /drivers/{driverId} {
-      allow list, get, create: if true;
+      allow list, get: if true;
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow update: if true; // Allow drivers to set/update PIN
       allow delete: if isSuperAdmin();
     }
@@ -228,63 +252,66 @@ service cloud.firestore {
     match /tractors/{tractorId} {
       allow get: if true;
       allow list: if true;
-      allow create: if isAdmin() && isValidId(tractorId) && isValidTractor(incoming());
-      allow update: if isAdmin() && isValidId(tractorId) && isValidTractor(incoming());
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(tractorId) && isValidTractor(incoming());
+      allow update: if isFranchiseAuthorized(existing().get('franchiseId', null)) && isValidId(tractorId) && isValidTractor(incoming());
       allow delete: if isSuperAdmin() && isValidId(tractorId);
     }
 
     match /dieselLogs/{logId} {
       allow get: if isSignedIn() && isValidId(logId);
       allow list: if isSignedIn();
-      allow create: if isAdmin() && isValidId(logId) && isValidLog(incoming());
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(logId) && isValidLog(incoming());
       allow delete: if isSuperAdmin() && isValidId(logId);
     }
 
     match /maintenanceLogs/{logId} {
       allow get: if isSignedIn() && isValidId(logId);
       allow list: if isSignedIn();
-      allow create: if isAdmin() && isValidId(logId) && isValidLog(incoming());
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(logId) && isValidLog(incoming());
       allow delete: if isSuperAdmin() && isValidId(logId);
     }
 
     match /ledger/{entryId} {
       allow get, list: if true;
-      allow create: if true;
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow update: if false; 
       allow delete: if isSuperAdmin() && isValidId(entryId);
     }
 
     match /accountGroups/{groupId} {
-      allow read, create, update: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow delete: if isSuperAdmin();
     }
 
     match /accounts/{accountId} {
-      allow read, create, update: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow delete: if isSuperAdmin();
     }
 
     match /vouchers/{voucherId} {
-      allow read, create, update: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow delete: if isSuperAdmin();
     }
 
     match /attendance/{atId} {
       allow read: if true;
-      allow create: if true;
-      allow update, delete: if isAdmin();
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null));
+      allow update, delete: if isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /feedbacks/{id} {
       allow create: if true;
-      allow read, update, delete: if isAdmin();
+      allow read, update, delete: if isSuperAdmin();
     }
 
     match /hydrantFillings/{fillingId} {
       allow get: if isSignedIn() && isValidId(fillingId);
       allow list: if isSignedIn();
-      allow create: if isAdmin() && isValidId(fillingId) && isValidHydrantFilling(incoming());
-      allow update: if isAdmin() && isValidId(fillingId) && isValidHydrantFilling(incoming());
+      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(fillingId) && isValidHydrantFilling(incoming());
+      allow update: if isFranchiseAuthorized(existing().get('franchiseId', null)) && isValidId(fillingId) && isValidHydrantFilling(incoming());
       allow delete: if isSuperAdmin() && isValidId(fillingId);
     }
 
