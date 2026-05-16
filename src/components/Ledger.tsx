@@ -48,7 +48,7 @@ import { formatCurrency } from '../constants';
 import { format } from 'date-fns';
 import { ConfirmationModal } from './ConfirmationModal';
 import { generatePDF } from '../lib/pdfUtils';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 type AccountingTab = 'vouchers' | 'daybook' | 'ledgers' | 'reports' | 'accounts';
@@ -178,7 +178,7 @@ export function Ledger() {
 
       await batch.commit();
     } catch (error) {
-      console.error("Setup error:", error);
+      console.error("Setup error:", error?.message || String(error));
       handleFirestoreError(error, OperationType.WRITE, 'initial-setup');
     } finally {
       setIsInitializing(false);
@@ -320,7 +320,14 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
 
   const componentRef = useRef<HTMLDivElement>(null);
   const handlePrint = async () => {
-    const doc = new jsPDF();
+    let doc: any;
+    try {
+      doc = new jsPDF();
+    } catch (e) {
+      console.error('jsPDF failed:', e);
+      alert('PDF generation is not supported in this browser.');
+      return;
+    }
     doc.setFontSize(20);
     doc.text('TankerWala Powered by Rajhans', 14, 20);
     doc.setFontSize(10);
@@ -406,7 +413,9 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
 
       <div className="overflow-x-auto p-4 pt-0 print:p-8" ref={componentRef}>
         <div className="hidden print:block mb-8 mt-4 text-center">
-          <h2 className="text-2xl font-black mb-2">TankerWala Powered by Rajhans</h2>
+          <h2 className="text-2xl font-black pb-4 mb-2">
+            Tanker<span className="relative">Wala<span className="absolute top-[90%] left-0 text-[10px] text-slate-500 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5 mt-0.5">Powered by Rajhans</span></span>
+          </h2>
           <p className="text-sm text-slate-500 uppercase tracking-widest">Daybook / Journal</p>
         </div>
         <table className="w-full text-left border-collapse">
@@ -966,7 +975,7 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
           });
           if (navigator.vibrate) navigator.vibrate(50);
         } catch (error) {
-          console.error("Error toggling hide status:", error);
+          console.error("Error toggling hide status:", error?.message || String(error));
         }
       }
     };
@@ -980,7 +989,14 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
     const acc = accounts.find(a => a.id === selectedAccountId);
     if (!acc) return;
 
-    const doc = new jsPDF();
+    let doc: any;
+    try {
+      doc = new jsPDF();
+    } catch (e) {
+      console.error('jsPDF failed:', e);
+      alert('PDF generation is not supported in this browser.');
+      return;
+    }
     doc.setFontSize(20);
     doc.text('TankerWala Powered by Rajhans', 14, 20);
     doc.setFontSize(12);
@@ -1211,7 +1227,14 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
 
   const componentRef = useRef<HTMLDivElement>(null);
   const handlePrint = async () => {
-    const doc = new jsPDF();
+    let doc: any;
+    try {
+      doc = new jsPDF();
+    } catch (e) {
+      console.error('jsPDF failed:', e);
+      alert('PDF generation is not supported in this browser.');
+      return;
+    }
     doc.setFontSize(20);
     doc.text('TankerWala Powered by Rajhans', 14, 20);
     
@@ -1358,7 +1381,9 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
 
        <div ref={componentRef} className="print:p-8">
          <div className="hidden print:block mb-8 text-center">
-           <h2 className="text-3xl font-black mb-2">TankerWala Powered by Rajhans</h2>
+           <h2 className="text-3xl font-black mb-2 pb-5">
+             Tanker<span className="relative">Wala<span className="absolute top-[90%] left-0 text-[10px] text-slate-500 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
+           </h2>
            <p className="text-sm text-slate-500 uppercase tracking-widest">{
              reportType === 'trial' ? 'Trial Balance' : 
              reportType === 'pl' ? 'Profit & Loss Statement' : 

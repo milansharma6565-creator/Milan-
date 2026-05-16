@@ -1,0 +1,1507 @@
+./src/components/DocumentVault.tsx:        const reader = new FileReader();
+./src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./src/components/DriverAttendance.tsx:      doc = new jsPDF();
+./src/components/DriverAttendance.tsx:               const nd = new Date(d);
+./src/components/DriverAttendance.tsx:               const nd = new Date(d);
+./src/components/ThermalInvoice.tsx:        <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
+./src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./src/components/ReportView.tsx:                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+./src/components/CustomerManagement.tsx:      doc = new jsPDF();
+./src/components/CustomerManagement.tsx:      const entryDate = new Date(receiptForm.date);
+./src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./src/components/CustomerManagement.tsx:      const start = new Date(startDate);
+./src/components/CustomerManagement.tsx:      const end = new Date(endDate);
+./src/components/CustomerManagement.tsx:      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./src/components/CustomerManagement.tsx:      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./src/components/CustomerManagement.tsx:      doc = new jsPDF();
+./src/components/CustomerManagement.tsx:            file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+./src/components/CustomerManagement.tsx:                         {new Date(bill.date).toLocaleDateString()}
+./src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./src/components/Ledger.tsx:            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
+./src/components/Ledger.tsx:            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+./src/components/Ledger.tsx:      doc = new jsPDF();
+./src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./src/components/Ledger.tsx:          date: new Date(date),
+./src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./src/components/Ledger.tsx:      doc = new jsPDF();
+./src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./src/components/Ledger.tsx:      doc = new jsPDF();
+./src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./src/components/DriverApp.tsx:      reader = new FileReader();
+./src/components/DriverApp.tsx:          const completedDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+./src/components/DriverApp.tsx:        audioContext = new AudioContextClass();
+./src/components/DriverApp.tsx:        audioContext = new AudioContextClass();
+./src/components/HydrantFilling.tsx:    const fillingDate = new Date(f.date);
+./src/components/HydrantFilling.tsx:              <span className="text-[10px] font-bold text-slate-400">{format(new Date(f.date), 'dd MMM, hh:mm a')}</span>
+./src/components/HydrantFilling.tsx:              <span className="font-bold">{(printingFilling || downloadingFilling) && format(new Date((printingFilling || downloadingFilling)!.date), 'dd/MM/yyyy HH:mm')}</span>
+./src/components/Dashboard.tsx:      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./src/components/Dashboard.tsx:        const expiryDate = new Date(t.insuranceExpiry);
+./src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./src/components/Dashboard.tsx:      const entryDate = new Date(quickVchForm.date);
+./src/components/Dashboard.tsx:      // 2. Generate new bill number
+./src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./src/components/Dashboard.tsx:            file = new File([blob], fileName, { type: 'image/jpeg' });
+./src/components/Dashboard.tsx:            const item = new ClipboardItemConstructor({ [blob.type]: blob });
+./src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./src/components/Dashboard.tsx:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./src/components/Dashboard.tsx:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+./src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./src/components/Dashboard.tsx:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./src/components/Dashboard.tsx:                      Via {quickVoucher.paymentMethod} • {new Date(quickVchForm.date).toLocaleDateString()}
+./src/components/TractorDiesel.tsx:          date: new Date(newDiesel.date),
+./src/components/TractorDiesel.tsx:          date: new Date(newMaintenance.date),
+./src/components/TractorDiesel.tsx:      doc = new jsPDF();
+./src/components/TractorDiesel.tsx:        isWithinInterval(new Date(l.date), { start, end })
+./src/components/TractorDiesel.tsx:        isWithinInterval(new Date(l.date), { start, end })
+./src/components/TractorDiesel.tsx:        isWithinInterval(new Date(b.date), { start, end })
+./src/components/TractorDiesel.tsx:            new Date(l.date).toLocaleDateString(),
+./src/components/TractorDiesel.tsx:            new Date(l.date).toLocaleDateString(),
+./src/components/TractorDiesel.tsx:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./src/components/TractorDiesel.tsx:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./src/components/CustomerBookingPortal.tsx:    const date = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+./src/components/CustomerBookingPortal.tsx:    const target = new Date(date.getTime() + 1.5 * 60 * 60 * 1000); // +1.5 hours
+./src/components/CustomerBookingPortal.tsx:        const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.date);
+./src/components/CustomerBookingPortal.tsx:        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.date).getTime();
+./src/components/CustomerBookingPortal.tsx:        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.date).getTime();
+./src/components/CustomerBookingPortal.tsx:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM')}
+./src/components/Billing.tsx:            file = new File([blob], fileName, { type: 'image/jpeg' });
+./src/components/DriverManagement.tsx:      doc = new jsPDF();
+./src/constants.ts:  return new Intl.NumberFormat('en-IN', {
+./src/constants.ts:      const urlObj = new URL(currentUrl.replace('ais-dev-', 'ais-pre-'));
+./src/constants.ts:    return new URL(currentUrl);
+./src/lib/pdfUtils.ts:      pdf = new jsPDF({
+./src/App.tsx:      const params = new URLSearchParams(window.location.search);
+./src/App.tsx:    const queryParams = new URLSearchParams(window.location.search);
+./src/firebase.ts:export const googleProvider = new GoogleAuthProvider();
+./debug.txt:src/components/DocumentVault.tsx:new Date
+./debug.txt:src/components/DocumentVault.tsx:new FileReader
+./debug.txt:src/components/DocumentVault.tsx:new password
+./debug.txt:src/components/DriverAttendance.tsx:new Date
+./debug.txt:src/components/DriverAttendance.tsx:new jsPDF
+./debug.txt:src/components/DriverAttendance.tsx:new Date
+./debug.txt:src/components/DriverAttendance.tsx:new Date
+./debug.txt:src/components/DriverAttendance.tsx:new Date
+./debug.txt:src/components/DriverAttendance.tsx:new Date
+./debug.txt:src/components/ThermalInvoice.tsx:new Date
+./debug.txt:src/components/ReportView.tsx:new Date
+./debug.txt:src/components/ReportView.tsx:new Date
+./debug.txt:src/components/ReportView.tsx:new tab
+./debug.txt:src/components/ReportView.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new jsPDF
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new client
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new jsPDF
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new File
+./debug.txt:src/components/CustomerManagement.tsx:new Date
+./debug.txt:src/components/CustomerManagement.tsx:new tab
+./debug.txt:src/components/DriverLiveTracking.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new jsPDF
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new tab
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new account
+./debug.txt:src/components/Ledger.tsx:new jsPDF
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new tab
+./debug.txt:src/components/Ledger.tsx:new jsPDF
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new Date
+./debug.txt:src/components/Ledger.tsx:new tab
+./debug.txt:src/components/DriverApp.tsx:new FileReader
+./debug.txt:src/components/DriverApp.tsx:new Date
+./debug.txt:src/components/DriverApp.tsx:new Date
+./debug.txt:src/components/DriverApp.tsx:new Date
+./debug.txt:src/components/DriverApp.tsx:new Date
+./debug.txt:src/components/DriverApp.tsx:new AudioContextClass
+./debug.txt:src/components/DriverApp.tsx:new AudioContextClass
+./debug.txt:src/components/DriverApp.tsx:new Date
+./debug.txt:src/components/DriverApp.tsx:new Date
+./debug.txt:src/components/HydrantFilling.tsx:new Date
+./debug.txt:src/components/HydrantFilling.tsx:new Date
+./debug.txt:src/components/HydrantFilling.tsx:new Date
+./debug.txt:src/components/HydrantFilling.tsx:new Date
+./debug.txt:src/components/HydrantFilling.tsx:new Date
+./debug.txt:src/components/HydrantFilling.tsx:new Date
+./debug.txt:src/components/HydrantFilling.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new bill
+./debug.txt:src/components/Dashboard.tsx:new bill
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new File
+./debug.txt:src/components/Dashboard.tsx:new ClipboardItemClass
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new tractor
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new tab
+./debug.txt:src/components/Dashboard.tsx:new tractor
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/Dashboard.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new jsPDF
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new Date
+./debug.txt:src/components/TractorDiesel.tsx:new fuel
+./debug.txt:src/components/TractorDiesel.tsx:new repair
+./debug.txt:src/components/DriverTrackingAdmin.tsx:new Date
+./debug.txt:src/components/DriverTrackingAdmin.tsx:new Date
+./debug.txt:src/components/CustomerOrderView.tsx:new trip
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/CustomerBookingPortal.tsx:new Date
+./debug.txt:src/components/GoodMorningGreeting.tsx:new Date
+./debug.txt:src/components/GoodMorningGreeting.tsx:new Date
+./debug.txt:src/components/Billing.tsx:new Date
+./debug.txt:src/components/Billing.tsx:new File
+./debug.txt:src/components/Billing.tsx:new Date
+./debug.txt:src/components/DriverManagement.tsx:new Date
+./debug.txt:src/components/DriverManagement.tsx:new Date
+./debug.txt:src/components/DriverManagement.tsx:new jsPDF
+./debug.txt:src/components/DriverManagement.tsx:new Date
+./debug.txt:src/components/DriverManagement.tsx:new Date
+./debug.txt:src/constants.ts:new Intl
+./debug.txt:src/constants.ts:new URL
+./debug.txt:src/constants.ts:new URL
+./debug.txt:src/services/ledgerAutomation.ts:new Date
+./debug.txt:src/services/ledgerAutomation.ts:new Date
+./debug.txt:src/lib/pdfUtils.ts:new jsPDF
+./debug.txt:src/App.tsx:new URLSearchParams
+./debug.txt:src/App.tsx:new URLSearchParams
+./debug.txt:src/firebase.ts:new GoogleAuthProvider
+./new_findings.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./new_findings.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_findings.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./new_findings.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_findings.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_findings.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./new_findings.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_findings.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_findings.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./new_findings.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./new_findings.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./new_findings.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./new_findings.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./new_findings.txt:debug.txt:src/components/ReportView.tsx:new tab
+./new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./new_findings.txt:debug.txt:src/components/Ledger.tsx:new account
+./new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./new_findings.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./output.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./output.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./output.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./output.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./output.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./output.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./output.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./output.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./output.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./output.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./output.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./output.txt:debug.txt:src/components/ReportView.tsx:new tab
+./output.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./output.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./output.txt:debug.txt:src/components/Ledger.tsx:new account
+./output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./output.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./output.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./output.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./output.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./output.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./output.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./output.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./output.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./output.txt:new_findings.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./output.txt:new_findings.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:new_findings.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./output.txt:new_findings.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:new_findings.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:new_findings.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./output.txt:new_findings.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:new_findings.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:new_findings.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./output.txt:new_findings.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./output.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./output.txt:new_findings.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./output.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./output.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./output.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./output.txt:new_findings.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./output.txt:new_findings.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./output.txt:new_findings.txt:debug.txt:src/components/ReportView.tsx:new tab
+./output.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./output.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new account
+./output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./output.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./output.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./output.txt:new_findings.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./log.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./log.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./log.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./log.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./log.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./log.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./log.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./log.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./log.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./log.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./log.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./log.txt:debug.txt:src/components/ReportView.tsx:new tab
+./log.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./log.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./log.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:debug.txt:src/components/Ledger.tsx:new account
+./log.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./log.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./log.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./log.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./log.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./log.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./log.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./log.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./log.txt:new_findings.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./log.txt:new_findings.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:new_findings.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./log.txt:new_findings.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:new_findings.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:new_findings.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./log.txt:new_findings.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:new_findings.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:new_findings.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./log.txt:new_findings.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./log.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./log.txt:new_findings.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./log.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./log.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./log.txt:new_findings.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./log.txt:new_findings.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./log.txt:new_findings.txt:debug.txt:src/components/ReportView.tsx:new tab
+./log.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./log.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./log.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new account
+./log.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./log.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./log.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./log.txt:new_findings.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./log.txt:output.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./log.txt:output.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./log.txt:output.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./log.txt:output.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./log.txt:output.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./log.txt:output.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./log.txt:output.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./log.txt:output.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./log.txt:output.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./log.txt:output.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./log.txt:output.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./log.txt:output.txt:debug.txt:src/components/ReportView.tsx:new tab
+./log.txt:output.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./log.txt:output.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./log.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:output.txt:debug.txt:src/components/Ledger.tsx:new account
+./log.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./log.txt:output.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./log.txt:output.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./log.txt:output.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./log.txt:output.txt:new_findings.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./log.txt:output.txt:new_findings.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:new_findings.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./log.txt:output.txt:new_findings.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./log.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./log.txt:output.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./log.txt:output.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./log.txt:output.txt:new_findings.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/ReportView.tsx:new tab
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new account
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./log.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./words.txt:src/components/DocumentVault.tsx:new Date
+./words.txt:src/components/DocumentVault.tsx:new FileReader
+./words.txt:src/components/DocumentVault.tsx:new password
+./words.txt:src/components/DriverAttendance.tsx:new Date
+./words.txt:src/components/DriverAttendance.tsx:new jsPDF
+./words.txt:src/components/DriverAttendance.tsx:new Date
+./words.txt:src/components/DriverAttendance.tsx:new Date
+./words.txt:src/components/DriverAttendance.tsx:new Date
+./words.txt:src/components/DriverAttendance.tsx:new Date
+./words.txt:src/components/ThermalInvoice.tsx:new Date
+./words.txt:src/components/ReportView.tsx:new Date
+./words.txt:src/components/ReportView.tsx:new Date
+./words.txt:src/components/ReportView.tsx:new tab
+./words.txt:src/components/ReportView.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new jsPDF
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new client
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new jsPDF
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new File
+./words.txt:src/components/CustomerManagement.tsx:new Date
+./words.txt:src/components/CustomerManagement.tsx:new tab
+./words.txt:src/components/DriverLiveTracking.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new jsPDF
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new tab
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new account
+./words.txt:src/components/Ledger.tsx:new jsPDF
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new tab
+./words.txt:src/components/Ledger.tsx:new jsPDF
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new Date
+./words.txt:src/components/Ledger.tsx:new tab
+./words.txt:src/components/DriverApp.tsx:new FileReader
+./words.txt:src/components/DriverApp.tsx:new Date
+./words.txt:src/components/DriverApp.tsx:new Date
+./words.txt:src/components/DriverApp.tsx:new Date
+./words.txt:src/components/DriverApp.tsx:new Date
+./words.txt:src/components/DriverApp.tsx:new AudioContextClass
+./words.txt:src/components/DriverApp.tsx:new AudioContextClass
+./words.txt:src/components/DriverApp.tsx:new Date
+./words.txt:src/components/DriverApp.tsx:new Date
+./words.txt:src/components/HydrantFilling.tsx:new Date
+./words.txt:src/components/HydrantFilling.tsx:new Date
+./words.txt:src/components/HydrantFilling.tsx:new Date
+./words.txt:src/components/HydrantFilling.tsx:new Date
+./words.txt:src/components/HydrantFilling.tsx:new Date
+./words.txt:src/components/HydrantFilling.tsx:new Date
+./words.txt:src/components/HydrantFilling.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new bill
+./words.txt:src/components/Dashboard.tsx:new bill
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new File
+./words.txt:src/components/Dashboard.tsx:new ClipboardItemClass
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new tractor
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new tab
+./words.txt:src/components/Dashboard.tsx:new tractor
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/Dashboard.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new jsPDF
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new Date
+./words.txt:src/components/TractorDiesel.tsx:new fuel
+./words.txt:src/components/TractorDiesel.tsx:new repair
+./words.txt:src/components/DriverTrackingAdmin.tsx:new Date
+./words.txt:src/components/DriverTrackingAdmin.tsx:new Date
+./words.txt:src/components/CustomerOrderView.tsx:new trip
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/CustomerBookingPortal.tsx:new Date
+./words.txt:src/components/GoodMorningGreeting.tsx:new Date
+./words.txt:src/components/GoodMorningGreeting.tsx:new Date
+./words.txt:src/components/Billing.tsx:new Date
+./words.txt:src/components/Billing.tsx:new File
+./words.txt:src/components/Billing.tsx:new Date
+./words.txt:src/components/DriverManagement.tsx:new Date
+./words.txt:src/components/DriverManagement.tsx:new Date
+./words.txt:src/components/DriverManagement.tsx:new jsPDF
+./words.txt:src/components/DriverManagement.tsx:new Date
+./words.txt:src/components/DriverManagement.tsx:new Date
+./words.txt:src/constants.ts:new Intl
+./words.txt:src/constants.ts:new URL
+./words.txt:src/constants.ts:new URL
+./words.txt:src/services/ledgerAutomation.ts:new Date
+./words.txt:src/services/ledgerAutomation.ts:new Date
+./words.txt:src/lib/pdfUtils.ts:new jsPDF
+./words.txt:src/App.tsx:new URLSearchParams
+./words.txt:src/App.tsx:new URLSearchParams
+./words.txt:src/firebase.ts:new GoogleAuthProvider
+./all_new_calls.txt:src/components/DocumentVault.tsx:194:        const reader = new FileReader();
+./all_new_calls.txt:src/components/DocumentVault.tsx:296:                placeholder="Enter new password"
+./all_new_calls.txt:src/components/DriverAttendance.tsx:221:    const doc = new jsPDF();
+./all_new_calls.txt:src/components/DriverAttendance.tsx:322:               const nd = new Date(d);
+./all_new_calls.txt:src/components/DriverAttendance.tsx:340:               const nd = new Date(d);
+./all_new_calls.txt:src/components/ThermalInvoice.tsx:30:        <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
+./all_new_calls.txt:src/components/ReportView.tsx:171:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./all_new_calls.txt:src/components/ReportView.tsx:277:                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+./all_new_calls.txt:src/components/CustomerManagement.tsx:221:    const doc = new jsPDF();
+./all_new_calls.txt:src/components/CustomerManagement.tsx:267:      const entryDate = new Date(receiptForm.date);
+./all_new_calls.txt:src/components/CustomerManagement.tsx:598:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./all_new_calls.txt:src/components/CustomerManagement.tsx:935:      const start = new Date(startDate);
+./all_new_calls.txt:src/components/CustomerManagement.tsx:937:      const end = new Date(endDate);
+./all_new_calls.txt:src/components/CustomerManagement.tsx:948:      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./all_new_calls.txt:src/components/CustomerManagement.tsx:958:      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./all_new_calls.txt:src/components/CustomerManagement.tsx:970:      const doc = new jsPDF();
+./all_new_calls.txt:src/components/CustomerManagement.tsx:1034:        file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+./all_new_calls.txt:src/components/CustomerManagement.tsx:1314:                         {new Date(bill.date).toLocaleDateString()}
+./all_new_calls.txt:src/components/CustomerManagement.tsx:1402:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./all_new_calls.txt:src/components/Ledger.tsx:114:            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
+./all_new_calls.txt:src/components/Ledger.tsx:115:            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+./all_new_calls.txt:src/components/Ledger.tsx:323:    const doc = new jsPDF();
+./all_new_calls.txt:src/components/Ledger.tsx:389:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./all_new_calls.txt:src/components/Ledger.tsx:545:          date: new Date(date),
+./all_new_calls.txt:src/components/Ledger.tsx:808:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./all_new_calls.txt:src/components/Ledger.tsx:985:    const doc = new jsPDF();
+./all_new_calls.txt:src/components/Ledger.tsx:1056:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./all_new_calls.txt:src/components/Ledger.tsx:1216:    const doc = new jsPDF();
+./all_new_calls.txt:src/components/Ledger.tsx:1354:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./all_new_calls.txt:src/components/DriverApp.tsx:101:    const reader = new FileReader();
+./all_new_calls.txt:src/components/DriverApp.tsx:331:          const completedDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+./all_new_calls.txt:src/components/DriverApp.tsx:524:      const audioContext = new AudioContextClass();
+./all_new_calls.txt:src/components/DriverApp.tsx:544:      const audioContext = new AudioContextClass();
+./all_new_calls.txt:src/components/HydrantFilling.tsx:443:    const fillingDate = new Date(f.date);
+./all_new_calls.txt:src/components/HydrantFilling.tsx:566:              <span className="text-[10px] font-bold text-slate-400">{format(new Date(f.date), 'dd MMM, hh:mm a')}</span>
+./all_new_calls.txt:src/components/HydrantFilling.tsx:801:              <span className="font-bold">{(printingFilling || downloadingFilling) && format(new Date((printingFilling || downloadingFilling)!.date), 'dd/MM/yyyy HH:mm')}</span>
+./all_new_calls.txt:src/components/Dashboard.tsx:143:      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./all_new_calls.txt:src/components/Dashboard.tsx:167:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./all_new_calls.txt:src/components/Dashboard.tsx:242:        const expiryDate = new Date(t.insuranceExpiry);
+./all_new_calls.txt:src/components/Dashboard.tsx:381:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./all_new_calls.txt:src/components/Dashboard.tsx:388:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./all_new_calls.txt:src/components/Dashboard.tsx:394:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./all_new_calls.txt:src/components/Dashboard.tsx:414:      const entryDate = new Date(quickVchForm.date);
+./all_new_calls.txt:src/components/Dashboard.tsx:1115:      // 2. Generate new bill number
+./all_new_calls.txt:src/components/Dashboard.tsx:1119:      // 3. Create new bill based on original but with current time
+./all_new_calls.txt:src/components/Dashboard.tsx:1251:        file = new File([blob], fileName, { type: 'image/jpeg' });
+./all_new_calls.txt:src/components/Dashboard.tsx:1276:            const item = new ClipboardItemClass({ [blob.type]: blob });
+./all_new_calls.txt:src/components/Dashboard.tsx:1864:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./all_new_calls.txt:src/components/Dashboard.tsx:1885:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./all_new_calls.txt:src/components/Dashboard.tsx:2093:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+./all_new_calls.txt:src/components/Dashboard.tsx:2596:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./all_new_calls.txt:src/components/Dashboard.tsx:2643:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./all_new_calls.txt:src/components/Dashboard.tsx:2664:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./all_new_calls.txt:src/components/Dashboard.tsx:2712:                      Via {quickVoucher.paymentMethod} • {new Date(quickVchForm.date).toLocaleDateString()}
+./all_new_calls.txt:src/components/TractorDiesel.tsx:282:          date: new Date(newDiesel.date),
+./all_new_calls.txt:src/components/TractorDiesel.tsx:446:          date: new Date(newMaintenance.date),
+./all_new_calls.txt:src/components/TractorDiesel.tsx:651:    const doc = new jsPDF();
+./all_new_calls.txt:src/components/TractorDiesel.tsx:697:        isWithinInterval(new Date(l.date), { start, end })
+./all_new_calls.txt:src/components/TractorDiesel.tsx:702:        isWithinInterval(new Date(l.date), { start, end })
+./all_new_calls.txt:src/components/TractorDiesel.tsx:707:        isWithinInterval(new Date(b.date), { start, end })
+./all_new_calls.txt:src/components/TractorDiesel.tsx:739:            new Date(l.date).toLocaleDateString(),
+./all_new_calls.txt:src/components/TractorDiesel.tsx:766:            new Date(l.date).toLocaleDateString(),
+./all_new_calls.txt:src/components/TractorDiesel.tsx:1063:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./all_new_calls.txt:src/components/TractorDiesel.tsx:1103:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./all_new_calls.txt:src/components/TractorDiesel.tsx:1140:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./all_new_calls.txt:src/components/TractorDiesel.tsx:1259:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./all_new_calls.txt:src/components/CustomerOrderView.tsx:261:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./all_new_calls.txt:src/components/CustomerBookingPortal.tsx:37:    const date = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+./all_new_calls.txt:src/components/CustomerBookingPortal.tsx:38:    const target = new Date(date.getTime() + 1.5 * 60 * 60 * 1000); // +1.5 hours
+./all_new_calls.txt:src/components/CustomerBookingPortal.tsx:413:        const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.date);
+./all_new_calls.txt:src/components/CustomerBookingPortal.tsx:421:        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.date).getTime();
+./all_new_calls.txt:src/components/CustomerBookingPortal.tsx:422:        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.date).getTime();
+./all_new_calls.txt:src/components/CustomerBookingPortal.tsx:1365:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM')}
+./all_new_calls.txt:src/components/Billing.tsx:200:        file = new File([blob], fileName, { type: 'image/jpeg' });
+./all_new_calls.txt:src/components/DriverManagement.tsx:244:    const doc = new jsPDF();
+./all_new_calls.txt:src/constants.ts:26:  return new Intl.NumberFormat('en-IN', {
+./all_new_calls.txt:src/constants.ts:42:    const urlObj = new URL(currentUrl.replace('ais-dev-', 'ais-pre-'));
+./all_new_calls.txt:src/constants.ts:45:  return new URL(currentUrl);
+./all_new_calls.txt:src/lib/pdfUtils.ts:27:    const pdf = new jsPDF({
+./all_new_calls.txt:src/App.tsx:54:    const params = new URLSearchParams(window.location.search);
+./all_new_calls.txt:src/App.tsx:81:  const queryParams = new URLSearchParams(window.location.search);
+./all_new_calls.txt:src/firebase.ts:30:export const googleProvider = new GoogleAuthProvider();
+./new_usage.txt:src/components/DocumentVault.tsx:194:        const reader = new FileReader();
+./new_usage.txt:src/components/DocumentVault.tsx:296:                placeholder="Enter new password"
+./new_usage.txt:src/components/DriverAttendance.tsx:221:    const doc = new jsPDF();
+./new_usage.txt:src/components/DriverAttendance.tsx:322:               const nd = new Date(d);
+./new_usage.txt:src/components/DriverAttendance.tsx:340:               const nd = new Date(d);
+./new_usage.txt:src/components/ThermalInvoice.tsx:30:        <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
+./new_usage.txt:src/components/ReportView.tsx:171:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_usage.txt:src/components/ReportView.tsx:277:                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+./new_usage.txt:src/components/CustomerManagement.tsx:221:    const doc = new jsPDF();
+./new_usage.txt:src/components/CustomerManagement.tsx:267:      const entryDate = new Date(receiptForm.date);
+./new_usage.txt:src/components/CustomerManagement.tsx:598:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./new_usage.txt:src/components/CustomerManagement.tsx:935:      const start = new Date(startDate);
+./new_usage.txt:src/components/CustomerManagement.tsx:937:      const end = new Date(endDate);
+./new_usage.txt:src/components/CustomerManagement.tsx:948:      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./new_usage.txt:src/components/CustomerManagement.tsx:958:      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./new_usage.txt:src/components/CustomerManagement.tsx:970:      const doc = new jsPDF();
+./new_usage.txt:src/components/CustomerManagement.tsx:1034:        file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+./new_usage.txt:src/components/CustomerManagement.tsx:1324:                         {new Date(bill.date).toLocaleDateString()}
+./new_usage.txt:src/components/CustomerManagement.tsx:1412:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_usage.txt:src/components/Ledger.tsx:114:            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
+./new_usage.txt:src/components/Ledger.tsx:115:            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+./new_usage.txt:src/components/Ledger.tsx:323:    const doc = new jsPDF();
+./new_usage.txt:src/components/Ledger.tsx:389:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_usage.txt:src/components/Ledger.tsx:545:          date: new Date(date),
+./new_usage.txt:src/components/Ledger.tsx:808:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./new_usage.txt:src/components/Ledger.tsx:985:    const doc = new jsPDF();
+./new_usage.txt:src/components/Ledger.tsx:1056:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_usage.txt:src/components/Ledger.tsx:1216:    const doc = new jsPDF();
+./new_usage.txt:src/components/Ledger.tsx:1354:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_usage.txt:src/components/DriverApp.tsx:101:    const reader = new FileReader();
+./new_usage.txt:src/components/DriverApp.tsx:331:          const completedDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+./new_usage.txt:src/components/DriverApp.tsx:524:      const audioContext = new AudioContextClass();
+./new_usage.txt:src/components/DriverApp.tsx:544:      const audioContext = new AudioContextClass();
+./new_usage.txt:src/components/HydrantFilling.tsx:443:    const fillingDate = new Date(f.date);
+./new_usage.txt:src/components/HydrantFilling.tsx:566:              <span className="text-[10px] font-bold text-slate-400">{format(new Date(f.date), 'dd MMM, hh:mm a')}</span>
+./new_usage.txt:src/components/HydrantFilling.tsx:801:              <span className="font-bold">{(printingFilling || downloadingFilling) && format(new Date((printingFilling || downloadingFilling)!.date), 'dd/MM/yyyy HH:mm')}</span>
+./new_usage.txt:src/components/Dashboard.tsx:143:      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_usage.txt:src/components/Dashboard.tsx:167:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_usage.txt:src/components/Dashboard.tsx:242:        const expiryDate = new Date(t.insuranceExpiry);
+./new_usage.txt:src/components/Dashboard.tsx:381:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_usage.txt:src/components/Dashboard.tsx:388:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_usage.txt:src/components/Dashboard.tsx:394:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_usage.txt:src/components/Dashboard.tsx:414:      const entryDate = new Date(quickVchForm.date);
+./new_usage.txt:src/components/Dashboard.tsx:1115:      // 2. Generate new bill number
+./new_usage.txt:src/components/Dashboard.tsx:1119:      // 3. Create new bill based on original but with current time
+./new_usage.txt:src/components/Dashboard.tsx:1251:        file = new File([blob], fileName, { type: 'image/jpeg' });
+./new_usage.txt:src/components/Dashboard.tsx:1286:            const item = new ClipboardItemClass({ [blob.type]: blob });
+./new_usage.txt:src/components/Dashboard.tsx:1874:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./new_usage.txt:src/components/Dashboard.tsx:1895:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./new_usage.txt:src/components/Dashboard.tsx:2103:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+./new_usage.txt:src/components/Dashboard.tsx:2606:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_usage.txt:src/components/Dashboard.tsx:2653:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./new_usage.txt:src/components/Dashboard.tsx:2674:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./new_usage.txt:src/components/Dashboard.tsx:2722:                      Via {quickVoucher.paymentMethod} • {new Date(quickVchForm.date).toLocaleDateString()}
+./new_usage.txt:src/components/TractorDiesel.tsx:282:          date: new Date(newDiesel.date),
+./new_usage.txt:src/components/TractorDiesel.tsx:446:          date: new Date(newMaintenance.date),
+./new_usage.txt:src/components/TractorDiesel.tsx:651:    const doc = new jsPDF();
+./new_usage.txt:src/components/TractorDiesel.tsx:697:        isWithinInterval(new Date(l.date), { start, end })
+./new_usage.txt:src/components/TractorDiesel.tsx:702:        isWithinInterval(new Date(l.date), { start, end })
+./new_usage.txt:src/components/TractorDiesel.tsx:707:        isWithinInterval(new Date(b.date), { start, end })
+./new_usage.txt:src/components/TractorDiesel.tsx:739:            new Date(l.date).toLocaleDateString(),
+./new_usage.txt:src/components/TractorDiesel.tsx:766:            new Date(l.date).toLocaleDateString(),
+./new_usage.txt:src/components/TractorDiesel.tsx:1063:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./new_usage.txt:src/components/TractorDiesel.tsx:1103:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./new_usage.txt:src/components/TractorDiesel.tsx:1140:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./new_usage.txt:src/components/TractorDiesel.tsx:1259:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./new_usage.txt:src/components/CustomerOrderView.tsx:261:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./new_usage.txt:src/components/CustomerBookingPortal.tsx:37:    const date = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+./new_usage.txt:src/components/CustomerBookingPortal.tsx:38:    const target = new Date(date.getTime() + 1.5 * 60 * 60 * 1000); // +1.5 hours
+./new_usage.txt:src/components/CustomerBookingPortal.tsx:413:        const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.date);
+./new_usage.txt:src/components/CustomerBookingPortal.tsx:421:        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.date).getTime();
+./new_usage.txt:src/components/CustomerBookingPortal.tsx:422:        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.date).getTime();
+./new_usage.txt:src/components/CustomerBookingPortal.tsx:1365:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM')}
+./new_usage.txt:src/components/Billing.tsx:200:        file = new File([blob], fileName, { type: 'image/jpeg' });
+./new_usage.txt:src/components/DriverManagement.tsx:244:    const doc = new jsPDF();
+./new_usage.txt:src/constants.ts:26:  return new Intl.NumberFormat('en-IN', {
+./new_usage.txt:src/constants.ts:42:    const urlObj = new URL(currentUrl.replace('ais-dev-', 'ais-pre-'));
+./new_usage.txt:src/constants.ts:45:  return new URL(currentUrl);
+./new_usage.txt:src/lib/pdfUtils.ts:27:    const pdf = new jsPDF({
+./new_usage.txt:src/App.tsx:54:    const params = new URLSearchParams(window.location.search);
+./new_usage.txt:src/App.tsx:81:  const queryParams = new URLSearchParams(window.location.search);
+./new_usage.txt:src/firebase.ts:30:export const googleProvider = new GoogleAuthProvider();
+./new_uppercase.txt:src/components/Billing.tsx:200:        file = new File([blob], fileName, { type: 'image/jpeg' });
+./new_uppercase.txt:src/components/CustomerBookingPortal.tsx:37:    const date = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+./new_uppercase.txt:src/components/CustomerBookingPortal.tsx:38:    const target = new Date(date.getTime() + 1.5 * 60 * 60 * 1000); // +1.5 hours
+./new_uppercase.txt:src/components/CustomerBookingPortal.tsx:413:        const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.date);
+./new_uppercase.txt:src/components/CustomerBookingPortal.tsx:421:        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.date).getTime();
+./new_uppercase.txt:src/components/CustomerBookingPortal.tsx:422:        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.date).getTime();
+./new_uppercase.txt:src/components/CustomerBookingPortal.tsx:1365:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM')}
+./new_uppercase.txt:src/components/CustomerManagement.tsx:267:      const entryDate = new Date(receiptForm.date);
+./new_uppercase.txt:src/components/CustomerManagement.tsx:935:      const start = new Date(startDate);
+./new_uppercase.txt:src/components/CustomerManagement.tsx:937:      const end = new Date(endDate);
+./new_uppercase.txt:src/components/CustomerManagement.tsx:948:      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./new_uppercase.txt:src/components/CustomerManagement.tsx:958:      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./new_uppercase.txt:src/components/CustomerManagement.tsx:1034:        file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+./new_uppercase.txt:src/components/CustomerManagement.tsx:1324:                         {new Date(bill.date).toLocaleDateString()}
+./new_uppercase.txt:src/components/Dashboard.tsx:143:      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_uppercase.txt:src/components/Dashboard.tsx:167:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_uppercase.txt:src/components/Dashboard.tsx:242:        const expiryDate = new Date(t.insuranceExpiry);
+./new_uppercase.txt:src/components/Dashboard.tsx:381:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_uppercase.txt:src/components/Dashboard.tsx:388:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_uppercase.txt:src/components/Dashboard.tsx:394:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./new_uppercase.txt:src/components/Dashboard.tsx:414:      const entryDate = new Date(quickVchForm.date);
+./new_uppercase.txt:src/components/Dashboard.tsx:1251:        file = new File([blob], fileName, { type: 'image/jpeg' });
+./new_uppercase.txt:src/components/Dashboard.tsx:1286:            const item = new ClipboardItemClass({ [blob.type]: blob });
+./new_uppercase.txt:src/components/Dashboard.tsx:1895:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./new_uppercase.txt:src/components/Dashboard.tsx:2103:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+./new_uppercase.txt:src/components/Dashboard.tsx:2674:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./new_uppercase.txt:src/components/Dashboard.tsx:2722:                      Via {quickVoucher.paymentMethod} • {new Date(quickVchForm.date).toLocaleDateString()}
+./new_uppercase.txt:src/components/DocumentVault.tsx:194:        const reader = new FileReader();
+./new_uppercase.txt:src/components/DriverApp.tsx:101:    const reader = new FileReader();
+./new_uppercase.txt:src/components/DriverApp.tsx:331:          const completedDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+./new_uppercase.txt:src/components/DriverApp.tsx:524:      const audioContext = new AudioContextClass();
+./new_uppercase.txt:src/components/DriverApp.tsx:544:      const audioContext = new AudioContextClass();
+./new_uppercase.txt:src/components/DriverAttendance.tsx:322:               const nd = new Date(d);
+./new_uppercase.txt:src/components/DriverAttendance.tsx:340:               const nd = new Date(d);
+./new_uppercase.txt:src/components/HydrantFilling.tsx:443:    const fillingDate = new Date(f.date);
+./new_uppercase.txt:src/components/HydrantFilling.tsx:566:              <span className="text-[10px] font-bold text-slate-400">{format(new Date(f.date), 'dd MMM, hh:mm a')}</span>
+./new_uppercase.txt:src/components/HydrantFilling.tsx:801:              <span className="font-bold">{(printingFilling || downloadingFilling) && format(new Date((printingFilling || downloadingFilling)!.date), 'dd/MM/yyyy HH:mm')}</span>
+./new_uppercase.txt:src/components/Ledger.tsx:114:            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
+./new_uppercase.txt:src/components/Ledger.tsx:115:            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+./new_uppercase.txt:src/components/Ledger.tsx:545:          date: new Date(date),
+./new_uppercase.txt:src/components/ReportView.tsx:277:                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+./new_uppercase.txt:src/components/ThermalInvoice.tsx:30:        <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
+./new_uppercase.txt:src/components/TractorDiesel.tsx:282:          date: new Date(newDiesel.date),
+./new_uppercase.txt:src/components/TractorDiesel.tsx:446:          date: new Date(newMaintenance.date),
+./new_uppercase.txt:src/components/TractorDiesel.tsx:697:        isWithinInterval(new Date(l.date), { start, end })
+./new_uppercase.txt:src/components/TractorDiesel.tsx:702:        isWithinInterval(new Date(l.date), { start, end })
+./new_uppercase.txt:src/components/TractorDiesel.tsx:707:        isWithinInterval(new Date(b.date), { start, end })
+./new_uppercase.txt:src/components/TractorDiesel.tsx:739:            new Date(l.date).toLocaleDateString(),
+./new_uppercase.txt:src/components/TractorDiesel.tsx:766:            new Date(l.date).toLocaleDateString(),
+./new_uppercase.txt:src/components/TractorDiesel.tsx:1063:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./new_uppercase.txt:src/components/TractorDiesel.tsx:1103:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./new_calls.txt:src/components/DocumentVault.tsx:194:        const reader = new FileReader();
+./new_calls.txt:src/components/DocumentVault.tsx:296:                placeholder="Enter new password"
+./new_calls.txt:src/components/DriverAttendance.tsx:221:    const doc = new jsPDF();
+./new_calls.txt:src/components/ReportView.tsx:171:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_calls.txt:src/components/CustomerManagement.tsx:221:    const doc = new jsPDF();
+./new_calls.txt:src/components/CustomerManagement.tsx:598:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./new_calls.txt:src/components/CustomerManagement.tsx:970:      const doc = new jsPDF();
+./new_calls.txt:src/components/CustomerManagement.tsx:1035:          file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+./new_calls.txt:src/components/CustomerManagement.tsx:1416:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_calls.txt:src/components/Ledger.tsx:323:    const doc = new jsPDF();
+./new_calls.txt:src/components/Ledger.tsx:389:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_calls.txt:src/components/Ledger.tsx:808:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./new_calls.txt:src/components/Ledger.tsx:985:    const doc = new jsPDF();
+./new_calls.txt:src/components/Ledger.tsx:1056:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_calls.txt:src/components/Ledger.tsx:1216:    const doc = new jsPDF();
+./new_calls.txt:src/components/Ledger.tsx:1354:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_calls.txt:src/components/DriverApp.tsx:103:      reader = new FileReader();
+./new_calls.txt:src/components/DriverApp.tsx:530:      const audioContext = new AudioContextClass();
+./new_calls.txt:src/components/DriverApp.tsx:550:      const audioContext = new AudioContextClass();
+./new_calls.txt:src/components/Dashboard.tsx:1115:      // 2. Generate new bill number
+./new_calls.txt:src/components/Dashboard.tsx:1119:      // 3. Create new bill based on original but with current time
+./new_calls.txt:src/components/Dashboard.tsx:1253:          file = new File([blob], fileName, { type: 'image/jpeg' });
+./new_calls.txt:src/components/Dashboard.tsx:1290:            const item = new ClipboardItem({ [blob.type]: blob });
+./new_calls.txt:src/components/Dashboard.tsx:1883:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./new_calls.txt:src/components/Dashboard.tsx:2615:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./new_calls.txt:src/components/Dashboard.tsx:2662:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./new_calls.txt:src/components/TractorDiesel.tsx:651:    const doc = new jsPDF();
+./new_calls.txt:src/components/TractorDiesel.tsx:1140:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./new_calls.txt:src/components/TractorDiesel.tsx:1259:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./new_calls.txt:src/components/CustomerOrderView.tsx:261:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./new_calls.txt:src/components/Billing.tsx:202:          file = new File([blob], fileName, { type: 'image/jpeg' });
+./new_calls.txt:src/components/DriverManagement.tsx:244:    const doc = new jsPDF();
+./new_calls.txt:src/constants.ts:26:  return new Intl.NumberFormat('en-IN', {
+./new_calls.txt:src/constants.ts:42:    const urlObj = new URL(currentUrl.replace('ais-dev-', 'ais-pre-'));
+./new_calls.txt:src/constants.ts:45:  return new URL(currentUrl);
+./new_calls.txt:src/lib/pdfUtils.ts:27:    const pdf = new jsPDF({
+./new_calls.txt:src/App.tsx:56:      const params = new URLSearchParams(window.location.search);
+./new_calls.txt:src/App.tsx:93:    const queryParams = new URLSearchParams(window.location.search);
+./new_calls.txt:src/firebase.ts:30:export const googleProvider = new GoogleAuthProvider();
+./sorted_new_calls.txt:new AudioContextClass(
+./sorted_new_calls.txt:new AudioContextClass(
+./sorted_new_calls.txt:new ClipboardItemClass(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new Date(
+./sorted_new_calls.txt:new File(
+./sorted_new_calls.txt:new File(
+./sorted_new_calls.txt:new File(
+./sorted_new_calls.txt:new FileReader(
+./sorted_new_calls.txt:new FileReader(
+./sorted_new_calls.txt:new GoogleAuthProvider(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new jsPDF(
+./sorted_new_calls.txt:new URL(
+./sorted_new_calls.txt:new URL(
+./sorted_new_calls.txt:new URLSearchParams(
+./sorted_new_calls.txt:new URLSearchParams(
+./raw_new.txt:src/components/DocumentVault.tsx:        const reader = new FileReader();
+./raw_new.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./raw_new.txt:src/components/DriverAttendance.tsx:    const doc = new jsPDF();
+./raw_new.txt:src/components/DriverAttendance.tsx:               const nd = new Date(d);
+./raw_new.txt:src/components/DriverAttendance.tsx:               const nd = new Date(d);
+./raw_new.txt:src/components/ThermalInvoice.tsx:        <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
+./raw_new.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./raw_new.txt:src/components/ReportView.tsx:                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+./raw_new.txt:src/components/CustomerManagement.tsx:    const doc = new jsPDF();
+./raw_new.txt:src/components/CustomerManagement.tsx:      const entryDate = new Date(receiptForm.date);
+./raw_new.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./raw_new.txt:src/components/CustomerManagement.tsx:      const start = new Date(startDate);
+./raw_new.txt:src/components/CustomerManagement.tsx:      const end = new Date(endDate);
+./raw_new.txt:src/components/CustomerManagement.tsx:      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./raw_new.txt:src/components/CustomerManagement.tsx:      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./raw_new.txt:src/components/CustomerManagement.tsx:      const doc = new jsPDF();
+./raw_new.txt:src/components/CustomerManagement.tsx:            file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+./raw_new.txt:src/components/CustomerManagement.tsx:                         {new Date(bill.date).toLocaleDateString()}
+./raw_new.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./raw_new.txt:src/components/Ledger.tsx:            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
+./raw_new.txt:src/components/Ledger.tsx:            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+./raw_new.txt:src/components/Ledger.tsx:    const doc = new jsPDF();
+./raw_new.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./raw_new.txt:src/components/Ledger.tsx:          date: new Date(date),
+./raw_new.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./raw_new.txt:src/components/Ledger.tsx:    const doc = new jsPDF();
+./raw_new.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./raw_new.txt:src/components/Ledger.tsx:    const doc = new jsPDF();
+./raw_new.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./raw_new.txt:src/components/DriverApp.tsx:      reader = new FileReader();
+./raw_new.txt:src/components/DriverApp.tsx:          const completedDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+./raw_new.txt:src/components/DriverApp.tsx:        audioContext = new AudioContextClass();
+./raw_new.txt:src/components/DriverApp.tsx:        audioContext = new AudioContextClass();
+./raw_new.txt:src/components/HydrantFilling.tsx:    const fillingDate = new Date(f.date);
+./raw_new.txt:src/components/HydrantFilling.tsx:              <span className="text-[10px] font-bold text-slate-400">{format(new Date(f.date), 'dd MMM, hh:mm a')}</span>
+./raw_new.txt:src/components/HydrantFilling.tsx:              <span className="font-bold">{(printingFilling || downloadingFilling) && format(new Date((printingFilling || downloadingFilling)!.date), 'dd/MM/yyyy HH:mm')}</span>
+./raw_new.txt:src/components/Dashboard.tsx:      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_new.txt:src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_new.txt:src/components/Dashboard.tsx:        const expiryDate = new Date(t.insuranceExpiry);
+./raw_new.txt:src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_new.txt:src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_new.txt:src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_new.txt:src/components/Dashboard.tsx:      const entryDate = new Date(quickVchForm.date);
+./raw_new.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./raw_new.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./raw_new.txt:src/components/Dashboard.tsx:            file = new File([blob], fileName, { type: 'image/jpeg' });
+./raw_new.txt:src/components/Dashboard.tsx:            const item = new ClipboardItemConstructor({ [blob.type]: blob });
+./raw_new.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./raw_new.txt:src/components/Dashboard.tsx:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./raw_new.txt:src/components/Dashboard.tsx:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+./raw_new.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./raw_new.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./raw_new.txt:src/components/Dashboard.tsx:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./raw_new.txt:src/components/Dashboard.tsx:                      Via {quickVoucher.paymentMethod} • {new Date(quickVchForm.date).toLocaleDateString()}
+./raw_new.txt:src/components/TractorDiesel.tsx:          date: new Date(newDiesel.date),
+./raw_new.txt:src/components/TractorDiesel.tsx:          date: new Date(newMaintenance.date),
+./raw_new.txt:src/components/TractorDiesel.tsx:    const doc = new jsPDF();
+./raw_new.txt:src/components/TractorDiesel.tsx:        isWithinInterval(new Date(l.date), { start, end })
+./raw_new.txt:src/components/TractorDiesel.tsx:        isWithinInterval(new Date(l.date), { start, end })
+./raw_new.txt:src/components/TractorDiesel.tsx:        isWithinInterval(new Date(b.date), { start, end })
+./raw_new.txt:src/components/TractorDiesel.tsx:            new Date(l.date).toLocaleDateString(),
+./raw_new.txt:src/components/TractorDiesel.tsx:            new Date(l.date).toLocaleDateString(),
+./raw_new.txt:src/components/TractorDiesel.tsx:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./raw_new.txt:src/components/TractorDiesel.tsx:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./raw_new.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./raw_new.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./raw_new.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./raw_new.txt:src/components/CustomerBookingPortal.tsx:    const date = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+./raw_new.txt:src/components/CustomerBookingPortal.tsx:    const target = new Date(date.getTime() + 1.5 * 60 * 60 * 1000); // +1.5 hours
+./raw_new.txt:src/components/CustomerBookingPortal.tsx:        const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.date);
+./raw_new.txt:src/components/CustomerBookingPortal.tsx:        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.date).getTime();
+./raw_new.txt:src/components/CustomerBookingPortal.tsx:        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.date).getTime();
+./raw_new.txt:src/components/CustomerBookingPortal.tsx:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM')}
+./raw_new.txt:src/components/Billing.tsx:            file = new File([blob], fileName, { type: 'image/jpeg' });
+./raw_new.txt:src/components/DriverManagement.tsx:    const doc = new jsPDF();
+./raw_new.txt:src/constants.ts:  return new Intl.NumberFormat('en-IN', {
+./raw_new.txt:src/constants.ts:    const urlObj = new URL(currentUrl.replace('ais-dev-', 'ais-pre-'));
+./raw_new.txt:src/constants.ts:  return new URL(currentUrl);
+./raw_new.txt:src/lib/pdfUtils.ts:    const pdf = new jsPDF({
+./raw_new.txt:src/App.tsx:      const params = new URLSearchParams(window.location.search);
+./raw_new.txt:src/App.tsx:    const queryParams = new URLSearchParams(window.location.search);
+./raw_new.txt:src/firebase.ts:export const googleProvider = new GoogleAuthProvider();
+./raw_unusual.txt:src/components/DocumentVault.tsx:194:        const reader = new FileReader();
+./raw_unusual.txt:src/components/DriverAttendance.tsx:322:               const nd = new Date(d);
+./raw_unusual.txt:src/components/DriverAttendance.tsx:340:               const nd = new Date(d);
+./raw_unusual.txt:src/components/ThermalInvoice.tsx:30:        <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
+./raw_unusual.txt:src/components/ReportView.tsx:277:                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+./raw_unusual.txt:src/components/CustomerManagement.tsx:267:      const entryDate = new Date(receiptForm.date);
+./raw_unusual.txt:src/components/CustomerManagement.tsx:935:      const start = new Date(startDate);
+./raw_unusual.txt:src/components/CustomerManagement.tsx:937:      const end = new Date(endDate);
+./raw_unusual.txt:src/components/CustomerManagement.tsx:948:      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./raw_unusual.txt:src/components/CustomerManagement.tsx:958:      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+./raw_unusual.txt:src/components/CustomerManagement.tsx:1037:            file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+./raw_unusual.txt:src/components/CustomerManagement.tsx:1334:                         {new Date(bill.date).toLocaleDateString()}
+./raw_unusual.txt:src/components/Ledger.tsx:114:            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
+./raw_unusual.txt:src/components/Ledger.tsx:115:            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+./raw_unusual.txt:src/components/Ledger.tsx:545:          date: new Date(date),
+./raw_unusual.txt:src/components/DriverApp.tsx:103:      reader = new FileReader();
+./raw_unusual.txt:src/components/DriverApp.tsx:337:          const completedDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+./raw_unusual.txt:src/components/DriverApp.tsx:532:        audioContext = new AudioContextClass();
+./raw_unusual.txt:src/components/DriverApp.tsx:559:        audioContext = new AudioContextClass();
+./raw_unusual.txt:src/components/HydrantFilling.tsx:443:    const fillingDate = new Date(f.date);
+./raw_unusual.txt:src/components/HydrantFilling.tsx:566:              <span className="text-[10px] font-bold text-slate-400">{format(new Date(f.date), 'dd MMM, hh:mm a')}</span>
+./raw_unusual.txt:src/components/HydrantFilling.tsx:801:              <span className="font-bold">{(printingFilling || downloadingFilling) && format(new Date((printingFilling || downloadingFilling)!.date), 'dd/MM/yyyy HH:mm')}</span>
+./raw_unusual.txt:src/components/Dashboard.tsx:143:      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_unusual.txt:src/components/Dashboard.tsx:167:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_unusual.txt:src/components/Dashboard.tsx:242:        const expiryDate = new Date(t.insuranceExpiry);
+./raw_unusual.txt:src/components/Dashboard.tsx:381:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_unusual.txt:src/components/Dashboard.tsx:388:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_unusual.txt:src/components/Dashboard.tsx:394:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+./raw_unusual.txt:src/components/Dashboard.tsx:414:      const entryDate = new Date(quickVchForm.date);
+./raw_unusual.txt:src/components/Dashboard.tsx:1254:            file = new File([blob], fileName, { type: 'image/jpeg' });
+./raw_unusual.txt:src/components/Dashboard.tsx:1297:            const item = new ClipboardItemConstructor({ [blob.type]: blob });
+./raw_unusual.txt:src/components/Dashboard.tsx:1911:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./raw_unusual.txt:src/components/Dashboard.tsx:2119:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+./raw_unusual.txt:src/components/Dashboard.tsx:2690:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+./raw_unusual.txt:src/components/Dashboard.tsx:2738:                      Via {quickVoucher.paymentMethod} • {new Date(quickVchForm.date).toLocaleDateString()}
+./raw_unusual.txt:src/components/TractorDiesel.tsx:282:          date: new Date(newDiesel.date),
+./raw_unusual.txt:src/components/TractorDiesel.tsx:446:          date: new Date(newMaintenance.date),
+./raw_unusual.txt:src/components/TractorDiesel.tsx:697:        isWithinInterval(new Date(l.date), { start, end })
+./raw_unusual.txt:src/components/TractorDiesel.tsx:702:        isWithinInterval(new Date(l.date), { start, end })
+./raw_unusual.txt:src/components/TractorDiesel.tsx:707:        isWithinInterval(new Date(b.date), { start, end })
+./raw_unusual.txt:src/components/TractorDiesel.tsx:739:            new Date(l.date).toLocaleDateString(),
+./raw_unusual.txt:src/components/TractorDiesel.tsx:766:            new Date(l.date).toLocaleDateString(),
+./raw_unusual.txt:src/components/TractorDiesel.tsx:1063:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./raw_unusual.txt:src/components/TractorDiesel.tsx:1103:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+./raw_unusual.txt:src/components/CustomerBookingPortal.tsx:37:    const date = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+./raw_unusual.txt:src/components/CustomerBookingPortal.tsx:38:    const target = new Date(date.getTime() + 1.5 * 60 * 60 * 1000); // +1.5 hours
+./raw_unusual.txt:src/components/CustomerBookingPortal.tsx:413:        const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.date);
+./raw_unusual.txt:src/components/CustomerBookingPortal.tsx:421:        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.date).getTime();
+./raw_unusual.txt:src/components/CustomerBookingPortal.tsx:422:        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.date).getTime();
+./raw_unusual.txt:src/components/CustomerBookingPortal.tsx:1365:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM')}
+./raw_unusual.txt:src/components/Billing.tsx:203:            file = new File([blob], fileName, { type: 'image/jpeg' });
+./raw_unusual.txt:src/constants.ts:26:  return new Intl.NumberFormat('en-IN', {
+./raw_unusual.txt:src/constants.ts:42:    const urlObj = new URL(currentUrl.replace('ais-dev-', 'ais-pre-'));
+./raw_unusual.txt:src/constants.ts:45:  return new URL(currentUrl);
+./raw_unusual.txt:src/App.tsx:56:      const params = new URLSearchParams(window.location.search);
+./raw_unusual.txt:src/App.tsx:93:    const queryParams = new URLSearchParams(window.location.search);
+./raw_unusual.txt:src/firebase.ts:30:export const googleProvider = new GoogleAuthProvider();
+./unusual_constructors.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:debug.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:debug.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:new_findings.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:new_findings.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_findings.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:new_findings.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_findings.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_findings.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:new_findings.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_findings.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_findings.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:new_findings.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:new_findings.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:new_findings.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:new_findings.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:output.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:output.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:output.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:output.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:output.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:output.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:output.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:output.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:output.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:output.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:output.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:output.txt:debug.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:output.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:output.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:output.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:output.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:output.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:output.txt:new_findings.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:log.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:log.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:log.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:log.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:log.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:log.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:log.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:log.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:log.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:log.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:log.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:log.txt:debug.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:log.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:log.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:log.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:log.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:log.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:log.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:log.txt:new_findings.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:log.txt:new_findings.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:log.txt:output.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:log.txt:output.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:log.txt:output.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:log.txt:output.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:log.txt:output.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:log.txt:output.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:log.txt:output.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:log.txt:output.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:log.txt:output.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:log.txt:output.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:log.txt:output.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:log.txt:output.txt:new_findings.txt:debug.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:words.txt:src/components/DocumentVault.tsx:new password
+./unusual_constructors.txt:words.txt:src/components/ReportView.tsx:new tab
+./unusual_constructors.txt:words.txt:src/components/CustomerManagement.tsx:new client
+./unusual_constructors.txt:words.txt:src/components/CustomerManagement.tsx:new tab
+./unusual_constructors.txt:words.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:words.txt:src/components/Ledger.tsx:new account
+./unusual_constructors.txt:words.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:words.txt:src/components/Ledger.tsx:new tab
+./unusual_constructors.txt:words.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:words.txt:src/components/Dashboard.tsx:new bill
+./unusual_constructors.txt:words.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:words.txt:src/components/Dashboard.tsx:new tab
+./unusual_constructors.txt:words.txt:src/components/Dashboard.tsx:new tractor
+./unusual_constructors.txt:words.txt:src/components/TractorDiesel.tsx:new fuel
+./unusual_constructors.txt:words.txt:src/components/TractorDiesel.tsx:new repair
+./unusual_constructors.txt:words.txt:src/components/CustomerOrderView.tsx:new trip
+./unusual_constructors.txt:all_new_calls.txt:src/components/DocumentVault.tsx:296:                placeholder="Enter new password"
+./unusual_constructors.txt:all_new_calls.txt:src/components/ReportView.tsx:171:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:all_new_calls.txt:src/components/CustomerManagement.tsx:598:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:all_new_calls.txt:src/components/CustomerManagement.tsx:1402:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:all_new_calls.txt:src/components/Ledger.tsx:389:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:all_new_calls.txt:src/components/Ledger.tsx:808:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:all_new_calls.txt:src/components/Ledger.tsx:1056:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:all_new_calls.txt:src/components/Ledger.tsx:1354:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:all_new_calls.txt:src/components/Dashboard.tsx:1115:      // 2. Generate new bill number
+./unusual_constructors.txt:all_new_calls.txt:src/components/Dashboard.tsx:1119:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:all_new_calls.txt:src/components/Dashboard.tsx:1864:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:all_new_calls.txt:src/components/Dashboard.tsx:2596:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:all_new_calls.txt:src/components/Dashboard.tsx:2643:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:all_new_calls.txt:src/components/TractorDiesel.tsx:1140:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:all_new_calls.txt:src/components/TractorDiesel.tsx:1259:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:all_new_calls.txt:src/components/CustomerOrderView.tsx:261:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:new_usage.txt:src/components/DocumentVault.tsx:296:                placeholder="Enter new password"
+./unusual_constructors.txt:new_usage.txt:src/components/ReportView.tsx:171:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_usage.txt:src/components/CustomerManagement.tsx:598:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:new_usage.txt:src/components/CustomerManagement.tsx:1412:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_usage.txt:src/components/Ledger.tsx:389:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_usage.txt:src/components/Ledger.tsx:808:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:new_usage.txt:src/components/Ledger.tsx:1056:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_usage.txt:src/components/Ledger.tsx:1354:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_usage.txt:src/components/Dashboard.tsx:1115:      // 2. Generate new bill number
+./unusual_constructors.txt:new_usage.txt:src/components/Dashboard.tsx:1119:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:new_usage.txt:src/components/Dashboard.tsx:1874:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:new_usage.txt:src/components/Dashboard.tsx:2606:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_usage.txt:src/components/Dashboard.tsx:2653:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:new_usage.txt:src/components/TractorDiesel.tsx:1140:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:new_usage.txt:src/components/TractorDiesel.tsx:1259:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:new_usage.txt:src/components/CustomerOrderView.tsx:261:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:new_calls.txt:src/components/DocumentVault.tsx:296:                placeholder="Enter new password"
+./unusual_constructors.txt:new_calls.txt:src/components/ReportView.tsx:171:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_calls.txt:src/components/CustomerManagement.tsx:598:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:new_calls.txt:src/components/CustomerManagement.tsx:1416:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_calls.txt:src/components/Ledger.tsx:389:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_calls.txt:src/components/Ledger.tsx:808:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:new_calls.txt:src/components/Ledger.tsx:1056:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_calls.txt:src/components/Ledger.tsx:1354:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_calls.txt:src/components/Dashboard.tsx:1115:      // 2. Generate new bill number
+./unusual_constructors.txt:new_calls.txt:src/components/Dashboard.tsx:1119:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:new_calls.txt:src/components/Dashboard.tsx:1883:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:new_calls.txt:src/components/Dashboard.tsx:2615:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:new_calls.txt:src/components/Dashboard.tsx:2662:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:new_calls.txt:src/components/TractorDiesel.tsx:1140:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:new_calls.txt:src/components/TractorDiesel.tsx:1259:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:new_calls.txt:src/components/CustomerOrderView.tsx:261:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+./unusual_constructors.txt:raw_new.txt:src/components/DocumentVault.tsx:                placeholder="Enter new password"
+./unusual_constructors.txt:raw_new.txt:src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:raw_new.txt:src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+./unusual_constructors.txt:raw_new.txt:src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:raw_new.txt:src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:raw_new.txt:src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+./unusual_constructors.txt:raw_new.txt:src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:raw_new.txt:src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:raw_new.txt:src/components/Dashboard.tsx:      // 2. Generate new bill number
+./unusual_constructors.txt:raw_new.txt:src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+./unusual_constructors.txt:raw_new.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:raw_new.txt:src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+./unusual_constructors.txt:raw_new.txt:src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+./unusual_constructors.txt:raw_new.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+./unusual_constructors.txt:raw_new.txt:src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+./unusual_constructors.txt:raw_new.txt:src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>

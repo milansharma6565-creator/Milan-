@@ -1,5 +1,6 @@
 {
   "name": "TankerWala Powered by Rajhans",
   "description": "Smart water tanker management system for billing, live driver tracking, attendance, ledger, and phone call/SMS synchronization.",
-  "requestFramePermissions": ["geolocation"]
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

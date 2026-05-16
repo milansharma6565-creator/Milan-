@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, where, orderBy, runTransaction, getDocs, deleteDoc, getDoc } from 'firebase/firestore';
 import { Customer, Bill, LedgerEntry, Account } from '../types';
-import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare, Minus } from 'lucide-react';
+import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare, Minus, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { generatePDF } from '../lib/pdfUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { ConfirmationModal } from './ConfirmationModal';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { startOfMonth, endOfMonth, format } from 'date-fns';
 import { ledgerAutomation } from '../services/ledgerAutomation';
@@ -24,7 +24,8 @@ export function CustomerManagement() {
     address: '',
     alternateMobile: '',
     vehicleNumber: '',
-    notes: ''
+    notes: '',
+    pin: ''
   });
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -154,11 +155,12 @@ export function CustomerManagement() {
       await addDoc(collection(db, 'customers'), {
         ...newCustomer,
         name: newCustomer.name.trim(),
+        pin: newCustomer.pin || Math.floor(1000 + Math.random() * 9000).toString(),
         pendingAmount: 0,
         createdAt: serverTimestamp()
       });
       setIsAdding(false);
-      setNewCustomer({ name: '', mobile: '', address: '', alternateMobile: '', vehicleNumber: '', notes: '' });
+      setNewCustomer({ name: '', mobile: '', address: '', alternateMobile: '', vehicleNumber: '', notes: '', pin: '' });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'customers');
     }
@@ -216,7 +218,14 @@ export function CustomerManagement() {
       return;
     }
     
-    const doc = new jsPDF();
+    let doc: any;
+    try {
+      doc = new jsPDF();
+    } catch (e) {
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
+      alert('PDF generation is not supported in this browser.');
+      return;
+    }
     const title = onlyPending ? 'TankerWala Powered by Rajhans - Pending Dues List' : 'TankerWala Powered by Rajhans - Customer List';
     doc.text(title, 14, 15);
     
@@ -476,6 +485,17 @@ export function CustomerManagement() {
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (customer.pin) alert(`Login PIN for ${customer.name} is: ${customer.pin}`);
+                            else alert("PIN not set for this customer.");
+                          }}
+                          className="p-1 px-2.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-all"
+                          title="Show PIN"
+                        >
+                          <Lock size={14} />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setEditingCustomer(customer);
                           }}
                           className="p-1 px-2.5 bg-slate-100 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
@@ -650,6 +670,16 @@ export function CustomerManagement() {
                     />
                   </div>
                 </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Login PIN (4-digit)</label>
+                  <input
+                    maxLength={4}
+                    className="material-input h-14 bg-slate-50 border-2 border-transparent focus:border-blue-100 focus:bg-white"
+                    value={newCustomer.pin || ''}
+                    onChange={e => setNewCustomer({...newCustomer, pin: e.target.value.replace(/\D/g, '')})}
+                    placeholder="Auto-generated if empty"
+                  />
+                </div>
                 
                 <button type="submit" className="material-btn material-btn-primary h-16 text-lg mt-4 shadow-blue-500/20">
                   Register Customer
@@ -745,6 +775,16 @@ export function CustomerManagement() {
                       placeholder="e.g. UP14..."
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Login PIN (4-digit)</label>
+                  <input
+                    maxLength={4}
+                    className="material-input h-14 bg-slate-50 border-2 border-transparent focus:border-blue-100 focus:bg-white"
+                    value={(editingCustomer as any).pin || ''}
+                    onChange={e => setEditingCustomer({...editingCustomer, pin: e.target.value.replace(/\D/g, '')} as any)}
+                    placeholder="4-digit PIN"
+                  />
                 </div>
                 
                 <button type="submit" className="material-btn material-btn-primary h-16 text-lg mt-4 shadow-blue-500/20">
@@ -933,8 +973,15 @@ function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClos
         return;
       }
 
-      // Generate PDF
-      const doc = new jsPDF();
+    let doc: any;
+    try {
+      doc = new jsPDF();
+    } catch (e) {
+      console.error('jsPDF constructor failed:', e instanceof Error ? e.message : String(e));
+      alert('PDF generation is not supported in this browser environment.');
+      setIsGenerating(false);
+      return;
+    }
       
       // Header
       doc.setFontSize(20);
@@ -996,9 +1043,34 @@ function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClos
       // Save and Share
       const pdfBlob = doc.output('blob');
       const fileName = `Hisab_${customer.name}_${format(new Date(), 'dd_MMM')}.pdf`;
-      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+      let file: any;
+      // Handle file constructor safely with double guards for 'Illegal constructor'
+      try {
+        if (typeof window.File === 'function') {
+          try {
+            file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+          } catch (fileConstructErr) {
+            console.warn('File constructor failed, falling back to blob');
+            file = pdfBlob;
+          }
+        } else {
+          file = pdfBlob;
+        }
+      } catch (e) {
+        file = pdfBlob;
+      }
 
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      let canShareFile = false;
+      try {
+        if (navigator.canShare) {
+          canShareFile = navigator.canShare({ files: [file] });
+        }
+      } catch (canShareErr) {
+        console.warn('canShare check failed', canShareErr);
+        canShareFile = false;
+      }
+
+      if (navigator.share && canShareFile) {
         await navigator.share({
           files: [file],
           title: `Hisab - ${customer.name}`,
@@ -1019,7 +1091,7 @@ function WhatsAppLedgerModal({ customer, onClose }: { customer: Customer, onClos
       
       onClose();
     } catch (error) {
-      console.error('Error generating ledger:', error);
+      console.error('Error generating ledger:', error instanceof Error ? error.message : String(error));
       alert('Failed to generate ledger. Please try again.');
     } finally {
       setIsGenerating(false);
@@ -1123,7 +1195,7 @@ function CustomerHistoryModal({
         await generatePDF(printRef.current, fileName);
         setSelectedBillForPrint(null);
       } catch (err) {
-        console.error("PDF Export Error:", err);
+        console.error("PDF Export Error:", err instanceof Error ? err.message : String(err));
         alert("Failed to generate PDF. Please try again.");
       }
     }

@@ -6,13 +6,13 @@ import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Download, User
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmationModal } from './ConfirmationModal';
 import { ledgerAutomation } from '../services/ledgerAutomation';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export function DriverManagement() {
   const [isAdding, setIsAdding] = useState(false);
   const [activeTab, setActiveTab] = useState<'Active' | 'Inactive' | 'pending'>('Active');
-  const [newDriver, setNewDriver] = useState({ name: '', mobile: '', monthlySalary: '' });
+  const [newDriver, setNewDriver] = useState({ name: '', mobile: '', monthlySalary: '', pin: '' });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
   const [statusConfirm, setStatusConfirm] = useState<{ id: string, name: string, status: 'Active' | 'Inactive' | 'pending' | 'approved' } | null>(null);
 
@@ -68,6 +68,7 @@ export function DriverManagement() {
             ...newDriver,
             mobile: newDriver.mobile.replace(/\D/g, ''),
             monthlySalary: Number(newDriver.monthlySalary) || 0,
+            pin: newDriver.pin || Math.floor(1000 + Math.random() * 9000).toString(),
             status: 'Active',
             createdAt: serverTimestamp()
           };
@@ -103,7 +104,7 @@ export function DriverManagement() {
             driverId: driverRef.id
           });
         });
-        setNewDriver({ name: '', mobile: '', monthlySalary: '' });
+        setNewDriver({ name: '', mobile: '', monthlySalary: '', pin: '' });
         setIsAdding(false);
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'drivers-transaction');
@@ -240,7 +241,14 @@ export function DriverManagement() {
   };
 
   const downloadPDF = () => {
-    const doc = new jsPDF();
+    let doc: any;
+    try {
+      doc = new jsPDF();
+    } catch (e) {
+      console.error('jsPDF failed:', e);
+      alert('PDF generation is not supported in this browser.');
+      return;
+    }
     
     doc.setFontSize(20);
     doc.text(`TankerWala Powered by Rajhans - ${activeTab} Drivers`, 14, 22);
@@ -389,6 +397,17 @@ export function DriverManagement() {
                   </div>
 
                   <div className="flex gap-1">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (driver.pin) alert(`Login PIN for ${driver.name} is: ${driver.pin}`);
+                        else alert("PIN not set for this driver.");
+                      }}
+                      className="w-10 h-10 bg-indigo-50 text-indigo-500 rounded-xl flex items-center justify-center border border-indigo-100 transition-transform active:scale-95"
+                      title="Show PIN"
+                    >
+                      <Lock size={18} />
+                    </button>
                     {activeTab === 'pending' ? (
                       <button 
                         onClick={() => toggleDriverStatus(driver.id!, 'approved')}
@@ -512,6 +531,16 @@ export function DriverManagement() {
                     value={newDriver.monthlySalary}
                     onChange={e => setNewDriver({...newDriver, monthlySalary: e.target.value})}
                     placeholder="e.g. 15000"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Login PIN (4-digit)</label>
+                  <input
+                    maxLength={4}
+                    className="material-input h-14 bg-slate-50 border-2 border-transparent focus:border-blue-100 focus:bg-white"
+                    value={newDriver.pin}
+                    onChange={e => setNewDriver({...newDriver, pin: e.target.value.replace(/\D/g, '')})}
+                    placeholder="Auto-generated if empty"
                   />
                 </div>
                 

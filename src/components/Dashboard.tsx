@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc, where, setDoc, arrayUnion } from 'firebase/firestore';
 import { Customer, Driver, Bill, Tractor, Account } from '../types';
 import { 
@@ -32,10 +32,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { formatCurrency, PAYMENT_MODES, generateBillNumber } from '../constants';
+import { formatCurrency, PAYMENT_MODES, generateBillNumber, getPublicAppUrl, copyToClipboard } from '../constants';
 import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay } from 'date-fns';
 import { generatePDF } from '../lib/pdfUtils';
 import { ThermalInvoice } from './ThermalInvoice';
+import { InstallPWA } from './InstallPWA';
 import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
 
@@ -52,7 +53,7 @@ function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void
                setText('');
            }
        }
-     }, (error) => console.error("Admin Chat Error:", error));
+     }, (error: any) => console.error("Admin Chat Error:", error?.message || error));
      return () => unsubscribe();
    }, [bill.id, text]);
 
@@ -118,6 +119,8 @@ function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void
      </div>
    );
 }
+
+import { Logo } from './Logo';
 
 export function Dashboard() {
   const todayStart = startOfDay(new Date());
@@ -188,6 +191,9 @@ export function Dashboard() {
       };
     }).filter(d => d.tripCount > 0).sort((a, b) => b.tripCount - a.tripCount);
 
+    const busyDrivers = new Set(bills.filter(b => ['Assigned', 'Filling'].includes(b.status)).map(b => b.driverId));
+    const busyTractors = new Set(bills.filter(b => ['Assigned', 'Filling'].includes(b.status)).map(b => b.tractorId));
+
     const allBillsSorted = [...bills].sort((a, b) => {
       // First sort by status: Pending should be on top
       if (a.status === 'Pending' && b.status !== 'Pending') return -1;
@@ -210,6 +216,8 @@ export function Dashboard() {
       customerCount: customers.length,
       drivers,
       tractors,
+      busyDrivers,
+      busyTractors,
       driverStats: driverStatsList,
       recentBills: allBillsSorted.slice(0, 10)
     };
@@ -310,12 +318,12 @@ export function Dashboard() {
     const unsubRequests = onSnapshot(
       query(collection(db, 'bookingRequests'), where('status', '==', 'Pending'), orderBy('requestedAt', 'desc')),
       (snapshot) => setBookingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
-      (error) => console.log('Requests err:', error)
+      (error) => console.log('Requests err:', error?.message || error)
     );
     const unsubDiesel = onSnapshot(
       query(collection(db, 'dieselRequests'), where('status', '==', 'Pending')),
       (snapshot) => setPendingDieselRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
-      (error) => console.log('Diesel Requests err:', error)
+      (error) => console.log('Diesel Requests err:', error?.message || error)
     );
     const unsubCustomers = onSnapshot(collection(db, 'customers'), 
       (snapshot) => setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer))),
@@ -504,10 +512,88 @@ export function Dashboard() {
   const [showPaymentSelection, setShowPaymentSelection] = React.useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, number: string } | null>(null);
 
+  const [isWiping, setIsWiping] = useState(false);
+  const isAdmin = auth.currentUser?.email === 'milan.sharma6565@gmail.com' || auth.currentUser?.email === 'rajhanssikar@gmail.com';
+  const isMilan = auth.currentUser?.email === 'milan.sharma6565@gmail.com';
+
+  const handleMasterReset = async () => {
+    if (!isMilan) {
+      alert("SECURITY ALERT: This operation is restricted to Milan Sharma only.");
+      return;
+    }
+
+    if (!confirm("⚠️ CRITICAL WARNING: This will delete ALL data (Customers, Tokens, Drivers, Ledger, Documents, etc.). This action is IRREVERSIBLE. Are you absolutely sure?")) return;
+    if (!confirm("🚨 LAST CHANCE: You are about to wipe the entire database. Are you really sure?")) return;
+
+    const promptText = prompt("Please type 'DELETE' to confirm the master reset:");
+    if (promptText !== 'DELETE') {
+      alert("Reset cancelled. Text did not match.");
+      return;
+    }
+
+    setIsWiping(true);
+    const collectionsToWipe = [
+      'customers', 'bills', 'drivers', 'tractors', 'dieselLogs', 
+      'maintenanceLogs', 'ledger', 'driverLocations', 'bookingRequests', 
+      'vouchers', 'attendance', 'hydrantFillings', 'trips', 
+      'dieselRequests', 'documents', 'chats', 'accounts', 'ledgerEntries',
+      'tractorDiesel', 'vouchers_backup', 'expenses', 'trackingPoints', 'feedbacks'
+    ];
+
+    try {
+      for (const collName of collectionsToWipe) {
+        const snap = await getDocs(collection(db, collName));
+        const chunks = [];
+        const chunkSize = 50; 
+        for (let i = 0; i < snap.docs.length; i += chunkSize) {
+          chunks.push(snap.docs.slice(i, i + chunkSize));
+        }
+
+        for (const chunk of chunks) {
+          await Promise.all(chunk.map(d => deleteDoc(doc(db, collName, d.id))));
+        }
+      }
+      
+      await setDoc(doc(db, 'settings', 'documents'), { folders: [] }, { merge: true });
+      
+      alert("✅ Fresh Start! Database wiped successfully. System is now clean.");
+      window.location.reload();
+    } catch (err: any) {
+      console.error("Master Reset Failed:", err?.message || String(err));
+      alert("❌ Wipe failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsWiping(false);
+    }
+  };
+
+  const [isDeletingDrivers, setIsDeletingDrivers] = useState(false);
+  const handleDeleteDriversData = async () => {
+    if (!isAdmin) return;
+    if (!confirm("⚠️ WARNING: This will delete ALL Drivers and ALL driver-related Ledger entries. Are you sure?")) return;
+    
+    setIsDeletingDrivers(true);
+    try {
+      const { bulkDeleteDrivers } = await import('../services/cleanup');
+      const result = await bulkDeleteDrivers();
+      alert(`✅ Cleanup successful! Deleted ${result.count} driver-related records.`);
+      window.location.reload();
+    } catch (err: any) {
+      alert("❌ Operation failed: " + (err.message || String(err)));
+    } finally {
+      setIsDeletingDrivers(false);
+    }
+  };
+
+  const [isAcceptingRequest, setIsAcceptingRequest] = useState<string | null>(null);
+
   const handleStatusUpdate = async (status: 'Delivered' | 'Pending' | 'Filling' | 'Cancelled') => {
     if (!editingBill?.id) return;
 
     if (status === 'Delivered') {
+      if (!editingBill.driverId || !editingBill.tractorId) {
+        alert('Assignment Required: Please assign a Driver and Tractor before marking as Delivered.');
+        return;
+      }
       setShowPaymentSelection(true);
       return;
     }
@@ -1041,7 +1127,18 @@ export function Dashboard() {
   };
 
   const handleAcceptRequest = async (request: any) => {
+    if (isAcceptingRequest === request.id) return;
+    setIsAcceptingRequest(request.id);
+    
     try {
+      // Re-fetch request to ensure it hasn't been accepted already
+      const freshReqSnap = await getDoc(doc(db, 'bookingRequests', request.id));
+      if (!freshReqSnap.exists() || freshReqSnap.data().status === 'Accepted') {
+        alert("This request has already been accepted or no longer exists.");
+        setIsAcceptingRequest(null);
+        return;
+      }
+
       let originalData: any = {};
       
       if (request.billId) {
@@ -1051,6 +1148,7 @@ export function Dashboard() {
         
         if (!originalBillSnap.exists()) {
           alert("Original order not found.");
+          setIsAcceptingRequest(null);
           return;
         }
         originalData = originalBillSnap.data();
@@ -1081,6 +1179,7 @@ export function Dashboard() {
           };
         } else {
             alert("Customer not found.");
+            setIsAcceptingRequest(null);
             return;
         }
       }
@@ -1092,6 +1191,7 @@ export function Dashboard() {
       // 3. Create new bill based on original but with current time
       const newBillData = {
         ...originalData,
+        category: request.category || originalData.category || 'TANKER', // Ensure category is present
         billNumber: newBillNumber,
         date: new Date().toISOString(),
         status: 'Pending',
@@ -1101,7 +1201,12 @@ export function Dashboard() {
         createdAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, 'bills'), newBillData);
+      try {
+        await addDoc(collection(db, 'bills'), newBillData);
+      } catch (billErr) {
+        handleFirestoreError(billErr, OperationType.CREATE, 'bills');
+        throw billErr;
+      }
 
       // 4. Update request status
       await updateDoc(doc(db, 'bookingRequests', request.id), { 
@@ -1109,7 +1214,12 @@ export function Dashboard() {
         updatedAt: serverTimestamp() 
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookingRequests/${request.id}`);
+      // Avoid double handleFirestoreError if it already happened for bills
+      if (!(error instanceof Error && error.message.includes('OperationType'))) {
+        handleFirestoreError(error, OperationType.UPDATE, `bookingRequests/${request.id}`);
+      }
+    } finally {
+      setIsAcceptingRequest(null);
     }
   };
 
@@ -1217,10 +1327,35 @@ export function Dashboard() {
       
       const blob = await (await fetch(dataUrl)).blob();
       const fileName = `Token_${bill.billNumber}.jpg`;
-      const file = new File([blob], fileName, { type: 'image/jpeg' });
+      let file: any;
+      // Handle file constructor safely with double guards for 'Illegal constructor'
+      try {
+        if (typeof window.File === 'function') {
+          try {
+            file = new File([blob], fileName, { type: 'image/jpeg' });
+          } catch (fileConstructErr) {
+            console.warn('File constructor failed, falling back to blob');
+            file = blob;
+          }
+        } else {
+          file = blob;
+        }
+      } catch (e) {
+        file = blob;
+      }
+
+      let canShareFile = false;
+      try {
+        if (navigator.canShare) {
+          canShareFile = navigator.canShare({ files: [file] });
+        }
+      } catch (canShareErr) {
+        console.warn('canShare check failed', canShareErr);
+        canShareFile = false;
+      }
 
       // Try Web Share API (Best for Mobile WhatsApp)
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (navigator.share && canShareFile) {
         try {
           await navigator.share({
             files: [file],
@@ -1234,26 +1369,41 @@ export function Dashboard() {
         }
       }
 
-      // Try Copy to Clipboard
+      // Try Copy to Clipboard with robust constructor check
       try {
-        if (navigator.clipboard && window.ClipboardItem) {
-          const item = new ClipboardItem({ [blob.type]: blob });
-          await navigator.clipboard.write([item]);
-          alert('Token image copied! Opening WhatsApp... Just Paste (Ctrl+V) and send.');
+        if (navigator.clipboard && typeof window.ClipboardItem === 'function') {
+          try {
+            // Use a local let to avoid potential scope issues with the constructor
+            const ClipboardItemConstructor = window.ClipboardItem;
+            const item = new ClipboardItemConstructor({ [blob.type]: blob });
+            await navigator.clipboard.write([item]);
+            alert('Token image copied! Opening WhatsApp... Just Paste (Ctrl+V) and send.');
+          } catch (itemErr) {
+            // Fallback for browsers that support clipboard.write but failed constructor
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = fileName;
+            link.click();
+          }
         } else {
+          // Navigator.clipboard.write is not supported or ClipboardItem is not a constructor
           const link = document.createElement('a');
           link.href = dataUrl;
           link.download = fileName;
           link.click();
         }
-      } catch (err) {
-        console.warn('Clipboard share failed', err);
+      } catch (err: any) {
+        console.warn('Clipboard share failed', err?.message || err);
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = fileName;
+        link.click();
       }
 
       // Open WhatsApp text as fallback
       sendWhatsApp(bill, target);
-    } catch (err) {
-      console.error('Error sharing image:', err);
+    } catch (err: any) {
+      console.error('Error sharing image:', err?.message || String(err));
       sendWhatsApp(bill, target);
     }
   };
@@ -1270,7 +1420,7 @@ export function Dashboard() {
       ? cleanPhone 
       : `91${cleanPhone.slice(-10)}`;
 
-    const url = new URL(window.location.href);
+    const url = getPublicAppUrl();
     url.search = '';
     url.searchParams.set('o', bill.id);
     const rebookUrl = url.toString();
@@ -1301,8 +1451,8 @@ export function Dashboard() {
       try {
         const fileName = `Token_${editingBill?.billNumber || 'Order'}`;
         await generatePDF(printRef.current, fileName);
-      } catch (err) {
-        console.error("PDF Export Error:", err);
+      } catch (err: any) {
+        console.error("PDF Export Error:", err?.message || String(err));
         alert("Failed to generate PDF. Please try again.");
       }
     }
@@ -1311,9 +1461,14 @@ export function Dashboard() {
   if (!stats) {
     return (
       <div className="flex items-center justify-center min-h-[60vh] p-4 text-center">
-        <div>
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-slate-500 font-medium">Loading Dashboard...</p>
+        <div className="relative">
+          <div className="absolute inset-0 animate-ping opacity-25">
+            <Logo size={120} className="text-blue-600/20" />
+          </div>
+          <div className="relative animate-bounce">
+            <Logo size={80} className="text-blue-600" />
+          </div>
+          <p className="text-slate-500 font-bold mt-8 uppercase tracking-[0.2em] text-[10px] animate-pulse">Loading TankerWala...</p>
         </div>
       </div>
     );
@@ -1327,7 +1482,9 @@ export function Dashboard() {
             <Droplets size={28} />
           </div>
           <div>
-            <h1 className="text-2xl font-display font-bold">TankerWala Powered by Rajhans</h1>
+            <h1 className="text-2xl font-display font-bold pb-4">
+              Tanker<span className="relative">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">Powered by Rajhans</span></span>
+            </h1>
             <p className="text-slate-500 text-sm">Dashboard Overview</p>
           </div>
         </div>
@@ -1891,9 +2048,15 @@ export function Dashboard() {
                   </button>
                   <button
                     onClick={() => handleAcceptRequest(req)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all flex items-center gap-2"
+                    disabled={isAcceptingRequest === req.id}
+                    className={`px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all flex items-center gap-2 ${isAcceptingRequest === req.id ? 'opacity-50' : ''}`}
                   >
-                    <CheckCircle2 size={14} /> Accept
+                    {isAcceptingRequest === req.id ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <CheckCircle2 size={14} />
+                    )} 
+                    {isAcceptingRequest === req.id ? 'Accepting...' : 'Accept'}
                   </button>
                 </div>
               </motion.div>
@@ -1908,9 +2071,9 @@ export function Dashboard() {
           <div className="flex items-center gap-3">
             <h3 className="font-display font-bold text-lg">Recent Tokens</h3>
             <button 
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.stopPropagation();
-                const urlObj = new URL(window.location.href);
+                const urlObj = getPublicAppUrl();
                 urlObj.search = '';
                 urlObj.searchParams.set('mode', 'booking');
                 const url = urlObj.toString();
@@ -1922,7 +2085,7 @@ export function Dashboard() {
                     url: url
                   });
                 } else {
-                  navigator.clipboard.writeText(url);
+                  await copyToClipboard(url);
                   alert('Booking Link Copied!');
                 }
               }}
@@ -2234,17 +2397,24 @@ export function Dashboard() {
                   <motion.div 
                     initial={{ opacity: 0, scale: 0.8 }} 
                     animate={{ opacity: 1, scale: 1 }} 
-                    className="absolute inset-0 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-50 rounded-[2rem] border-4 border-green-500 shadow-2xl shadow-green-100"
+                    className="absolute inset-0 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center gap-4 z-50 rounded-[2rem] border-4 border-green-500 shadow-2xl shadow-green-100"
                   >
                     <motion.div 
-                      initial={{ scale: 0 }} 
-                      animate={{ scale: [0, 1.2, 1] }} 
-                      transition={{ duration: 0.4 }}
-                      className="w-16 h-16 bg-green-500 text-white rounded-full flex items-center justify-center shadow-lg"
+                      initial={{ scale: 0, rotate: -20 }} 
+                      animate={{ scale: 1, rotate: 0 }} 
+                      transition={{ 
+                        type: 'spring', 
+                        bounce: 0.5, 
+                        duration: 0.5 
+                      }}
+                      className="text-green-600"
                     >
-                      <CheckCircle2 size={40} />
+                      <Logo size={80} />
                     </motion.div>
-                    <span className="font-display font-black text-2xl text-green-600 uppercase tracking-widest">Done!</span>
+                    <div className="flex flex-col items-center">
+                      <span className="font-display font-black text-2xl text-green-600 uppercase tracking-widest">Done!</span>
+                      <div className="w-12 h-1 bg-green-500 mt-1 rounded-full animate-width-expand" />
+                    </div>
                   </motion.div>
                 )}
               </div>
@@ -2430,26 +2600,34 @@ export function Dashboard() {
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Assign Driver</label>
                   <div className="flex flex-wrap gap-2">
-                    {stats.drivers.map(d => (
-                      <button 
-                        key={d.id}
-                        onClick={async () => {
-                          const hasActiveTrip = await (async () => {
-                            const qTrp = query(collection(db, 'trips'), where('driverId', '==', d.id), where('status', 'in', ['Active', 'Filling', 'On the way', 'Reached']));
-                            const snap = await getDocs(qTrp);
-                            return !snap.empty;
-                          })();
-                          if (hasActiveTrip) {
-                             alert('Driver Busy: Completion of current trip required.');
-                             return;
-                          }
-                          handleDriverUpdate(d);
-                        }}
-                        className={`px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${editingBill.driverName === d.name ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
-                      >
-                        {d.name}
-                      </button>
-                    ))}
+                    {stats.drivers.map(d => {
+                      const isBusy = stats.busyDrivers.has(d.id);
+                      const isSelected = editingBill.driverName === d.name;
+                      return (
+                        <button 
+                          key={d.id}
+                          onClick={() => {
+                            if (isBusy && !isSelected) {
+                               alert('Driver Busy: Currently on an active trip.');
+                               return;
+                            }
+                            handleDriverUpdate(d);
+                          }}
+                          className={`relative px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
+                            isSelected 
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                              : isBusy 
+                                ? 'border-amber-100 bg-amber-50 text-amber-600 opacity-60' 
+                                : 'border-slate-100 text-slate-500 hover:border-blue-200'
+                          }`}
+                        >
+                          {d.name}
+                          {isBusy && !isSelected && (
+                            <span className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">BUSY</span>
+                          )}
+                        </button>
+                      );
+                    })}
                     {stats.drivers.length === 0 && (
                       <div className="text-xs text-slate-400 italic">No drivers found. Add in settings.</div>
                     )}
@@ -2460,15 +2638,34 @@ export function Dashboard() {
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Assign Tractor</label>
                   <div className="flex flex-wrap gap-2">
-                    {stats.tractors.map(t => (
-                      <button 
-                        key={t.id}
-                        onClick={() => handleTractorUpdate(t.id!)}
-                        className={`px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${editingBill.tractorId === t.id ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
-                      >
-                        {t.name}
-                      </button>
-                    ))}
+                    {stats.tractors.map(t => {
+                      const isBusy = stats.busyTractors.has(t.id);
+                      const isSelected = editingBill.tractorId === t.id;
+                      return (
+                        <button 
+                          key={t.id}
+                          onClick={() => {
+                            if (isBusy && !isSelected) {
+                               alert('Tractor Busy: Currently on an active trip.');
+                               return;
+                            }
+                            handleTractorUpdate(t.id!);
+                          }}
+                          className={`relative px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
+                            isSelected 
+                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                              : isBusy 
+                                ? 'border-amber-100 bg-amber-50 text-amber-600 opacity-60' 
+                                : 'border-slate-100 text-slate-500 hover:border-blue-200'
+                          }`}
+                        >
+                          {t.name}
+                          {isBusy && !isSelected && (
+                            <span className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">BUSY</span>
+                          )}
+                        </button>
+                      );
+                    })}
                     {stats.tractors.length === 0 && (
                       <div className="text-xs text-slate-400 italic">No tractors found. Add in Tractors tab.</div>
                     )}
@@ -2530,63 +2727,6 @@ export function Dashboard() {
         title="Delete Trip Token?"
         message={`Are you sure you want to delete Token #${deleteConfirm?.number}? This will remove the record from history, but will NOT reverse manual payments or existing customer balance changes.`}
       />
-
-      <AnimatePresence>
-        {showInsuranceAlert && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6">
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0, y: 20 }}
-              className="bg-white w-full max-w-md rounded-[3rem] p-8 shadow-2xl relative overflow-hidden"
-            >
-              <div className="absolute top-0 right-0 p-12 opacity-[0.03] scale-[3] pointer-events-none">
-                <ShieldCheck size={48} />
-              </div>
-              
-              <div className="text-center mb-8 relative">
-                <div className="w-20 h-20 bg-orange-100 text-orange-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-100">
-                  <BellRing size={40} className="animate-bounce" />
-                </div>
-                <h2 className="text-3xl font-display font-black text-slate-900 leading-tight">Insurance Renewal!</h2>
-                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
-              </div>
-
-              <div className="space-y-4 max-h-[300px] overflow-y-auto mb-8 pr-2">
-                {insuranceAlerts.map(t => {
-                  const daysLeft = differenceInDays(new Date(t.insuranceExpiry), new Date());
-                  return (
-                    <div key={t.id} className="bg-slate-50 p-4 rounded-3xl border border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-slate-400">
-                          <Truck size={20} />
-                        </div>
-                        <div>
-                          <div className="font-bold text-slate-900">{t.name}</div>
-                          <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{t.vehicleNumber}</div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className={`text-sm font-black ${daysLeft <= 3 ? 'text-red-500' : 'text-orange-500'}`}>
-                          {daysLeft === 0 ? 'Expires Today!' : `${daysLeft} Days Left`}
-                        </div>
-                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <button 
-                onClick={() => setShowInsuranceAlert(false)}
-                className="w-full h-16 bg-slate-900 text-white rounded-2xl font-display font-black text-lg shadow-xl shadow-slate-200 active:scale-95 transition-all"
-              >
-                Okay, I'll Check
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Quick Voucher Modal */}
       <AnimatePresence>
@@ -2725,6 +2865,51 @@ export function Dashboard() {
           <LiveChatAdminModal bill={chatBill} onClose={() => setChatBill(null)} />
         )}
       </AnimatePresence>
+
+      {/* Admin System Maintenance */}
+      {isMilan && (
+        <div className="mt-12 pt-8 border-t border-slate-200">
+          <div className="bg-white p-6 rounded-[2.5rem] border border-red-100 shadow-sm">
+            <h3 className="text-lg font-black text-slate-900 mb-2 flex items-center gap-2">
+              <ShieldCheck className="text-red-500" />
+              System Maintenance
+            </h3>
+            <p className="text-sm text-slate-500 mb-6 font-medium">Administrative tools for database management and system resets.</p>
+            
+            <div className="flex flex-wrap gap-4">
+               <button 
+                 onClick={handleMasterReset}
+                 disabled={isWiping}
+                 className="flex items-center gap-3 px-6 py-4 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-600 hover:text-white transition-all border border-red-100 disabled:opacity-50 group"
+               >
+                 {isWiping ? (
+                   <div className="animate-spin rounded-full h-5 w-5 border-2 border-red-600 border-t-transparent group-hover:border-white" />
+                 ) : (
+                   <Trash2 size={20} />
+                 )}
+                 {isWiping ? 'Wiping Database...' : 'Master Reset (Wipe All Data)'}
+               </button>
+
+               <button 
+                 onClick={handleDeleteDriversData}
+                 disabled={isDeletingDrivers}
+                 className="flex items-center gap-3 px-6 py-4 bg-orange-50 text-orange-600 rounded-2xl font-bold hover:bg-orange-600 hover:text-white transition-all border border-orange-100 disabled:opacity-50 group"
+               >
+                 {isDeletingDrivers ? (
+                   <div className="animate-spin rounded-full h-5 w-5 border-2 border-orange-600 border-t-transparent group-hover:border-white" />
+                 ) : (
+                   <Users size={20} />
+                 )}
+                 {isDeletingDrivers ? 'Deleting Drivers...' : 'Delete All Drivers & Related Ledger'}
+               </button>
+            </div>
+            
+            <p className="mt-4 text-[10px] font-black text-red-400 uppercase tracking-widest italic">
+              * This will delete all customers, bills, drivers, documents, and ledger entries. Use with caution.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

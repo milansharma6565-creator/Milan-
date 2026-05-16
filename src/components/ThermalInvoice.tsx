@@ -17,7 +17,9 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
     <div className="bg-white p-6 shadow-sm border border-slate-200" style={{ width: '80mm', margin: '0 auto', fontFamily: 'Inter' }}>
       <div className="flex flex-col items-center border-b border-dashed pb-4 mb-4">
         <Logo size={64} className="mb-2" />
-        <h2 className="text-xl font-bold uppercase">TankerWala Powered by Rajhans</h2>
+        <h2 className="text-xl font-bold uppercase pb-3">
+          Tanker<span className="relative">Wala<span className="absolute top-[80%] left-0 text-[8px] text-slate-500 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
+        </h2>
         <p className="text-xs text-slate-500">Supplier & Service</p>
         <p className="text-[10px] mt-1 whitespace-pre-line">Behind balaji dharm kanta, near puniya wines jaipur road sikar, Rajasthan 332001</p>
         <p className="text-[10px]">Ph: +91 94133 39987</p>
@@ -118,7 +120,9 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
         <p className="font-bold text-slate-900 border border-slate-900 p-1 mb-2">NOTE</p>
         <p className="text-slate-600 uppercase">नये बुकिंग आदेश के लिए कृपया ड्राइवर के नंबर पर फोन न करें।</p>
         <p className="text-slate-900 font-bold mt-0.5">केवल ऑफिस के नंबर (+91 94133 39987) पर ही संपर्क करें।</p>
-        <p className="mt-2 text-[9px] text-slate-900 font-bold italic">धन्यवाद TankerWala Powered by Rajhans ☺</p>
+        <p className="mt-2 text-[9px] text-slate-900 font-bold italic pb-4">
+          धन्यवाद Tanker<span className="relative">Wala<span className="absolute top-[90%] left-0 text-[6px] text-slate-500 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">Powered by Rajhans</span></span> ☺
+        </p>
       </div>
     </div>
   );

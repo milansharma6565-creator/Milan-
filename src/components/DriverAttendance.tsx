@@ -32,7 +32,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 import { formatCurrency } from '../constants';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export function DriverAttendance() {
@@ -218,7 +218,14 @@ export function DriverAttendance() {
   };
 
   const exportPDF = () => {
-    const doc = new jsPDF();
+    let doc: any;
+    try {
+      doc = new jsPDF();
+    } catch (e) {
+      console.error('jsPDF failed:', e);
+      alert('PDF generation is not supported in this browser.');
+      return;
+    }
     const monthYear = format(selectedDate, 'MMMM yyyy');
     
     doc.setFontSize(20);

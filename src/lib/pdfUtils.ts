@@ -1,29 +1,45 @@
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 
 export const generatePDF = async (element: HTMLElement, fileName: string) => {
   try {
-    // Increase scale for better quality
-    const canvas = await html2canvas(element, {
-      scale: 3,
-      useCORS: true,
-      logging: false,
+    // html-to-image handles modern CSS like oklch much better than html2canvas
+    const dataUrl = await toPng(element, {
+      quality: 1.0,
+      pixelRatio: 2, // Use 2 for good quality without excessive file size
       backgroundColor: '#ffffff',
-      windowWidth: element.scrollWidth,
-      windowHeight: element.scrollHeight,
+      style: {
+        transform: 'scale(1)',
+      }
     });
 
-    const imgData = canvas.toDataURL('image/png', 1.0);
-    const pdf = new jsPDF({
-      orientation: canvas.width > canvas.height ? 'l' : 'p',
-      unit: 'px',
-      format: [canvas.width, canvas.height],
+    // Create a temporary image to get dimensions
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    
+    await new Promise((resolve) => {
+      img.onload = resolve;
     });
 
-    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height, undefined, 'FAST');
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+
+    let pdf: any;
+    try {
+      pdf = new jsPDF({
+        orientation: width > height ? 'l' : 'p',
+        unit: 'px',
+        format: [width, height],
+      });
+    } catch (e) {
+      console.error('jsPDF failed:', e);
+      throw new Error('PDF Generation failed: Illegal constructor or unsupported environment');
+    }
+
+    pdf.addImage(dataUrl, 'PNG', 0, 0, width, height, undefined, 'FAST');
     pdf.save(`${fileName}.pdf`);
   } catch (error) {
-    console.error('PDF Generation Error:', error);
+    console.error('PDF Export Error:', error?.message || error);
     throw error;
   }
 };

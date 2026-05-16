@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FileBox, Lock, Unlock, Upload, FileText, Trash2, ShieldAlert, Folder, X, Search, FileImage, File, Link } from 'lucide-react';
+import { FileBox, Lock, Unlock, Upload, FileText, Trash2, ShieldAlert, Folder, X, Search, FileImage, File, Link, Plus } from 'lucide-react';
 import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage, handleFirestoreError, OperationType } from '../firebase';
+import { getPublicAppUrl, copyToClipboard } from '../constants';
 import { format } from 'date-fns';
 
 interface DocumentVaultProps {
@@ -38,20 +39,38 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
 
   const isAdmin = userEmail === 'milan.sharma6565@gmail.com';
 
-  const folders = [
+  const defaultFolders = [
     { id: 'phed', name: 'PHED Documents' },
     { id: 'vehicle', name: 'Vehicle Document' },
     { id: 'kyc', name: 'Owner KYC Document' },
     { id: 'firm', name: 'Firm Documents' },
-    { id: 'legal', name: 'Legal Document' }
+    { id: 'legal', name: 'Legal Document' },
+    { id: 'drivers', name: 'Tractor Drivers' }
   ];
+
+  const [customFolders, setCustomFolders] = useState<{id: string, name: string}[]>([]);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+
+  const folders = [...defaultFolders, ...customFolders];
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'settings', 'documents'), (docSnap) => {
-      if (docSnap.exists() && docSnap.data().password) {
-        setVaultPassword(docSnap.data().password);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.password) {
+          setVaultPassword(data.password);
+        } else {
+          setVaultPassword(null);
+        }
+        if (data.folders) {
+          setCustomFolders(data.folders);
+        } else {
+          setCustomFolders([]);
+        }
       } else {
         setVaultPassword(null);
+        setCustomFolders([]);
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, 'settings/documents'));
 
@@ -91,6 +110,26 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
       setErrorMsg('');
     } else {
       setErrorMsg('Incorrect password');
+    }
+  };
+
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    try {
+      const newFolderId = `custom_${Date.now()}`;
+      const newFolder: any = { id: newFolderId, name: newFolderName.trim() };
+      if (currentFolder) {
+        newFolder.parentId = currentFolder;
+      }
+      
+      await setDoc(doc(db, 'settings', 'documents'), {
+        folders: [...customFolders, newFolder]
+      }, { merge: true });
+      setShowCreateFolder(false);
+      setNewFolderName('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'settings/documents');
     }
   };
 
@@ -152,7 +191,14 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
           return;
         }
 
-        const reader = new FileReader();
+        let reader: any;
+        try {
+          reader = new FileReader();
+        } catch (e) {
+          console.error('FileReader constructor failed:', e?.message || String(e));
+          setUploading(false);
+          return;
+        }
         reader.onload = async () => {
           try {
             const base64String = reader.result as string;
@@ -167,7 +213,7 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
             });
             setUploading(false);
           } catch (dbErr: any) {
-            console.error("Firestore fallback error:", dbErr);
+            console.error("Firestore fallback error:", dbErr?.message || String(dbErr));
             setUploading(false);
             alert('Upload failed: ' + dbErr.message);
           }
@@ -179,7 +225,7 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
         reader.readAsDataURL(file);
       }
     } catch (err: any) {
-      console.error(err);
+      console.error("Document upload failed:", err?.message || String(err));
       setUploading(false);
       alert('Upload failed: ' + err.message);
     }
@@ -233,10 +279,10 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
     }
   };
 
-  const copyShareLink = () => {
-    const url = new URL(window.location.href);
+  const copyShareLink = async () => {
+    const url = getPublicAppUrl();
     url.searchParams.set('tab', 'documents');
-    navigator.clipboard.writeText(url.toString());
+    await copyToClipboard(url.toString());
     alert('Share link copied to clipboard!');
   };
 
@@ -381,28 +427,84 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
       </div>
 
       {!currentFolder ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {folders.map(folder => (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {folders.filter(f => !f.parentId).map(folder => (
+              <button
+                key={folder.id}
+                onClick={() => setCurrentFolder(folder.id)}
+                className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-100 transition-all flex items-center gap-4 group text-left"
+              >
+                <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                  <Folder size={28} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-bold text-slate-900 text-lg">{folder.name}</h3>
+                  <p className="text-sm font-medium text-slate-400">View documents</p>
+                </div>
+              </button>
+            ))}
             <button
-              key={folder.id}
-              onClick={() => setCurrentFolder(folder.id)}
-              className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-100 transition-all flex items-center gap-4 group text-left"
+              onClick={() => setShowCreateFolder(true)}
+              className="bg-slate-50 border-2 border-dashed border-slate-200 p-6 rounded-3xl hover:border-blue-300 hover:bg-blue-50 transition-all flex flex-col items-center justify-center gap-2 group"
             >
-              <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <Folder size={28} />
+              <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-slate-400 group-hover:text-blue-500 group-hover:scale-110 transition-all shadow-sm">
+                <Plus size={24} />
               </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-slate-900 text-lg">{folder.name}</h3>
-                <p className="text-sm font-medium text-slate-400">View documents</p>
-              </div>
+              <span className="font-bold text-slate-500 group-hover:text-blue-600">Create New Folder</span>
             </button>
-          ))}
+          </div>
+
+          {/* Create Folder Modal */}
+          <AnimatePresence>
+            {showCreateFolder && (
+              <motion.div 
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+              >
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden"
+                >
+                  <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                    <h3 className="text-xl font-black text-slate-900">New Folder</h3>
+                    <button onClick={() => setShowCreateFolder(false)} className="p-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200">
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <form onSubmit={handleCreateFolder} className="p-6 space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Folder Name</label>
+                      <input 
+                        type="text" 
+                        required
+                        value={newFolderName}
+                        onChange={e => setNewFolderName(e.target.value)}
+                        placeholder="e.g. Audit Reports"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                    <button 
+                      type="submit"
+                      disabled={!newFolderName.trim()}
+                      className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition"
+                    >
+                      Create Folder
+                    </button>
+                  </form>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       ) : (
         <div className="space-y-6">
           <div className="flex items-center gap-4">
             <button 
-              onClick={() => setCurrentFolder(null)}
+              onClick={() => {
+                const f = folders.find(f => f.id === currentFolder);
+                setCurrentFolder(f?.parentId || null);
+              }}
               className="w-10 h-10 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-colors"
             >
               <X size={20} />
@@ -411,7 +513,14 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
               <Folder className="w-6 h-6 text-blue-500" />
               {folders.find(f => f.id === currentFolder)?.name}
             </h3>
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-2">
+               <button 
+                  onClick={() => setShowCreateFolder(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                >
+                  <Plus size={18} />
+                  New Folder
+               </button>
               <input 
                 type="file" 
                 ref={fileInputRef} 
@@ -432,6 +541,25 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
               </button>
             </div>
           </div>
+
+          {folders.filter(f => f.parentId === currentFolder).length > 0 && (
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+               {folders.filter(f => f.parentId === currentFolder).map(folder => (
+                 <button
+                    key={folder.id}
+                    onClick={() => setCurrentFolder(folder.id)}
+                    className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-100 transition-all flex items-center gap-4 group text-left"
+                  >
+                    <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                      <Folder size={20} />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-slate-900">{folder.name}</h3>
+                    </div>
+                  </button>
+               ))}
+             </div>
+          )}
 
           <div 
             className={`bg-white rounded-3xl border ${isDragging ? 'border-blue-500 bg-blue-50/30' : 'border-slate-100'} shadow-sm flex flex-col min-h-[400px] transition-colors relative`}
@@ -492,6 +620,48 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
               </div>
             )}
           </div>
+
+          {/* Create Folder Modal for Subfolders */}
+          <AnimatePresence>
+            {showCreateFolder && (
+              <motion.div 
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+              >
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden"
+                >
+                  <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                    <h3 className="text-xl font-black text-slate-900">New Subfolder</h3>
+                    <button onClick={() => setShowCreateFolder(false)} className="p-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200">
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <form onSubmit={handleCreateFolder} className="p-6 space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Folder Name</label>
+                      <input 
+                        type="text" 
+                        required
+                        value={newFolderName}
+                        onChange={e => setNewFolderName(e.target.value)}
+                        placeholder="e.g. Audit Reports"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                    <button 
+                      type="submit"
+                      disabled={!newFolderName.trim()}
+                      className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition"
+                    >
+                      Create Folder
+                    </button>
+                  </form>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </div>

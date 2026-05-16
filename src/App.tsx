@@ -47,12 +47,18 @@ import { User } from 'firebase/auth';
 type Tab = 'dashboard' | 'customers' | 'billing' | 'reports' | 'drivers' | 'ledger' | 'tractors' | 'live-map' | 'attendance' | 'filling' | 'sync' | 'documents';
 
 import { format } from 'date-fns';
-import { formatCurrency } from './constants';
+import { formatCurrency, getPublicAppUrl, copyToClipboard } from './constants';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tabParam = params.get('tab') as Tab;
+    let tabParam: Tab | null = null;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      tabParam = params.get('tab') as Tab;
+    } catch (e) {
+      console.warn('URLSearchParams failed:', e);
+    }
+    
     if (tabParam && ['dashboard', 'customers', 'billing', 'reports', 'drivers', 'ledger', 'tractors', 'live-map', 'attendance', 'filling', 'sync', 'documents'].includes(tabParam)) {
       return tabParam;
     }
@@ -67,6 +73,8 @@ export default function App() {
   useEffect(() => {
     const unsub = onSnapshot(query(collection(db, 'dieselRequests'), where('status', '==', 'Pending')), (snap) => {
       setPendingFuelCount(snap.size);
+    }, (err) => {
+      console.warn("Diesel requests count check failed (likely unauthenticated):", err.message);
     });
     return () => unsub();
   }, []);
@@ -78,11 +86,20 @@ export default function App() {
     });
   }, []);
 
-  const queryParams = new URLSearchParams(window.location.search);
-  const driverId = queryParams.get('driverId');
-  const orderId = queryParams.get('o');
-  const isDriverMode = queryParams.get('mode') === 'driver';
-  const isCustomerMode = queryParams.get('mode') === 'booking';
+  let driverId: string | null = null;
+  let orderId: string | null = null;
+  let isDriverMode = false;
+  let isCustomerMode = false;
+  
+  try {
+    const queryParams = new URLSearchParams(window.location.search);
+    driverId = queryParams.get('driverId');
+    orderId = queryParams.get('o');
+    isDriverMode = queryParams.get('mode') === 'driver';
+    isCustomerMode = queryParams.get('mode') === 'booking';
+  } catch (e) {
+    console.warn('URLSearchParams failed in body:', e);
+  }
 
   const handleLogin = async () => {
     if (loginInProgress) return;
@@ -102,7 +119,7 @@ export default function App() {
         }
       }
     } catch (error: any) {
-      console.error('Login failed:', error);
+      console.error('Login failed:', error?.message || String(error));
       if (error.code === 'auth/unauthorized-domain') {
         const domain = window.location.hostname;
         alert(`ACCESS DENIED: The domain "${domain}" is not authorized in your Firebase Console.\n\nTo fix this:\n1. Go to Firebase Console\n2. Authentication > Settings > Authorized Domains\n3. Add "${domain}" to the list.`);
@@ -143,8 +160,17 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent" />
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="relative mb-8">
+          <div className="absolute inset-0 flex items-center justify-center opacity-10 animate-pulse scale-[2.5]">
+            <Logo size={120} />
+          </div>
+          <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center relative z-10 shadow-2xl shadow-blue-200">
+            <Logo size={48} color="white" />
+          </div>
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 mb-1">TankerWala</h2>
+        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest animate-pulse">Initializing System...</p>
       </div>
     );
   }
@@ -155,13 +181,16 @@ export default function App() {
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-[2.5rem] shadow-xl max-w-md w-full text-center border border-slate-100"
+          className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-md w-full text-center border border-slate-100"
         >
-          <div className="bg-blue-600 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-200 text-white">
-            <Truck size={40} />
+          <div className="bg-slate-900 w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-blue-100">
+            <Logo size={56} color="white" />
           </div>
-          <h1 className="text-3xl font-display font-black text-slate-900 mb-2 whitespace-pre-wrap">TankerWala <br/><span className="text-blue-600">Powered by Rajhans</span></h1>
-          <p className="text-slate-500 font-medium mb-8">Management System • Water Tanker Service</p>
+          <h1 className="text-4xl font-black text-slate-900 mb-1 tracking-tight text-center flex justify-center pb-2">
+            Tanker<span className="relative text-blue-600">Wala<span className="absolute top-[95%] left-0 text-[11px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case">Powered by Rajhans</span></span>
+          </h1>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em] mt-10 mb-2">Internal Management Portal</p>
+          <p className="text-slate-500 font-medium mb-10 text-sm">Secure access for fleet administrators</p>
           
           <button 
             onClick={handleLogin}
@@ -205,7 +234,9 @@ export default function App() {
       <header className="md:hidden bg-white border-b border-slate-100 p-4 flex items-center justify-between sticky top-0 z-[40]">
         <div className="flex items-center gap-2">
           <Logo size={32} />
-          <span className="font-display font-bold text-lg uppercase tracking-tight text-blue-900">TankerWala</span>
+          <h1 className="font-bold text-lg leading-tight pb-3">
+            Tanker<span className="relative text-blue-600">Wala<span className="absolute top-[90%] left-0 text-[6px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case mt-[2px]">Powered by Rajhans</span></span>
+          </h1>
         </div>
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -218,9 +249,13 @@ export default function App() {
       {/* Desktop Sidebar */}
       <aside className={`md:flex md:w-64 bg-white border-r border-slate-200 flex-col p-6 sticky top-0 h-screen z-50 ${isSidebarOpen ? 'flex fixed inset-0 w-full' : 'hidden'}`}>
         <div className="flex items-center justify-between mb-10">
-          <div className="flex items-center gap-3">
-            <Logo size={48} />
-            <span className="font-display font-bold text-xl uppercase tracking-tight text-blue-900">TankerWala</span>
+          <div className="flex flex-col items-center gap-3 group px-2 text-center pb-4 border-b border-slate-100 mb-6 w-full">
+            <div className="text-slate-900 transition-all group-hover:scale-110 drop-shadow-sm">
+              <Logo size={56} />
+            </div>
+            <h1 className="font-display font-black text-xl tracking-tight text-slate-900 flex flex-col">
+              Tanker<span className="relative text-blue-600 text-2xl -mt-1">Wala<span className="absolute top-[90%] left-0 text-[8px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">Powered by Rajhans</span></span>
+            </h1>
           </div>
           <button onClick={() => setIsSidebarOpen(false)} className="md:hidden">
             <X size={24} />
@@ -247,26 +282,26 @@ export default function App() {
              <div className="flex flex-col gap-2">
                <div className="flex gap-2">
                  <button 
-                   onClick={() => {
-                     const url = new URL(window.location.href);
+                   onClick={async () => {
+                     const url = getPublicAppUrl();
                      url.searchParams.set('mode', 'booking');
                      url.searchParams.delete('tab');
                      const link = url.toString();
-                     navigator.clipboard.writeText(link);
-                     alert('Portal Link Copied!\n\nIMPORTANT: If you are in Developer Preview, this link only works for you. Use the "Public URL" from the AIS Share menu to share with customers.');
+                     await copyToClipboard(link);
+                     alert('Portal Link Copied! You can now share this URL with your customers.');
                    }}
                    className="flex-1 p-2 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
                  >
                    Copy Cust. Link
                  </button>
                  <button 
-                   onClick={() => {
-                      const url = new URL(window.location.href);
+                   onClick={async () => {
+                      const url = getPublicAppUrl();
                       url.searchParams.set('mode', 'driver');
                       url.searchParams.delete('tab');
                       const link = url.toString();
-                      navigator.clipboard.writeText(link);
-                      alert('Driver App Link Copied!\n\nIMPORTANT: If you are in Developer Preview, this link only works for you. Use the "Public URL" from the AIS Share menu to share with drivers.');
+                      await copyToClipboard(link);
+                      alert('Driver App Link Copied! You can now share this URL with your drivers.');
                    }}
                    className="flex-1 p-2 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
                  >
@@ -274,7 +309,12 @@ export default function App() {
                  </button>
                </div>
                <button 
-                 onClick={() => window.open(`${window.location.origin}${window.location.pathname}?mode=driver`, '_blank')}
+                 onClick={() => {
+                   const url = getPublicAppUrl();
+                   url.searchParams.set('mode', 'driver');
+                   url.searchParams.delete('tab');
+                   window.open(url.toString(), '_blank');
+                 }}
                  className="w-full p-2 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-colors border border-blue-100"
                >
                  Test Driver App View

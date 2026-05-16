@@ -56,7 +56,7 @@ export const ledgerAutomation = {
 
       console.log(`Auto-posted Bill #${bill.billNumber} to Ledger.`);
     } catch (error) {
-      console.error('Ledger Automation Error:', error);
+      console.error('Ledger Automation Error:', error?.message || error);
     }
   },
 
@@ -108,7 +108,7 @@ export const ledgerAutomation = {
         createdAt: serverTimestamp()
       });
     } catch (error) {
-      console.error('Payment Auto-posting error:', error);
+      console.error('Payment Auto-posting error:', error?.message || error);
     }
   },
 
@@ -158,7 +158,7 @@ export const ledgerAutomation = {
             creditAcc = { id: newAccRef.id, name: 'Penalty Recovery', balanceType: 'Cr', currentBalance: 0 } as Account;
           }
         } catch (e) {
-          console.error("Failed to auto-create Penalty account:", e);
+          console.error("Failed to auto-create Penalty account:", e?.message || e);
         }
       }
 
@@ -198,7 +198,7 @@ export const ledgerAutomation = {
       
       console.log(`Auto-posted Driver Payment (${mode}) to Ledger.`);
     } catch (error) {
-      console.error('Driver Payment Automation Error:', error);
+      console.error('Driver Payment Automation Error:', error?.message || error);
     }
   }
 };

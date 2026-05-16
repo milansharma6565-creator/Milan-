@@ -9,10 +9,11 @@ export interface Customer {
   notes?: string;
   pendingAmount: number;
   lastRate?: number;
+  pin?: string;
   createdAt: any;
 }
 
-export type ProductCategory = 'TANKER' | 'STANDBY_TANKER' | 'MONTHLY_TANKER' | 'BOTTLE' | 'CAN';
+export type ProductCategory = 'TANKER' | 'STANDBY_TANKER' | 'MONTHLY_TANKER' | 'BOTTLE' | 'CAN' | 'DONATION';
 
 export interface Bill {
   id?: string;
@@ -197,7 +198,8 @@ export interface Driver {
   name: string;
   mobile: string;
   monthlySalary: number;
-  status?: 'Active' | 'Inactive';
+  status?: 'Active' | 'Inactive' | 'pending';
+  pin?: string;
   createdAt?: any;
 }
 

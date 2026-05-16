@@ -26,10 +26,12 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, format, subDays } from 'date-fns';
 import { ConfirmationModal } from './ConfirmationModal';
+
+import { Logo } from './Logo';
 
 export function TractorDiesel() {
   const [activeView, setActiveView] = useState<'diesel' | 'maintenance'>('diesel');
@@ -646,7 +648,14 @@ export function TractorDiesel() {
   const generateReport = async () => {
     if (!tractors) return;
 
-    const doc = new jsPDF();
+    let doc: any;
+    try {
+      doc = new jsPDF();
+    } catch (e: any) {
+      console.error('jsPDF failed:', e?.message || e);
+      alert('PDF generation is not supported in this browser.');
+      return;
+    }
     const now = new Date();
     let start: Date;
     let end: Date;
@@ -1635,13 +1644,15 @@ export function TractorDiesel() {
       <AnimatePresence>
         {showDone && (
           <motion.div
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[300] bg-green-600 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3"
+            initial={{ y: 100, opacity: 0, scale: 0.5 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 100, opacity: 0, scale: 0.5 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[300] bg-slate-900 text-white px-8 py-4 rounded-[2rem] shadow-2xl flex items-center gap-4 border border-blue-500/30"
           >
-            <CheckCircle2 size={24} />
-            <span className="font-display font-black">Entry Saved Successfully!</span>
+            <div className="text-blue-400">
+               <Logo size={32} />
+            </div>
+            <span className="font-display font-black text-lg">Entry Saved!</span>
           </motion.div>
         )}
       </AnimatePresence>

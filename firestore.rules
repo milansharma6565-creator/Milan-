@@ -6,11 +6,19 @@ service cloud.firestore {
     // ---------------------------------------------------------
     function isSignedIn() { 
       return request.auth != null && 
+             request.auth.token.email_verified == true &&
              (request.auth.token.email == 'rajhanssikar@gmail.com' || 
-              request.auth.token.email == 'milan.sharma6565@gmail.com'); 
+              request.auth.token.email == 'milan.sharma6565@gmail.com' ||
+              request.auth.uid == 'R3YQrAUh1tTGp0ghlwT7hgQ4Nm52'); 
     }
     function isAdmin() { 
       return isSignedIn(); 
+    }
+    function isSuperAdmin() {
+      return request.auth != null && 
+             request.auth.token.email_verified == true &&
+             (request.auth.token.email == 'milan.sharma6565@gmail.com' ||
+              request.auth.uid == 'R3YQrAUh1tTGp0ghlwT7hgQ4Nm52');
     }
     function isValidId(id) { 
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
@@ -163,10 +171,11 @@ service cloud.firestore {
     // ---------------------------------------------------------
 
     match /bookingRequests/{requestId} {
-      allow get: if isValidId(requestId);
-      allow create: if isValidId(requestId) || true; // Let customers create requests
-      allow list: if true; 
-      allow update, delete: if isAdmin();
+      allow list: if true;
+      allow get: if true;
+      allow create: if true; 
+      allow update: if isSignedIn();
+      allow delete: if isSuperAdmin();
     }
 
     match /chats/{billId} {
@@ -176,23 +185,18 @@ service cloud.firestore {
 
     match /driverLocations/{driverId} {
       allow get: if true;
-      allow list: if isSignedIn();
+      allow list: if true;
       allow create, update: if isValidId(driverId) && isValidDriverLocation(incoming()) &&
                             exists(/databases/$(database)/documents/drivers/$(driverId));
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /customers/{customerId} {
       allow get: if true;
       allow list: if true; // Allowed for customer portal
-      allow create: if isAdmin() && isValidId(customerId) && isValidCustomer(incoming());
-      allow update: if isAdmin() && isValidId(customerId) && (
-        (incoming().diff(existing()).affectedKeys().hasOnly(['pendingAmount', 'lastRate', 'secondaryMobiles', 'address', 'updatedAt']) && 
-         isTimestampValid('updatedAt')) ||
-        (incoming().diff(existing()).affectedKeys().hasAny(['name', 'mobile', 'address', 'alternateMobile', 'vehicleNumber', 'notes', 'updatedAt']) &&
-         isTimestampValid('updatedAt'))
-      );
-      allow delete: if isAdmin() && isValidId(customerId);
+      allow create: if true; // Allowed for self-registration
+      allow update: if true; // Allowed for PIN setup
+      allow delete: if isSuperAdmin() && isValidId(customerId);
     }
 
     match /bills/{billId} {
@@ -205,67 +209,75 @@ service cloud.firestore {
          incoming().billNumber == existing().billNumber && 
          incoming().customerId == existing().customerId)
       );
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /trips/{tripId} {
       allow read: if true;
       allow create: if isAdmin() && isValidTrip(incoming());
       allow update: if true; // Both admin and driver might update status (delivered)
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /drivers/{driverId} {
       allow list, get, create: if true;
       allow update: if true; // Allow drivers to set/update PIN
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /tractors/{tractorId} {
-      allow get: if isSignedIn() && isValidId(tractorId);
-      allow list: if isSignedIn();
+      allow get: if true;
+      allow list: if true;
       allow create: if isAdmin() && isValidId(tractorId) && isValidTractor(incoming());
       allow update: if isAdmin() && isValidId(tractorId) && isValidTractor(incoming());
-      allow delete: if isAdmin() && isValidId(tractorId);
+      allow delete: if isSuperAdmin() && isValidId(tractorId);
     }
 
     match /dieselLogs/{logId} {
       allow get: if isSignedIn() && isValidId(logId);
       allow list: if isSignedIn();
       allow create: if isAdmin() && isValidId(logId) && isValidLog(incoming());
-      allow delete: if isAdmin() && isValidId(logId);
+      allow delete: if isSuperAdmin() && isValidId(logId);
     }
 
     match /maintenanceLogs/{logId} {
       allow get: if isSignedIn() && isValidId(logId);
       allow list: if isSignedIn();
       allow create: if isAdmin() && isValidId(logId) && isValidLog(incoming());
-      allow delete: if isAdmin() && isValidId(logId);
+      allow delete: if isSuperAdmin() && isValidId(logId);
     }
 
     match /ledger/{entryId} {
-      allow get: if isSignedIn() && isValidId(entryId);
-      allow list: if isSignedIn();
-      allow create: if isAdmin() && isValidId(entryId) && isValidLedger(incoming());
+      allow get, list: if true;
+      allow create: if true;
       allow update: if false; 
-      allow delete: if isAdmin() && isValidId(entryId);
+      allow delete: if isSuperAdmin() && isValidId(entryId);
     }
 
     match /accountGroups/{groupId} {
-      allow read, write: if isSignedIn();
+      allow read, create, update: if isSignedIn();
+      allow delete: if isSuperAdmin();
     }
 
     match /accounts/{accountId} {
-      allow read, write: if isSignedIn();
+      allow read, create, update: if isSignedIn();
+      allow delete: if isSuperAdmin();
     }
 
     match /vouchers/{voucherId} {
-      allow read, write: if isSignedIn();
+      allow read, create, update: if isSignedIn();
+      allow delete: if isSuperAdmin();
     }
 
     match /attendance/{atId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() && isValidAttendance(incoming());
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isAdmin();
+    }
+
+    match /feedbacks/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
     }
 
     match /hydrantFillings/{fillingId} {
@@ -273,7 +285,7 @@ service cloud.firestore {
       allow list: if isSignedIn();
       allow create: if isAdmin() && isValidId(fillingId) && isValidHydrantFilling(incoming());
       allow update: if isAdmin() && isValidId(fillingId) && isValidHydrantFilling(incoming());
-      allow delete: if isAdmin() && isValidId(fillingId);
+      allow delete: if isSuperAdmin() && isValidId(fillingId);
     }
 
     match /dieselRequests/{requestId} {
@@ -281,7 +293,7 @@ service cloud.firestore {
       allow get: if true;
       allow create: if true; 
       allow update: if isSignedIn();
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /phone_sync_logs/{logId} {
@@ -289,12 +301,14 @@ service cloud.firestore {
     }
 
     match /documents/{docId} {
-      allow read, write: if isSignedIn();
+      allow create: if true;
+      allow read, update: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /settings/{docId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && request.auth.token.email == 'milan.sharma6565@gmail.com';
+      allow read: if true;
+      allow write: if isSuperAdmin();
     }
   }
 }

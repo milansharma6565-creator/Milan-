@@ -167,8 +167,10 @@ export function DriverLiveTracking({ driverId }: DriverLiveTrackingProps) {
           <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Navigation size={32} className="text-blue-600" />
           </div>
-          <h1 className="text-2xl font-display font-bold text-slate-900">Driver Portal</h1>
-          <p className="text-slate-500 font-medium">TankerWala Powered by Rajhans</p>
+          <h1 className="text-2xl font-display font-bold text-slate-900 pb-2">Driver Portal</h1>
+          <p className="text-slate-500 font-medium pb-2">
+            Tanker<span className="relative">Wala<span className="absolute top-[90%] left-0 text-[10px] text-slate-400 font-normal whitespace-nowrap tracking-normal normal-case">Powered by Rajhans</span></span>
+          </p>
         </header>
 
         <motion.div 

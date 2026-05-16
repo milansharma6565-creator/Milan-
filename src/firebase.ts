@@ -14,9 +14,11 @@ import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
+const databaseId = (firebaseConfig as any).firestoreDatabaseId || '(default)';
+
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-}, (firebaseConfig as any).firestoreDatabaseId);
+}, databaseId);
 export const storage = getStorage(app);
 
 // Use initializeAuth for more robust configuration
@@ -33,10 +35,15 @@ export { signInWithPopup, onAuthStateChanged, RecaptchaVerifier, signInWithPhone
 // Test connection as required by constraints
 async function testConnection() {
   try {
+    // Use a very short-lived getDoc from server to verify connectivity
     await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
+  } catch (error: any) {
+    // Only warn if it's a configuration/permission issue, ignore offline/network errors
+    // but log them for debugging
+    if (error?.message?.includes('permission-denied') || error?.code === 'permission-denied') {
+       console.warn("Firestore permissions check failed. This is expected if 'test/connection' doc doesn't exist.");
+    } else {
+       console.log("Initial Firestore connectivity test result:", error?.message);
     }
   }
 }
@@ -68,23 +75,43 @@ export interface FirestoreErrorInfo {
   }
 }
 
+export const safeJson = (obj: any) => {
+  try {
+    const cache = new Set();
+    return JSON.stringify(obj, (key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (cache.has(value)) return '[Circular]';
+        cache.add(value);
+      }
+      return value;
+    });
+  } catch (e) {
+    return "[Serialization Failed]";
+  }
+};
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const currentUser = auth.currentUser;
+  
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
+      userId: currentUser?.uid || null,
+      email: currentUser?.email || null,
+      emailVerified: currentUser?.emailVerified || null,
+      isAnonymous: currentUser?.isAnonymous || null,
+      tenantId: currentUser?.tenantId || null,
+      providerInfo: currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId || null,
+        email: provider.email || null,
       })) || []
     },
     operationType,
     path
   }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  
+  const jsonString = safeJson(errInfo);
+  console.error(`Firestore Error [${operationType}] at [${path || 'unknown'}]:`, jsonString);
+  
+  throw new Error(jsonString || `Firestore ${operationType} failed at ${path}`);
 }

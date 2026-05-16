@@ -27,7 +27,9 @@ export function CustomerOrderView({ billId }: { billId: string }) {
         
         // Audio Logic
         if (!beepAudio.current) {
-          beepAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+          const audio = document.createElement('audio');
+          audio.src = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
+          beepAudio.current = audio;
         }
         
         if (prevStatus.current && prevStatus.current !== data.status) {
@@ -38,6 +40,9 @@ export function CustomerOrderView({ billId }: { billId: string }) {
         setError('Bill not found');
         setLoading(false);
       }
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, `bills/${billId}`);
+      setLoading(false);
     });
 
     const q = query(
@@ -55,6 +60,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
             setRequestStatus('none');
             setRequestId(null);
         }
+    }, (err: any) => {
+      console.error("Booking requests check failed:", err?.message || String(err));
     });
 
     return () => {
@@ -70,6 +77,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
     }
     const unsubLoc = onSnapshot(doc(db, 'driverLocations', bill.driverId), (locSnap) => {
       if (locSnap.exists()) setDriverLocation(locSnap.data());
+    }, (err: any) => {
+      console.error("Driver location tracking failed:", err?.message || String(err));
     });
     return () => unsubLoc();
   }, [bill?.driverId]);
@@ -106,8 +115,17 @@ export function CustomerOrderView({ billId }: { billId: string }) {
   };
 
   if (loading) return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      <RefreshCw className="animate-spin text-blue-600" size={32} />
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative mb-8">
+        <div className="absolute inset-0 flex items-center justify-center opacity-10 animate-pulse scale-[2.5]">
+          <Logo size={120} />
+        </div>
+        <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center relative z-10 shadow-2xl shadow-blue-200">
+          <Logo size={48} color="white" />
+        </div>
+      </div>
+      <h2 className="text-xl font-bold text-slate-900 mb-1">TankerWala</h2>
+      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest animate-pulse">Loading Bill Details...</p>
     </div>
   );
 
@@ -122,9 +140,11 @@ export function CustomerOrderView({ billId }: { billId: string }) {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 md:p-10">
       <div className="max-w-md w-full">
-        <div className="flex items-center justify-center gap-3 mb-10">
-          <Logo size={48} />
-          <h1 className="text-2xl font-display font-bold uppercase tracking-tight text-blue-900">TankerWala</h1>
+        <div className="flex flex-col items-center justify-center gap-3 mb-10">
+          <Logo size={56} />
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">
+            Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
+          </h1>
         </div>
 
         <motion.div 
@@ -251,8 +271,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
           </div>
         </motion.div>
         
-        <p className="mt-8 text-center text-slate-400 text-xs font-semibold uppercase tracking-widest">
-            TankerWala Powered by Rajhans
+        <p className="mt-8 text-center text-slate-400 text-xs font-semibold uppercase tracking-widest pb-4">
+            Tanker<span className="relative text-blue-600">Wala<span className="absolute top-[90%] left-0 text-[8px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">Powered by Rajhans</span></span>
         </p>
       </div>
     </div>

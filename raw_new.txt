@@ -1,0 +1,184 @@
+src/components/DocumentVault.tsx:          createdAt: data.createdAt?.toDate() || new Date()
+src/components/DocumentVault.tsx:        const reader = new FileReader();
+src/components/DocumentVault.tsx:                placeholder="Enter new password"
+src/components/DriverAttendance.tsx:  const [selectedDate, setSelectedDate] = useState(new Date());
+src/components/DriverAttendance.tsx:    const doc = new jsPDF();
+src/components/DriverAttendance.tsx:        date: new Date(),
+src/components/DriverAttendance.tsx:        voucherNumber: `SLY-${format(new Date(), 'HHmm')}`,
+src/components/DriverAttendance.tsx:               const nd = new Date(d);
+src/components/DriverAttendance.tsx:               const nd = new Date(d);
+src/components/ThermalInvoice.tsx:        <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
+src/components/ReportView.tsx:    start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+src/components/ReportView.tsx:    end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
+src/components/ReportView.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+src/components/ReportView.tsx:                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+src/components/CustomerManagement.tsx:    date: new Date().toISOString().split('T')[0],
+src/components/CustomerManagement.tsx:    const doc = new jsPDF();
+src/components/CustomerManagement.tsx:    const fileName = onlyPending ? `TankerWala_Pending_Dues_${format(new Date(), 'dd_MMM')}.pdf` : 'TankerWala_Steel_Water_Customer_List.pdf';
+src/components/CustomerManagement.tsx:      if (!paymentAccount) throw new Error(`${paymentAccName} account not found`);
+src/components/CustomerManagement.tsx:      const entryDate = new Date(receiptForm.date);
+src/components/CustomerManagement.tsx:      const now = new Date();
+src/components/CustomerManagement.tsx:        date: new Date().toISOString().split('T')[0],
+src/components/CustomerManagement.tsx:      `Your current account status as of ${format(new Date(), 'dd MMM yyyy')}:\n\n` +
+src/components/CustomerManagement.tsx:                  <p className="text-sm text-slate-500">Register a new client for billing</p>
+src/components/CustomerManagement.tsx:  const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+src/components/CustomerManagement.tsx:  const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+src/components/CustomerManagement.tsx:      const start = new Date(startDate);
+src/components/CustomerManagement.tsx:      const end = new Date(endDate);
+src/components/CustomerManagement.tsx:      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+src/components/CustomerManagement.tsx:      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+src/components/CustomerManagement.tsx:      const doc = new jsPDF();
+src/components/CustomerManagement.tsx:      const fileName = `Hisab_${customer.name}_${format(new Date(), 'dd_MMM')}.pdf`;
+src/components/CustomerManagement.tsx:            file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+src/components/CustomerManagement.tsx:                         {new Date(bill.date).toLocaleDateString()}
+src/components/CustomerManagement.tsx:                      alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+src/components/LocationPicker.tsx:      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+src/components/LocationPicker.tsx:        throw new Error(`Search failed: ${response.status}`);
+src/components/DriverLiveTracking.tsx:      setLastUpdate(new Date());
+src/components/Ledger.tsx:            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
+src/components/Ledger.tsx:            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+src/components/Ledger.tsx:  const [customDate, setCustomDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+src/components/Ledger.tsx:        dateMatch = format(v.date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+src/components/Ledger.tsx:    const doc = new jsPDF();
+src/components/Ledger.tsx:    doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 34);
+src/components/Ledger.tsx:    doc.save(`Daybook_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
+src/components/Ledger.tsx:                alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+src/components/Ledger.tsx:  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+src/components/Ledger.tsx:                throw new Error(`INSUFFICIENT_FUNDS:${accData.name}:${accData.currentBalance || 0}`);
+src/components/Ledger.tsx:          date: new Date(date),
+src/components/Ledger.tsx:             <p className="text-sm text-slate-500">Add new account to your chart</p>
+src/components/Ledger.tsx:  const [hiddenRows, setHiddenRows] = useState<Set<number>>(new Set());
+src/components/Ledger.tsx:    const doc = new jsPDF();
+src/components/Ledger.tsx:    doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 36);
+src/components/Ledger.tsx:    doc.save(`Ledger_${acc.name}_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
+src/components/Ledger.tsx:                  alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+src/components/Ledger.tsx:    const doc = new jsPDF();
+src/components/Ledger.tsx:    doc.text(`As on ${format(new Date(), 'dd MMM yyyy')}`, 14, 36);
+src/components/Ledger.tsx:    doc.save(`${reportType.toUpperCase()}_Report_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
+src/components/Ledger.tsx:             alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+src/components/DriverApp.tsx:      reader = new FileReader();
+src/components/DriverApp.tsx:      const currentDayStr = format(new Date(), 'yyyy-MM-dd');
+src/components/DriverApp.tsx:          const completedDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+src/components/DriverApp.tsx:        date: format(new Date(), 'yyyy-MM-dd')
+src/components/DriverApp.tsx:    const today = format(new Date(), 'yyyy-MM-dd');
+src/components/DriverApp.tsx:        audioContext = new AudioContextClass();
+src/components/DriverApp.tsx:        audioContext = new AudioContextClass();
+src/components/DriverApp.tsx:                   <span className="text-[10px] text-slate-500 font-bold">{format(lastDeliveredTrip.completedAt?.toDate() || new Date(), 'hh:mm a')}</span>
+src/components/DriverApp.tsx:                  <div className="flex justify-between"><span>DATE:</span> <span>{format(new Date(), 'dd/MM/yyyy')}</span></div>
+src/components/HydrantFilling.tsx:      setPartySuggestions([...new Set(suggestions)]);
+src/components/HydrantFilling.tsx:      setPartySuggestions([...new Set(history)]);
+src/components/HydrantFilling.tsx:      setVehicleSuggestions([...new Set(fillings.filter(f => f.type === 'Inward').map(f => f.vehicleNumber || ''))]);
+src/components/HydrantFilling.tsx:          date: new Date().toISOString(),
+src/components/HydrantFilling.tsx:            date: new Date(),
+src/components/HydrantFilling.tsx:            date: new Date(),
+src/components/HydrantFilling.tsx:    const fillingDate = new Date(f.date);
+src/components/HydrantFilling.tsx:    const now = new Date();
+src/components/HydrantFilling.tsx:              <span className="text-[10px] font-bold text-slate-400">{format(new Date(f.date), 'dd MMM, hh:mm a')}</span>
+src/components/HydrantFilling.tsx:              <span className="font-bold">{(printingFilling || downloadingFilling) && format(new Date((printingFilling || downloadingFilling)!.date), 'dd/MM/yyyy HH:mm')}</span>
+src/components/Dashboard.tsx:        messages: arrayUnion({ text, sender: 'admin', timestamp: new Date() }),
+src/components/Dashboard.tsx:  const todayStart = startOfDay(new Date());
+src/components/Dashboard.tsx:    const todayStart = new Date();
+src/components/Dashboard.tsx:      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+src/components/Dashboard.tsx:      const date = subDays(new Date(), 6 - i);
+src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+src/components/Dashboard.tsx:    const busyDrivers = new Set(bills.filter(b => ['Assigned', 'Filling'].includes(b.status)).map(b => b.driverId));
+src/components/Dashboard.tsx:    const busyTractors = new Set(bills.filter(b => ['Assigned', 'Filling'].includes(b.status)).map(b => b.tractorId));
+src/components/Dashboard.tsx:  const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+src/components/Dashboard.tsx:      const today = startOfDay(new Date());
+src/components/Dashboard.tsx:        const expiryDate = new Date(t.insuranceExpiry);
+src/components/Dashboard.tsx:    date: new Date().toISOString().split('T')[0]
+src/components/Dashboard.tsx:    const sixtyDaysAgo = subDays(new Date(), 60);
+src/components/Dashboard.tsx:      const today = startOfDay(new Date());
+src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+src/components/Dashboard.tsx:      const yesterday = startOfDay(subDays(new Date(), 1));
+src/components/Dashboard.tsx:      const today = startOfDay(new Date());
+src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+src/components/Dashboard.tsx:        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+src/components/Dashboard.tsx:      const entryDate = new Date(quickVchForm.date);
+src/components/Dashboard.tsx:      const now = new Date();
+src/components/Dashboard.tsx:      if (!paymentAccId) throw new Error("Payment account not found");
+src/components/Dashboard.tsx:      if (!otherAccSnap.exists()) throw new Error("Selected account not found");
+src/components/Dashboard.tsx:          throw new Error(`INSUFFICIENT_FUNDS:${paymentAccName}:${payBal}`);
+src/components/Dashboard.tsx:      setQuickVchForm({ accountId: '', amount: '', description: '', date: new Date().toISOString().split('T')[0] });
+src/components/Dashboard.tsx:        if (!billDoc.exists()) throw new Error("Bill not found");
+src/components/Dashboard.tsx:        if (!billDoc.exists()) throw new Error("Bill not found");
+src/components/Dashboard.tsx:          date: new Date(),
+src/components/Dashboard.tsx:            date: new Date(),
+src/components/Dashboard.tsx:        if (!billDoc.exists()) throw new Error("Bill not found");
+src/components/Dashboard.tsx:              date: new Date(),
+src/components/Dashboard.tsx:      // 2. Generate new bill number
+src/components/Dashboard.tsx:      // 3. Create new bill based on original but with current time
+src/components/Dashboard.tsx:        date: new Date().toISOString(),
+src/components/Dashboard.tsx:            file = new File([blob], fileName, { type: 'image/jpeg' });
+src/components/Dashboard.tsx:            const item = new ClipboardItemConstructor({ [blob.type]: blob });
+src/components/Dashboard.tsx:              const hour = new Date().getHours();
+src/components/Dashboard.tsx:               const hour = new Date().getHours();
+src/components/Dashboard.tsx:               const hour = new Date().getHours();
+src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+src/components/Dashboard.tsx:                  const daysLeft = differenceInDays(new Date(t.insuranceExpiry), new Date());
+src/components/Dashboard.tsx:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+src/components/Dashboard.tsx:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+src/components/Dashboard.tsx:                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+src/components/Dashboard.tsx:                <p className="text-slate-500 font-medium mt-2">Renew tractor insurance to stay safe</p>
+src/components/Dashboard.tsx:                  const daysLeft = differenceInDays(new Date(t.insuranceExpiry), new Date());
+src/components/Dashboard.tsx:                        <div className="text-[9px] text-slate-400 font-bold">{new Date(t.insuranceExpiry).toLocaleDateString()}</div>
+src/components/Dashboard.tsx:                      Via {quickVoucher.paymentMethod} • {new Date(quickVchForm.date).toLocaleDateString()}
+src/components/TractorDiesel.tsx:    const ninetyDaysAgo = subDays(new Date(), 90);
+src/components/TractorDiesel.tsx:    date: new Date().toISOString().split('T')[0],
+src/components/TractorDiesel.tsx:    date: new Date().toISOString().split('T')[0],
+src/components/TractorDiesel.tsx:            throw new Error(`INSUFFICIENT_FUNDS:${accountName}:${currentBal}`);
+src/components/TractorDiesel.tsx:          date: new Date(newDiesel.date),
+src/components/TractorDiesel.tsx:      setNewDiesel({ date: new Date().toISOString().split('T')[0], tractorId: '', liters: 0, amount: 0, description: '', paymentMode: 'Cash', pendingRequestId: '' });
+src/components/TractorDiesel.tsx:            throw new Error(`INSUFFICIENT_FUNDS:${accountName}:${currentBal}`);
+src/components/TractorDiesel.tsx:          date: new Date(newMaintenance.date),
+src/components/TractorDiesel.tsx:      setNewMaintenance({ date: new Date().toISOString().split('T')[0], tractorId: '', amount: 0, description: '', paymentMode: 'Cash' });
+src/components/TractorDiesel.tsx:            throw new Error(`INSUFFICIENT_FUNDS:${finalAccountName}:${currentBal}`);
+src/components/TractorDiesel.tsx:          date: new Date().toISOString().split('T')[0],
+src/components/TractorDiesel.tsx:          date: new Date(),
+src/components/TractorDiesel.tsx:    const doc = new jsPDF();
+src/components/TractorDiesel.tsx:    const now = new Date();
+src/components/TractorDiesel.tsx:        isWithinInterval(new Date(l.date), { start, end })
+src/components/TractorDiesel.tsx:        isWithinInterval(new Date(l.date), { start, end })
+src/components/TractorDiesel.tsx:        isWithinInterval(new Date(b.date), { start, end })
+src/components/TractorDiesel.tsx:            new Date(l.date).toLocaleDateString(),
+src/components/TractorDiesel.tsx:            new Date(l.date).toLocaleDateString(),
+src/components/TractorDiesel.tsx:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+src/components/TractorDiesel.tsx:                    <span>{new Date(log.date).toLocaleDateString()}</span>
+src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new fuel purchase</p>
+src/components/TractorDiesel.tsx:                  <p className="text-sm text-slate-500">Record a new repair or service</p>
+src/components/DriverTrackingAdmin.tsx:    const twelveHoursAgo = new Date();
+src/components/DriverTrackingAdmin.tsx:        lastUpdated: doc.data().lastUpdated?.toDate() || new Date()
+src/components/CustomerOrderView.tsx:                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
+src/components/CustomerBookingPortal.tsx:    const date = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
+src/components/CustomerBookingPortal.tsx:    const target = new Date(date.getTime() + 1.5 * 60 * 60 * 1000); // +1.5 hours
+src/components/CustomerBookingPortal.tsx:      const now = new Date();
+src/components/CustomerBookingPortal.tsx:    const startObj = startOfMonth(new Date());
+src/components/CustomerBookingPortal.tsx:    const endObj = endOfMonth(new Date());
+src/components/CustomerBookingPortal.tsx:        const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.date);
+src/components/CustomerBookingPortal.tsx:        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.date).getTime();
+src/components/CustomerBookingPortal.tsx:        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.date).getTime();
+src/components/CustomerBookingPortal.tsx:            <span className="font-bold text-sm text-blue-100 uppercase tracking-widest">{format(new Date(), 'MMMM yyyy')}</span>
+src/components/CustomerBookingPortal.tsx:                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM')}
+src/components/GoodMorningGreeting.tsx:      const now = new Date();
+src/components/GoodMorningGreeting.tsx:    const todayDate = new Date().toDateString();
+src/components/Billing.tsx:    date: new Date().toISOString().slice(0, 16),
+src/components/Billing.tsx:            file = new File([blob], fileName, { type: 'image/jpeg' });
+src/components/Billing.tsx:                Trip Token <span className="font-bold text-slate-900">#{bookedBill.billNumber}</span> has been generated successfully at <span className="text-slate-900 font-bold">{format(new Date(), 'hh:mm a')}</span>.
+src/components/DriverManagement.tsx:    date: new Date().toISOString().split('T')[0],
+src/components/DriverManagement.tsx:        date: new Date().toISOString().split('T')[0],
+src/components/DriverManagement.tsx:    const doc = new jsPDF();
+src/components/DriverManagement.tsx:    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+src/components/DriverManagement.tsx:    doc.save(`TankerWala_${activeTab}_Drivers_${new Date().toISOString().split('T')[0]}.pdf`);
+src/constants.ts:  return new Intl.NumberFormat('en-IN', {
+src/constants.ts:    const urlObj = new URL(currentUrl.replace('ais-dev-', 'ais-pre-'));
+src/constants.ts:  return new URL(currentUrl);
+src/constants.ts:      if (!successful) throw new Error('Copy command failed');
+src/services/ledgerAutomation.ts:        date: new Date().toISOString().slice(0, 10),
+src/services/ledgerAutomation.ts:        date: new Date().toISOString().slice(0, 10),
+src/lib/pdfUtils.ts:    await new Promise((resolve) => {
+src/lib/pdfUtils.ts:    const pdf = new jsPDF({
+src/App.tsx:      const params = new URLSearchParams(window.location.search);
+src/App.tsx:    const queryParams = new URLSearchParams(window.location.search);
+src/firebase.ts:export const googleProvider = new GoogleAuthProvider();
+src/firebase.ts:      const cache = new Set();
+src/firebase.ts:  throw new Error(jsonString || `Firestore ${operationType} failed at ${path}`);

@@ -67,7 +67,7 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
           setCenter(pos);
         },
         (error) => {
-          console.error("Geolocation error:", error);
+          console.error("Geolocation error:", error?.message || String(error));
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -79,18 +79,54 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
     setLoading(true);
 
     try {
-      // Reverse geocoding using Nominatim (OpenStreetMap)
-      // Adding email to comply with Nominatim usage policy and potentially avoid blocks
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=en&email=milan.sharma6565@gmail.com`
-      );
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const data = await response.json();
-      const address = data.display_name || `Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      onLocationSelect(lat, lng, address);
+      let addressStr = '';
+      let googleKey = '';
+      try {
+        // Safe access to Vite vars
+        googleKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY || '';
+      } catch (envErr) {
+        // ignore
+      }
+      
+      if (googleKey) {
+        try {
+          const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${googleKey}`);
+          const data = await res.json();
+          if (data.status === 'OK' && data.results && data.results.length > 0) {
+            addressStr = data.results[0].formatted_address;
+          }
+        } catch (e) {
+          console.warn("Google Maps Geocoding failed, falling back to OSM.", e);
+        }
+      }
+
+      if (!addressStr) {
+        // Reverse geocoding using Nominatim (OpenStreetMap) with zoom=18 for street level precision
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&accept-language=en&email=milan.sharma6565@gmail.com`
+        );
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        if (data.address) {
+          // Construct a cleaner exact address from components
+          const a = data.address;
+          const parts = [
+            a.house_number, a.road, a.neighbourhood, a.suburb, 
+            a.village || a.town || a.city, a.postcode
+          ].filter(x => !!x);
+          addressStr = parts.join(', ');
+        }
+        if (!addressStr) {
+           addressStr = data.display_name;
+        }
+      }
+
+      if (!addressStr) {
+        addressStr = `Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      }
+
+      onLocationSelect(lat, lng, addressStr);
     } catch (err) {
-      // Don't log "Failed to fetch" as an error if we have a fallback
-      // console.error("Geocoding error:", err);
       const fallbackAddress = `Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
       onLocationSelect(lat, lng, fallbackAddress);
     } finally {
@@ -111,7 +147,7 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
         },
         (err) => {
           setFindingMe(false);
-          console.error("Geolocation error:", err);
+          console.error("Geolocation error (Find Me):", err?.message || String(err));
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -158,7 +194,7 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
       const data = await response.json();
       setSuggestions(data);
     } catch (err) {
-      console.error("Search error handled:", err);
+      console.error("Search error handled:", err?.message || String(err));
       // Silently fail search for UI but maybe show no results found
       setSuggestions([]);
     } finally {

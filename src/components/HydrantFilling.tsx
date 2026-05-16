@@ -25,7 +25,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { format, startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval } from 'date-fns';
 import { ConfirmationModal } from './ConfirmationModal';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
+
+import { Logo } from './Logo';
 
 export function HydrantFilling() {
   const [fillings, setFillings] = useState<HydrantFillingType[]>([]);
@@ -156,18 +158,17 @@ export function HydrantFilling() {
       const container = printRef.current;
       container.parentElement?.classList.remove('hidden');
       
-      const canvas = await html2canvas(container, {
-        scale: 2,
-        backgroundColor: '#ffffff',
-        logging: false,
-        useCORS: true
+      const dataUrl = await toPng(container, {
+        quality: 1.0,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff'
       });
       
       container.parentElement?.classList.add('hidden');
       
       const link = document.createElement('a');
       link.download = `Token_${downloadingFilling.tokenNumber}.png`;
-      link.href = canvas.toDataURL('image/png');
+      link.href = dataUrl;
       link.click();
       setDownloadingFilling(null);
     } catch (e) {
@@ -783,7 +784,9 @@ export function HydrantFilling() {
       <div className="hidden">
         <div ref={printRef} className="p-8 w-[80mm] font-mono text-xs text-slate-900 bg-white">
           <div className="text-center border-b-2 border-dashed border-slate-300 pb-4 mb-4">
-             <h2 className="text-lg font-black uppercase tracking-tighter">TankerWala Powered by Rajhans</h2>
+             <h2 className="text-lg font-black uppercase tracking-tighter pb-3">
+               Tanker<span className="relative">Wala<span className="absolute top-full left-0 text-[8px] text-slate-500 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
+             </h2>
              <p className="text-[10px]">Tanker Hydrant & Filling Point</p>
              <p className="text-[10px]">Sikar, Rajasthan | 9876543210</p>
           </div>
@@ -820,8 +823,8 @@ export function HydrantFilling() {
             <div className="relative w-28 h-28 rounded-full border-[5px] border-blue-700/40 flex items-center justify-center p-3 text-center">
               <div className="absolute inset-0 rounded-full border border-blue-700/20 m-1" />
               <div className="text-[9px] font-black uppercase text-blue-800 tracking-tighter leading-[1.1] rotate-[-5deg]">
-                TankerWala<br/>Powered by<br/>Rajhans<br/>
-                <span className="text-[14px]">TOKEN</span>
+                Tanker<span className="relative">Wala<span className="absolute top-full left-0 text-[6px] text-slate-500 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span><br/>
+                <span className="text-[14px] mt-2 block">TOKEN</span>
               </div>
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl font-black text-blue-900/10 -rotate-12 select-none pointer-events-none">
                 #{(printingFilling || downloadingFilling)?.tokenNumber.split('-')[1]}
@@ -848,13 +851,15 @@ export function HydrantFilling() {
       <AnimatePresence>
         {showDone && (
           <motion.div
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[300] bg-green-600 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3"
+            initial={{ y: 100, opacity: 0, scale: 0.5 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 100, opacity: 0, scale: 0.5 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[300] bg-slate-900 text-white px-8 py-4 rounded-[2rem] shadow-2xl flex items-center gap-4 border border-blue-500/30"
           >
-            <CheckCircle2 size={24} />
-            <span className="font-display font-black">Entry Saved Successfully!</span>
+            <div className="text-blue-400">
+               <Logo size={32} />
+            </div>
+            <span className="font-display font-black text-lg">Entry Saved!</span>
           </motion.div>
         )}
       </AnimatePresence>

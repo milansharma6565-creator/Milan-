@@ -4,7 +4,7 @@ import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serve
 import { Customer, Driver, Bill } from '../types';
 import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES } from '../constants';
+import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES, getPublicAppUrl } from '../constants';
 import { ThermalInvoice } from './ThermalInvoice';
 import { format } from 'date-fns';
 import { toJpeg } from 'html-to-image';
@@ -195,10 +195,34 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
       
       const blob = await (await fetch(dataUrl)).blob();
       const fileName = `Token_${bill.billNumber}.jpg`;
-      const file = new File([blob], fileName, { type: 'image/jpeg' });
+      let file: any;
+      try {
+        if (typeof window.File === 'function') {
+          try {
+            file = new File([blob], fileName, { type: 'image/jpeg' });
+          } catch (fileConstructErr) {
+            console.warn('File constructor failed, falling back to blob');
+            file = blob;
+          }
+        } else {
+          file = blob;
+        }
+      } catch (e) {
+        file = blob;
+      }
+
+      let canShareFile = false;
+      try {
+        if (navigator.canShare) {
+          canShareFile = navigator.canShare({ files: [file] });
+        }
+      } catch (canShareErr) {
+        console.warn('canShare check failed', canShareErr);
+        canShareFile = false;
+      }
 
       // Try Web Share API (Best for Mobile WhatsApp)
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (navigator.share && canShareFile) {
         try {
           await navigator.share({
             files: [file],
@@ -224,8 +248,8 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
       // Open WhatsApp link as fallback
       sendWhatsApp(bill);
       alert('Token Image Downloaded. You can now share it manually on WhatsApp.');
-    } catch (err) {
-      console.error('Error sharing image:', err);
+    } catch (err: any) {
+      console.error('Error sharing image:', err?.message || String(err));
       // Fallback to text WhatsApp
       sendWhatsApp(bill);
     }
@@ -233,7 +257,7 @@ export function Billing({ onBillCreated }: { onBillCreated?: () => void }) {
 
   const sendWhatsApp = (bill: any) => {
     if (!selectedCustomer) return;
-    const urlObj = new URL(window.location.href);
+    const urlObj = getPublicAppUrl();
     urlObj.search = ''; // Clear current params
     urlObj.searchParams.set('o', bill.id);
     const rebookUrl = urlObj.toString();

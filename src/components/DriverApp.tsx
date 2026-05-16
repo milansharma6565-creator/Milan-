@@ -36,6 +36,8 @@ import {
   limit
 } from 'firebase/firestore';
 import { format } from 'date-fns';
+import { InstallPWA } from './InstallPWA';
+import { Logo } from './Logo';
 
 export function DriverApp() {
   const [driver, setDriver] = useState<any>(null);
@@ -82,18 +84,35 @@ export function DriverApp() {
   const [qrBillNumber, setQrBillNumber] = useState('');
   const [showBill, setShowBill] = useState(false);
 
+  useEffect(() => {
+    // Check for "Reached" status to trigger alarm
+    if (activeTrip?.status === 'Reached') {
+      if (!sirenRef.current) {
+        playSirenSound();
+      }
+    } else {
+      stopSiren();
+    }
+  }, [activeTrip?.status]);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, side: 'front' | 'back' | 'zero' | 'amt') => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
+    let reader: any;
+    try {
+      reader = new FileReader();
+    } catch (e: any) {
+      console.error("FileReader constructor failed:", e?.message || String(e));
+      return;
+    }
     reader.onload = (readerEvent) => {
-      const img = new Image();
+      const img = document.createElement('img');
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const MAX_WIDTH = 800;
         const MAX_HEIGHT = 800;
-        let width = img.width;
-        let height = img.height;
+        let width = img.naturalWidth || img.width;
+        let height = img.naturalHeight || img.height;
 
         if (width > height) {
           if (width > MAX_WIDTH) {
@@ -131,6 +150,7 @@ export function DriverApp() {
   }, []);
 
   const bypassLogin = async (mobile: string) => {
+    setLoading(true);
     try {
       const q = query(collection(db, 'drivers'), where('mobile', '==', mobile));
       const snap = await getDocs(q);
@@ -146,8 +166,10 @@ export function DriverApp() {
            setError('Account deactivated. Contact Admin.');
         }
       }
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error("Bypass login failed:", e?.message || String(e));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -178,8 +200,8 @@ export function DriverApp() {
           setLoginStep('PIN_SETUP');
         }
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Mobile submit failed:", err?.message || String(err));
       setError('Network error. Please try again.');
     } finally {
       setLoading(false);
@@ -217,6 +239,44 @@ export function DriverApp() {
           updatedAt: serverTimestamp()
         };
         const docRef = await addDoc(collection(db, 'drivers'), newDData);
+        
+        // Setup Vault integration for Tractor Drivers
+        try {
+          const newFolderId = `driver_${docRef.id}`;
+          const newFolderName = `${newName.trim()}`;
+          
+          const docSnap = await getDoc(doc(db, 'settings', 'documents'));
+          let newFolders = [];
+          if (docSnap.exists() && docSnap.data().folders) {
+            newFolders = [...docSnap.data().folders];
+          }
+          newFolders.push({ id: newFolderId, name: newFolderName, parentId: 'drivers' });
+          
+          await setDoc(doc(db, 'settings', 'documents'), { folders: newFolders }, { merge: true });
+
+          await addDoc(collection(db, 'documents'), {
+            name: `${newName.trim()} - License Front`,
+            url: licenseFront,
+            folder: newFolderId,
+            type: 'image/jpeg',
+            size: 0,
+            storageType: 'base64',
+            createdAt: serverTimestamp()
+          });
+
+          await addDoc(collection(db, 'documents'), {
+            name: `${newName.trim()} - License Back`,
+            url: licenseBack,
+            folder: newFolderId,
+            type: 'image/jpeg',
+            size: 0,
+            storageType: 'base64',
+            createdAt: serverTimestamp()
+          });
+        } catch (vaultErr: any) {
+          console.error("Failed to sync directly to Document Vault", vaultErr?.message || String(vaultErr));
+        }
+
         setDriver({ id: docRef.id, ...newDData });
         setLoginStep('PENDING');
       } catch (err: any) {
@@ -349,13 +409,13 @@ export function DriverApp() {
               lastUpdated: serverTimestamp(),
               isActive: true
             }, { merge: true });
-          } catch (e) {
-            console.error("Tracking Error:", e);
+          } catch (e: any) {
+            console.error("Tracking Error:", e?.message || String(e));
           }
         }
       },
-      (err) => {
-        console.error("Geolocation Error:", err);
+      (err: any) => {
+        console.error("Geolocation Error:", err?.message || String(err));
         setIsTracking(false);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
@@ -463,47 +523,74 @@ export function DriverApp() {
   };
 
   const playAlertSound = () => {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-    oscillator.connect(audioContext.destination);
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 1);
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass || typeof AudioContextClass !== 'function') return;
+      
+      let audioContext;
+      try {
+        audioContext = new AudioContextClass();
+      } catch (constructErr) {
+        return;
+      }
+      
+      const oscillator = audioContext.createOscillator();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+      oscillator.connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 1);
+    } catch (e: any) {
+      console.warn('AudioContext initialization failed:', e?.message || String(e));
+    }
   };
 
   const playSirenSound = () => {
     stopSiren();
     setIsSirenActive(true);
 
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    
-    // High volume
-    gainNode.gain.value = 1;
-    
-    // Square wave for harsh siren sound
-    oscillator.type = 'square';
-    
-    // Alternating frequencies for a siren for 30 seconds
-    const duration = 30;
-    for (let i = 0; i < duration * 2; i++) {
-      const time = audioContext.currentTime + i * 0.5;
-      oscillator.frequency.setValueAtTime(i % 2 === 0 ? 800 : 1200, time);
-    }
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    
-    oscillator.onended = () => {
-      setIsSirenActive(false);
-    };
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass || typeof AudioContextClass !== 'function') return;
 
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + duration);
-    
-    sirenRef.current = { oscillator, audioContext };
+      let audioContext;
+      try {
+        audioContext = new AudioContextClass();
+      } catch (constructErr) {
+        return;
+      }
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      // High volume
+      gainNode.gain.value = 1;
+      
+      // Square wave for harsh siren sound
+      oscillator.type = 'square';
+      
+      // Alternating frequencies for a siren for 30 seconds
+      const duration = 30;
+      for (let i = 0; i < duration * 2; i++) {
+        const time = audioContext.currentTime + i * 0.5;
+        oscillator.frequency.setValueAtTime(i % 2 === 0 ? 800 : 1200, time);
+      }
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.onended = () => {
+        setIsSirenActive(false);
+      };
+
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + duration);
+      
+      sirenRef.current = { oscillator, audioContext };
+    } catch (e) {
+      console.warn('Siren AudioContext initialization failed:', e);
+      setIsSirenActive(false);
+    }
   };
 
   const stopSiren = () => {
@@ -526,6 +613,23 @@ export function DriverApp() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  if (loading && !isLogged) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+        <div className="relative mb-8">
+          <div className="absolute inset-0 flex items-center justify-center opacity-10 animate-pulse scale-[2.5]">
+            <Logo size={120} color="white" />
+          </div>
+          <div className="w-24 h-24 bg-white rounded-[2rem] flex items-center justify-center relative z-10 shadow-2xl shadow-blue-500/20">
+            <Logo size={48} />
+          </div>
+        </div>
+        <h2 className="text-xl font-bold text-white mb-1">TankerWala</h2>
+        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest animate-pulse">Driver Terminal Loading...</p>
+      </div>
+    );
+  }
+
   if (!isLogged) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
@@ -535,15 +639,18 @@ export function DriverApp() {
           className="bg-white p-8 rounded-[2.5rem] shadow-xl max-w-sm w-full border border-slate-100"
         >
           <div className="text-center mb-8">
-            <div className={`w-20 h-20 mx-auto ${loginStep === 'PENDING' ? 'bg-orange-100' : 'bg-slate-900'} rounded-[1.5rem] flex items-center justify-center mb-6 shadow-lg shadow-blue-100`}>
-              {loginStep === 'PENDING' ? <AlertCircle size={40} className="text-orange-500" /> : <Navigation size={40} className="text-white" />}
+            <div className={`w-24 h-24 mx-auto ${loginStep === 'PENDING' ? 'bg-orange-100' : 'bg-slate-900'} rounded-[2rem] flex items-center justify-center mb-6 shadow-2xl shadow-slate-900/10`}>
+              {loginStep === 'PENDING' ? <AlertCircle size={40} className="text-orange-500" /> : <Logo size={48} color="white" />}
             </div>
-            <h1 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">
+            <h1 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">
+              Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
+            </h1>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-8 mb-4">
               {loginStep === 'PENDING' ? 'Pending Approval' :
                loginStep === 'NEW_REGISTER' ? 'Register as Driver' :
                loginStep === 'PIN_SETUP' ? 'Setup Profile' :
-               loginStep === 'PIN_LOGIN' ? 'Enter PIN' : 'Driver Portal'}
-            </h1>
+               loginStep === 'PIN_LOGIN' ? 'Driver Login' : 'Fleet Management'}
+            </p>
             <p className="text-sm font-medium text-slate-500">
               {loginStep === 'PENDING' ? 'Your account is pending review by an Administrator. Please check back later.' :
                loginStep === 'NEW_REGISTER' ? 'Enter your details to register in the fleet' :
@@ -620,6 +727,14 @@ export function DriverApp() {
                   placeholder="••••"
                   className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3.5 outline-none focus:border-blue-500 focus:bg-white transition-all text-center text-2xl font-black tracking-[1em]"
                 />
+                {loginStep === 'PIN_LOGIN' && (
+                  <button 
+                    onClick={() => alert("Please call Admin Rahul Hans at +91 96102 96102 to retrieve your PIN. They can see it in their Drivers panel.")}
+                    className="w-full text-xs font-bold text-blue-600 mt-2 text-right hover:underline"
+                  >
+                    Forgot PIN? Ask Admin
+                  </button>
+                )}
               </div>
             )}
 
@@ -687,12 +802,15 @@ export function DriverApp() {
             </p>
           </div>
         </div>
-        <button onClick={() => {
-          localStorage.removeItem('isDriverLoggedIn');
-          window.location.reload();
-        }} className="p-3 bg-slate-900 rounded-2xl text-slate-400 active:scale-95 transition-all">
-          <LogOut size={20} />
-        </button>
+        <div className="flex items-center gap-2">
+          <InstallPWA />
+          <button onClick={() => {
+            localStorage.removeItem('isDriverLoggedIn');
+            window.location.reload();
+          }} className="p-3 bg-slate-900 rounded-2xl text-slate-400 active:scale-95 transition-all">
+            <LogOut size={20} />
+          </button>
+        </div>
       </div>
 
       <div className="px-6 space-y-6">
@@ -859,6 +977,10 @@ export function DriverApp() {
                 {activeTrip.status === 'Reached' && (
                   <button 
                     onClick={async () => {
+                      if (!activeTrip.tractorId) {
+                        alert('Assignment Required: Tractor must be assigned before marking as Delivered.');
+                        return;
+                      }
                       if(window.confirm('Confirm Delivery Completion?')) {
                         try {
                            const tripRef = doc(db, 'trips', activeTrip.id!);
@@ -1359,13 +1481,18 @@ export function DriverApp() {
       {/* QR Modal */}
       <AnimatePresence>
          {showQR && (
-           <div className="fixed inset-0 bg-slate-950/95 z-[110] flex items-center justify-center p-6" onClick={() => setShowQR(false)}>
-              <div className="bg-white p-8 rounded-[3rem] w-full max-w-sm text-center" onClick={e => e.stopPropagation()}>
-                <h3 className="text-slate-900 font-black text-2xl mb-2">Payment QR</h3>
-                <p className="text-slate-500 text-sm font-bold mb-6 uppercase tracking-widest">Scan to pay TankerWala</p>
+          <div className="fixed inset-0 bg-slate-950/95 z-[110] flex items-center justify-center p-6" onClick={() => setShowQR(false)}>
+            <div className="bg-white p-8 rounded-[3rem] w-full max-w-sm text-center relative overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="absolute top-0 right-0 p-8 opacity-5 scale-150 pointer-events-none">
+                <Logo size={120} />
+              </div>
+              <div className="mb-6 flex flex-col items-center gap-2">
+                <Logo size={48} />
+                <h3 className="text-slate-900 font-black text-2xl tracking-tight">Payment QR</h3>
+                <p className="text-slate-500 text-[10px] font-bold mb-0 uppercase tracking-widest leading-none">TankerWala Powered by Rajhans</p>
+              </div>
                 <div className="bg-slate-50 p-6 rounded-3xl mb-8 flex items-center justify-center border-2 border-slate-100">
-                   {/* Fallback to simple icon since QRCodeSVG needs import */}
-                   <div className="w-52 flex-col bg-slate-50 flex items-center justify-center">
+                   <div className="w-52 flex flex-col items-center justify-center">
                     <QRCodeSVG 
                       value={`upi://pay?pa=rajha94133@barodampay&pn=TankerWala%20Powered%20by%20Rajhans&am=${qrAmount}&cu=INR&tn=Token%20${qrBillNumber}`}
                       size={200}
@@ -1388,8 +1515,13 @@ export function DriverApp() {
            <div className="fixed inset-0 bg-slate-950/95 z-[110] flex items-center justify-center p-6 overflow-y-auto" onClick={() => setShowBill(false)}>
               <div className="bg-white p-8 rounded-[3rem] w-full max-w-sm text-slate-950 font-mono text-[10px]" onClick={e => e.stopPropagation()}>
                 <div className="text-center border-b-2 border-dashed border-slate-200 pb-4 mb-4">
-                  <h3 className="text-sm font-black uppercase">TankerWala Powered by Rajhans</h3>
-                  <p>Trip Token #{(activeTrip?.billNumber || '0000')}</p>
+                  <div className="flex justify-center mb-4 scale-75">
+                    <Logo size={40} />
+                  </div>
+                  <h3 className="text-sm font-black uppercase tracking-tight pb-3">
+                    Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[8px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
+                  </h3>
+                  <p className="mt-4">Trip Token #{(activeTrip?.billNumber || '0000')}</p>
                 </div>
                 
                 <div className="space-y-1 mb-4">
