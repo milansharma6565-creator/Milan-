@@ -24,16 +24,24 @@ import {
   Minus,
   RefreshCw,
   Droplets,
+  Droplet,
   Fuel,
   MapPin,
   ArrowRight,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   ShieldCheck,
-  BellRing
+  BellRing,
+  Star,
+  FlaskConical as Flask,
+  Package,
+  HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { formatCurrency, PAYMENT_MODES, generateBillNumber, getPublicAppUrl, copyToClipboard } from '../constants';
-import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay } from 'date-fns';
+import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isToday, subMonths, addMonths } from 'date-fns';
 import { generatePDF } from '../lib/pdfUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
@@ -87,7 +95,7 @@ function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void
        >
          <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-2 bg-slate-50 rounded-full z-10"><X size={20} /></button>
          <h2 className="text-xl font-display font-bold text-slate-900 mb-1">Customer Support</h2>
-         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-4 border-b border-slate-100 pb-4">Token #{bill.billNumber} • {bill.customerName}</p>
+         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-4 border-b border-slate-100 pb-4">Bill #{bill.billNumber} • {bill.customerName}</p>
          
          <div className="flex-1 overflow-y-auto mb-4 space-y-4 pr-1">
            {(chatData?.messages || []).map((m: any, i: number) => (
@@ -123,15 +131,18 @@ function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void
 
 import { Logo } from './Logo';
 
-export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: { 
+export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, setActiveTab, currentFranchise }: { 
   franchiseId?: string, 
   isSuperAdmin?: boolean,
-  commissionPercentage?: number
+  commissionPercentage?: number,
+  setActiveTab: (tab: any) => void,
+  currentFranchise?: any
 }) {
   const todayStart = startOfDay(new Date());
   
   const [bills, setBills] = useState<Bill[]>([]);
   const [bookingRequests, setBookingRequests] = useState<any[]>([]);
+  const [feedbacks, setFeedbacks] = useState<any[]>([]);
   const [pendingDieselRequests, setPendingDieselRequests] = useState<any[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -196,8 +207,28 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
       };
     }).filter(d => d.tripCount > 0).sort((a, b) => b.tripCount - a.tripCount);
 
-    const busyDrivers = new Set(bills.filter(b => ['Assigned', 'Filling'].includes(b.status)).map(b => b.driverId));
-    const busyTractors = new Set(bills.filter(b => ['Assigned', 'Filling'].includes(b.status)).map(b => b.tractorId));
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const oneDayInSecs = 24 * 60 * 60; // 24 hours
+
+    const busyDrivers = new Set(
+      bills
+        .filter(b => {
+          const createdAtSecs = b.createdAt?.seconds || (b.createdAt?.toDate ? b.createdAt.toDate().getTime() / 1000 : null) || (b.date ? new Date(b.date).getTime() / 1000 : null) || nowSecs;
+          const ageSecs = nowSecs - createdAtSecs;
+          return ['Assigned', 'Active', 'Filling', 'On the way', 'Reached'].includes(b.status || '') && ageSecs <= oneDayInSecs;
+        })
+        .map(b => b.driverId)
+    );
+
+    const busyTractors = new Set(
+      bills
+        .filter(b => {
+          const createdAtSecs = b.createdAt?.seconds || (b.createdAt?.toDate ? b.createdAt.toDate().getTime() / 1000 : null) || (b.date ? new Date(b.date).getTime() / 1000 : null) || nowSecs;
+          const ageSecs = nowSecs - createdAtSecs;
+          return ['Assigned', 'Active', 'Filling', 'On the way', 'Reached'].includes(b.status || '') && ageSecs <= oneDayInSecs;
+        })
+        .map(b => b.tractorId)
+    );
 
     let commissionTotal = 0;
     if (franchiseId && commissionPercentage) {
@@ -217,6 +248,52 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
       return timeB - timeA;
     });
 
+    // Calculate total water volume dispatched (in Liters) for bills that are completed ('Delivered')
+    const getLiters = (b: any) => {
+      let liters = 0;
+      const cat = b.category || '';
+      const sizeStr = String(b.tankerSize || b.bottleSize || '').toLowerCase();
+      
+      if (cat.includes('TANKER')) {
+        const qty = b.quantity || 1;
+        if (sizeStr.includes('small') || sizeStr.includes('2500')) liters = 2500 * qty;
+        else if (sizeStr.includes('medium') || sizeStr.includes('3500')) liters = 3500 * qty;
+        else if (sizeStr.includes('large') || sizeStr.includes('double') || sizeStr.includes('5000')) liters = 5000 * qty;
+        else liters = 4000 * qty; // Default standard tanker is 4000 Liters
+      } else if (cat.includes('CAN')) {
+        liters = 20 * (b.quantity || 1);
+      } else if (cat.includes('BOTTLE')) {
+        const qty = b.quantity || 1;
+        if (sizeStr.includes('500ml')) liters = 0.5 * qty * 12; // Assuming 12 bottle box
+        else if (sizeStr.includes('2l')) liters = 2 * qty * 6; // Assuming 6 bottle box
+        else liters = 1 * qty * 12; // Default 1L box is 12L
+      }
+      return liters;
+    };
+
+    const todayWaterLiters = todayBillsList
+      .filter(b => b.status === 'Delivered')
+      .reduce((sum, b) => sum + getLiters(b), 0);
+
+    const monthStartObj = new Date();
+    monthStartObj.setDate(1);
+    monthStartObj.setHours(0, 0, 0, 0);
+
+    const monthBillsList = bills.filter(b => {
+      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+      return bDate >= monthStartObj && b.status === 'Delivered';
+    });
+
+    const monthWaterLiters = monthBillsList.reduce((sum, b) => sum + getLiters(b), 0);
+
+    const todayTankerTrips = todayBillsList
+      .filter(b => b.status === 'Delivered' && (b.category || '').includes('TANKER'))
+      .reduce((sum, b) => sum + (b.quantity || 1), 0);
+
+    const monthTankerTrips = monthBillsList
+      .filter(b => b.status === 'Delivered' && (b.category || '').includes('TANKER'))
+      .reduce((sum, b) => sum + (b.quantity || 1), 0);
+
     return {
       todayCollection,
       totalPending,
@@ -232,6 +309,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
       busyTractors,
       driverStats: driverStatsList,
       commissionTotal,
+      todayWaterLiters,
+      monthWaterLiters,
+      todayTankerTrips,
+      monthTankerTrips,
       recentBills: allBillsSorted.slice(0, 10)
     };
   }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts, franchiseId, commissionPercentage]);
@@ -275,6 +356,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
     date: new Date().toISOString().split('T')[0]
   });
   const [isSavingQuickVch, setIsSavingQuickVch] = useState(false);
+  const [activeCanFilter, setActiveCanFilter] = useState<'Monthly' | 'Packaged' | 'On-Call'>('Monthly');
+  const [selectedMonthlyCust, setSelectedMonthlyCust] = useState<Customer | null>(null);
   const [smileyMood, setSmileyMood] = useState<'normal' | 'happy' | 'sad'>('normal');
   const [eatingState, setEatingState] = useState<'walking' | 'sitting' | 'eating' | 'idle'>('idle');
   const [removedDigits, setRemovedDigits] = useState<number[]>([]);
@@ -327,18 +410,20 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
     
     // Base Queries
     let billsQ = query(collection(db, 'bills'), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
-    let requestsQ = query(collection(db, 'bookingRequests'), where('status', '==', 'Pending'), orderBy('requestedAt', 'desc'));
+    let requestsQ = query(collection(db, 'bookingRequests'), where('status', '==', 'Pending'));
     let dieselQ = query(collection(db, 'dieselRequests'), where('status', '==', 'Pending'));
+    let feedbacksQ = query(collection(db, 'feedbacks'));
     let customersQ = query(collection(db, 'customers'));
     let driversQ = query(collection(db, 'drivers'));
     let tractorsQ = query(collection(db, 'tractors'));
     let accountsQ = query(collection(db, 'accounts'));
 
-    // Apply Franchise Filter if NOT Super Admin
-    if (!isSuperAdmin && franchiseId) {
+    // Apply Franchise Filter if present
+    if (franchiseId) {
       billsQ = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
-      requestsQ = query(collection(db, 'bookingRequests'), where('franchiseId', '==', franchiseId), where('status', '==', 'Pending'), orderBy('requestedAt', 'desc'));
+      requestsQ = query(collection(db, 'bookingRequests'), where('franchiseId', '==', franchiseId), where('status', '==', 'Pending'));
       dieselQ = query(collection(db, 'dieselRequests'), where('franchiseId', '==', franchiseId), where('status', '==', 'Pending'));
+      feedbacksQ = query(collection(db, 'feedbacks'), where('franchiseId', '==', franchiseId));
       customersQ = query(collection(db, 'customers'), where('franchiseId', '==', franchiseId));
       driversQ = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
       tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', franchiseId));
@@ -349,8 +434,26 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'bills-dashboard')
     );
+    const unsubFeedbacks = onSnapshot(feedbacksQ,
+      (snapshot) => {
+        const sorted = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a: any, b: any) => {
+          const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          return timeB - timeA;
+        });
+        setFeedbacks(sorted.slice(0, 50));
+      },
+      (error) => console.log('Feedbacks err:', error?.message || error)
+    );
     const unsubRequests = onSnapshot(requestsQ,
-      (snapshot) => setBookingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (snapshot) => {
+        const sorted = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a: any, b: any) => {
+          const timeA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : 0;
+          const timeB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : 0;
+          return timeB - timeA;
+        });
+        setBookingRequests(sorted);
+      },
       (error) => console.log('Requests err:', error?.message || error)
     );
     const unsubDiesel = onSnapshot(dieselQ,
@@ -385,6 +488,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
 
     return () => {
       unsubBills();
+      unsubFeedbacks();
       unsubRequests();
       unsubDiesel();
       unsubCustomers();
@@ -397,31 +501,63 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
   const filteredTokenBills = useMemo(() => {
     let baseBills = [...bills];
     
-    // Sort logic: Pending on top, then time descending
+    // Sort logic: Pending on top, then time descending safely with fallbacks
     baseBills.sort((a, b) => {
       if (a.status === 'Pending' && b.status !== 'Pending') return -1;
       if (a.status !== 'Pending' && b.status === 'Pending') return 1;
-      const timeA = a.createdAt?.seconds || 0;
-      const timeB = b.createdAt?.seconds || 0;
+      
+      const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : (a.date ? new Date(a.date).getTime() : Date.now()));
+      const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : (b.date ? new Date(b.date).getTime() : Date.now()));
       return timeB - timeA;
     });
 
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const yesterdayStr = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+
     if (tokenFilter === 'Today') {
-      const today = startOfDay(new Date());
       return baseBills.filter(b => {
+        // ALWAYS show active/assigned/pending trips even if from previous days
+        if (['Pending', 'Assigned', 'Filling', 'On the way', 'Reached'].includes(b.status!)) return true;
+        
+        // Match today's date string
+        if (b.date === todayStr) return true;
+
+        if (b.createdAt) {
+          try {
+            const cDate = b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt.seconds * 1000);
+            if (format(cDate, 'yyyy-MM-dd') === todayStr) return true;
+          } catch (e) {}
+        }
+        
         const bDate = b.date instanceof Date ? b.date : new Date(b.date);
-        return bDate >= today;
+        return format(bDate, 'yyyy-MM-dd') === todayStr;
       });
     } else if (tokenFilter === 'Yesterday') {
-      const yesterday = startOfDay(subDays(new Date(), 1));
-      const today = startOfDay(new Date());
       return baseBills.filter(b => {
+        if (b.date === yesterdayStr) return true;
+
+        if (b.createdAt) {
+          try {
+            const cDate = b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt.seconds * 1000);
+            if (format(cDate, 'yyyy-MM-dd') === yesterdayStr) return true;
+          } catch (e) {}
+        }
+
         const bDate = b.date instanceof Date ? b.date : new Date(b.date);
-        return bDate >= yesterday && bDate < today;
+        return format(bDate, 'yyyy-MM-dd') === yesterdayStr;
       });
     } else {
       // Custom Date
       return baseBills.filter(b => {
+        if (b.date === selectedTokenDate) return true;
+        
+        if (b.createdAt) {
+          try {
+            const cDate = b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt.seconds * 1000);
+            if (format(cDate, 'yyyy-MM-dd') === selectedTokenDate) return true;
+          } catch (e) {}
+        }
+
         const bDate = b.date instanceof Date ? b.date : new Date(b.date);
         return format(bDate, 'yyyy-MM-dd') === selectedTokenDate;
       });
@@ -545,11 +681,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
 
   const [isWiping, setIsWiping] = useState(false);
   const isAdmin = isSuperAdmin || !!franchiseId;
-  const isMilan = isSuperAdmin;
+  const isMilan = isSuperAdmin || (customers.length > 0 && bills.length > 0 && franchiseId === 'legacy-rajhans');
+  // Allow Rajhans main account also for system maintenance
+  const isSystemAdmin = isMilan || (customers.length > 0 && currentFranchise?.email === 'rajhanssikar@gmail.com');
 
   const handleMasterReset = async () => {
-    if (!isMilan) {
-      alert("SECURITY ALERT: This operation is restricted to Milan Sharma only.");
+    if (!isSystemAdmin) {
+      alert("SECURITY ALERT: This operation is restricted to System Administrators.");
       return;
     }
 
@@ -643,6 +781,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
       let bankAccId = bankSnap.docs[0]?.id;
       let customerAccId = customerSnap.docs[0]?.id;
 
+      // FETCH TRIPS TO SYNC OUTSIDE TRANSACTION
+      const qTrips = query(collection(db, 'trips'), where('billId', '==', editingBill.id));
+      const tripSnapToSync = await getDocs(qTrips);
+
       await runTransaction(db, async (transaction) => {
         const billRef = doc(db, 'bills', editingBill.id);
         const customerRef = doc(db, 'customers', editingBill.customerId);
@@ -684,7 +826,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           if (oldPaymentMode === 'Cash' && cashAccDoc?.exists()) {
             transaction.update(cashAccRef!, { currentBalance: (cashAccDoc.data().currentBalance || 0) - amount });
           } else if ((oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') && bankAccDoc?.exists()) {
-            transaction.update(bankAccRef!, { currentBalance: (bankAccDoc.data().currentBalance || 0) - amount });
+            transaction.update(bankAccRef!, { currentBalance: (bankAccRef!.id && bankAccDoc.data().currentBalance || 0) - amount });
           } else if (oldPaymentMode === 'Pending' && customerAccDoc?.exists()) {
             transaction.update(customerAccRef!, { currentBalance: (customerAccDoc.data().currentBalance || 0) - amount });
           }
@@ -708,6 +850,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           isSettled: false,
           updatedAt: serverTimestamp()
         });
+
+        // Sync with Trips
+        if (!tripSnapToSync.empty) {
+          tripSnapToSync.forEach(tDoc => {
+            transaction.update(doc(db, 'trips', tDoc.id), { status, updatedAt: serverTimestamp() });
+          });
+        }
       });
 
       const updated = await getDoc(doc(db, 'bills', editingBill.id));
@@ -728,14 +877,15 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
 
     try {
       // 1. Fetch required data outside transaction
-      const [incomeSnap, cashSnap, bankSnap, debtorsGroupSnap, customerSnap, assetsGroupSnap, incomeGroupSnap] = await Promise.all([
+      const [incomeSnap, cashSnap, bankSnap, debtorsGroupSnap, customerSnap, assetsGroupSnap, incomeGroupSnap, tripSnapToSync] = await Promise.all([
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
         getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Sundry Debtors'))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName))),
         getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Incomes')))
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Incomes'))),
+        getDocs(query(collection(db, 'trips'), where('billId', '==', editingBill.id)))
       ]);
 
       let incomeAccId = incomeSnap.docs[0]?.id;
@@ -878,6 +1028,17 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           updatedAt: serverTimestamp()
         });
 
+        // Sync with Trips
+        if (tripSnapToSync && !tripSnapToSync.empty) {
+          tripSnapToSync.forEach(tDoc => {
+            transaction.update(doc(db, 'trips', tDoc.id), { 
+              status: 'Delivered', 
+              completedAt: serverTimestamp(),
+              updatedAt: serverTimestamp() 
+            });
+          });
+        }
+
         // Update Customer Ledger (pendingAmount field)
         const currentPending = custDoc.exists() ? (custDoc.data().pendingAmount || 0) : 0;
         const adjustedPending = (wasDelivered && oldPaymentMode === 'Pending') ? currentPending - amount : currentPending;
@@ -899,6 +1060,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           ],
           narration: `Trip #${oldBill.billNumber} - ${oldBill.customerName} (${oldBill.tankerSize})`,
           totalAmount: amount,
+          franchiseId: oldBill.franchiseId || franchiseId || null,
           createdAt: oldBill.createdAt || serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -917,8 +1079,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
               { accountId: debitAccId, accountName: debitAccName, amount: amount, type: 'Dr' },
               { accountId: finalCustomerAccId, accountName: oldBill.customerName, amount: amount, type: 'Cr' }
             ],
-            narration: `Payment for Token #${oldBill.billNumber} via ${mode}`,
+            narration: `Payment for Bill #${oldBill.billNumber} via ${mode}`,
             totalAmount: amount,
+            franchiseId: oldBill.franchiseId || franchiseId || null,
             createdAt: serverTimestamp()
           });
         } else {
@@ -1059,7 +1222,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
                 { accountId: debitAccId, accountName: debitAccName, amount: amount, type: 'Dr' },
                 { accountId: customerAccId, accountName: billData.customerName, amount: amount, type: 'Cr' }
               ],
-              narration: `Payment mode update for Token #${billData.billNumber} to ${mode}`,
+              narration: `Payment mode update for Bill #${billData.billNumber} to ${mode}`,
               totalAmount: amount,
               createdAt: serverTimestamp()
             });
@@ -1091,12 +1254,36 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
   const handleDriverUpdate = async (driver: Driver) => {
     if (editingBill?.id) {
       try {
-        // Check if driver is already on an active trip
+        // Check if driver is already on an active trip (self-healing busy check)
         const qTrp = query(collection(db, 'trips'), where('driverId', '==', driver.id), where('status', 'in', ['Active', 'Filling', 'On the way', 'Reached']));
         const snap = await getDocs(qTrp);
         if (!snap.empty) {
-           alert('Driver is already on an active trip! Please wait until they finish.');
-           return;
+          let actuallyBusy = false;
+          for (const tDoc of snap.docs) {
+            const tData = tDoc.data();
+            if (tData.billId) {
+              const bRef = doc(db, 'bills', tData.billId);
+              const bSnap = await getDoc(bRef);
+              if (bSnap.exists()) {
+                const bStatus = bSnap.data().status;
+                if (['Delivered', 'Cancelled'].includes(bStatus)) {
+                  // Associated bill is delivered/cancelled, free driver self-healingly
+                  await updateDoc(doc(db, 'trips', tDoc.id), { status: bStatus, completedAt: serverTimestamp() });
+                } else {
+                  actuallyBusy = true;
+                }
+              } else {
+                // Bill doesn't exist, free driver
+                await updateDoc(doc(db, 'trips', tDoc.id), { status: 'Delivered', completedAt: serverTimestamp() });
+              }
+            } else {
+              actuallyBusy = true;
+            }
+          }
+          if (actuallyBusy) {
+            alert('Driver Busy: Currently on an active trip.');
+            return;
+          }
         }
 
         await updateDoc(doc(db, 'bills', editingBill.id), { 
@@ -1115,6 +1302,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           await updateDoc(doc(db, 'trips', existingSnap.docs[0].id), {
             driverId: driver.id,
             driverName: driver.name,
+            tractorId: editingBill.tractorId || 'T-01',
+            remarks: editingBill.remarks || '',
             status: 'Active',
             updatedAt: serverTimestamp()
           });
@@ -1124,12 +1313,16 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
             billNumber: editingBill.billNumber,
             driverId: driver.id,
             driverName: driver.name,
+            tractorId: editingBill.tractorId || 'T-01',
             customerName: editingBill.customerName,
             customerMobile: editingBill.customerMobile,
             siteLocation: editingBill.customerAddress,
             quantity: editingBill.quantity,
             tankerSize: editingBill.tankerSize,
+            remarks: editingBill.remarks || '',
             status: 'Active',
+            category: editingBill.category || 'TANKER',
+            franchiseId: editingBill.franchiseId || 'legacy-rajhans',
             createdAt: serverTimestamp()
           });
         }
@@ -1149,6 +1342,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           tractorId,
           updatedAt: serverTimestamp()
         });
+
+        // Sync with Trips
+        const qTrips = query(collection(db, 'trips'), where('billId', '==', editingBill.id));
+        const tripSnap = await getDocs(qTrips);
+        if (!tripSnap.empty) {
+          await updateDoc(doc(db, 'trips', tripSnap.docs[0].id), { tractorId, updatedAt: serverTimestamp() });
+        }
         const updated = await getDoc(doc(db, 'bills', editingBill.id));
         setEditingBill({ id: updated.id, ...updated.data() });
       } catch (error) {
@@ -1230,6 +1430,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
         paymentMode: 'Pending',
         remarks: request.remarks || originalData.remarks || '',
         createdAt: serverTimestamp(),
+        franchiseId: request.franchiseId || originalData.franchiseId || franchiseId || null
       };
 
       try {
@@ -1284,6 +1485,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
       let bankAccId = bankSnap.docs[0]?.id;
       let customerAccId = customerAccSnap.docs[0]?.id;
 
+      // FETCH TRIPS TO DELETE OUTSIDE TRANSACTION
+      const qTrips = query(collection(db, 'trips'), where('billId', '==', id));
+      const tripSnap = await getDocs(qTrips);
+
       await runTransaction(db, async (transaction) => {
         const billRef = doc(db, 'bills', id);
         const customerRef = doc(db, 'customers', billData.customerId);
@@ -1334,6 +1539,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           transaction.delete(doc(db, 'vouchers', `VCH-${id}-RECPT`));
         }
 
+        // Delete associated trips fetched outside
+        tripSnap.forEach(tDoc => {
+          transaction.delete(doc(db, 'trips', tDoc.id));
+        });
+
         // Delete the bill
         transaction.delete(billRef);
       });
@@ -1381,7 +1591,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           canShareFile = navigator.canShare({ files: [file] });
         }
       } catch (canShareErr) {
-        console.warn('canShare check failed', canShareErr);
+        console.warn('canShare check failed', canShareErr instanceof Error ? canShareErr.message : String(canShareErr));
         canShareFile = false;
       }
 
@@ -1390,13 +1600,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
         try {
           await navigator.share({
             files: [file],
-            title: `Token #${bill.billNumber}`,
+            title: `Bill #${bill.billNumber}`,
             text: `Trip Token from TankerWala Powered by Rajhans. Target: ${target.toUpperCase()}`
           });
           return;
         } catch (shareErr: any) {
           if (shareErr.name === 'AbortError') return;
-          console.warn('Web Share failed, trying fallback:', shareErr);
+          console.warn('Web Share failed, trying fallback:', shareErr instanceof Error ? shareErr.message : String(shareErr));
         }
       }
 
@@ -1424,7 +1634,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           link.click();
         }
       } catch (err: any) {
-        console.warn('Clipboard share failed', err?.message || err);
+        console.warn('Clipboard share failed', err instanceof Error ? err.message : String(err));
         const link = document.createElement('a');
         link.href = dataUrl;
         link.download = fileName;
@@ -1566,13 +1776,90 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
         )}
       </AnimatePresence>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        {/* Monthly Can Monitoring Summary */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="md:col-span-2 lg:col-span-3 bg-white p-8 rounded-[2.5rem] border border-blue-50 shadow-sm"
+        >
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+            <div className="flex items-center gap-4">
+               <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-100">
+                  <Calendar size={32} />
+               </div>
+               <div>
+                  <h2 className="text-2xl font-black text-slate-900 leading-tight">Monthly Can Monitoring</h2>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Subscriber Delivery Tracking</p>
+               </div>
+            </div>
+            <div className="flex gap-2">
+               <div className="bg-slate-50 p-1.5 rounded-2xl flex border border-slate-100 shadow-inner">
+                  <button 
+                    onClick={() => setActiveCanFilter('Monthly')}
+                    className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'Monthly' ? 'bg-white text-blue-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
+                  >Monthly</button>
+                  <button 
+                    onClick={() => setActiveCanFilter('Packaged')}
+                    className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'Packaged' ? 'bg-white text-green-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
+                  >Packaged Water</button>
+                  <button 
+                    onClick={() => setActiveCanFilter('On-Call')}
+                    className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'On-Call' ? 'bg-white text-orange-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
+                  >On-Call Cans</button>
+               </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+             {(() => {
+                const monthlyCusts = customers.filter(c => c.notes?.toLowerCase().includes('monthly') || bills.some(b => b.customerId === c.id && b.category === 'MONTHLY_TANKER'));
+                
+                const filteredList = activeCanFilter === 'Monthly' 
+                  ? monthlyCusts 
+                  : activeCanFilter === 'Packaged'
+                    ? customers.filter(c => bills.some(b => b.customerId === c.id && (b.category === 'BOTTLE' || b.bottleSize)))
+                    : customers.filter(c => !monthlyCusts.includes(c) && bills.some(b => b.customerId === c.id && b.category === 'CAN'));
+
+                if (filteredList.length === 0) {
+                  return <div className="col-span-4 py-12 text-center text-slate-400 font-bold text-[10px] uppercase tracking-widest border-2 border-dashed border-slate-100 rounded-3xl">No {activeCanFilter} customers found</div>
+                }
+
+                return filteredList.map(cust => (
+                  <motion.div
+                    key={cust.id}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setSelectedMonthlyCust(cust)}
+                    className="p-5 rounded-[2rem] border border-slate-100 bg-white hover:border-blue-200 transition-all cursor-pointer shadow-sm hover:shadow-xl group"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                       <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
+                          <Droplets size={20} />
+                       </div>
+                       <div className="bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1 rounded-md">Active</div>
+                    </div>
+                    <h4 className="font-bold text-slate-900 group-hover:text-blue-600 truncate">{cust.name}</h4>
+                    <p className="text-[10px] text-slate-400 font-bold mb-3">{cust.mobile}</p>
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-50">
+                       <div className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Deliveries (MTD)</div>
+                       <div className="text-lg font-black text-slate-800">
+                          {bills.filter(b => b.customerId === cust.id && b.status === 'Delivered' && b.date >= startOfMonth(new Date())).length}
+                       </div>
+                    </div>
+                  </motion.div>
+                ));
+             })()}
+          </div>
+        </motion.div>
+
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
-          className="relative bg-white p-5 rounded-[2.5rem] text-slate-900 shadow-2xl border border-white/80 overflow-hidden group ring-1 ring-white/50 min-h-[200px]"
+          whileHover={{ y: -6, scale: 1.02 }}
+          transition={{ type: "spring", stiffness: 300, damping: 15 }}
+          className="relative bg-white p-6 rounded-[2.5rem] text-slate-900 border-t border-x border-slate-100 border-b-[8px] border-b-slate-200/90 shadow-[0_20px_40px_rgba(34,197,94,0.08),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden group min-h-[200px]"
           style={{
-            background: "linear-gradient(135deg, #ffffff 0%, #f0f2f5 100%)",
-            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.08), inset 0 0 0 1px rgba(255,255,255,0.4)"
+            background: "linear-gradient(135deg, #ffffff 0%, #f4f6f8 100%)"
           }}
         >
           {/* Mirror Shine Effect */}
@@ -1685,8 +1972,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.1 }}
-          className="relative bg-white p-5 rounded-[2.5rem] border border-orange-100 shadow-xl overflow-hidden group min-h-[200px]"
+          whileHover={{ y: -6, scale: 1.02 }}
+          transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.1 }}
+          onClick={() => setActiveTab('customers')}
+          className="relative bg-white p-6 rounded-[2.5rem] border-t border-x border-orange-50 border-b-[8px] border-b-orange-200/60 shadow-[0_20px_40px_rgba(249,115,22,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden group min-h-[200px] cursor-pointer"
+          style={{
+            background: "linear-gradient(135deg, #ffffff 0%, #fffbf7 100%)"
+          }}
         >
           {/* Digits Eating Animation Layer */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
@@ -1745,8 +2037,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           <motion.div 
             initial={{ opacity: 0, scale: 0.9 }} 
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.2 }}
-            className="relative bg-white p-5 rounded-[2.5rem] border border-blue-100 shadow-xl overflow-hidden group min-h-[200px]"
+            whileHover={{ y: -6, scale: 1.02 }}
+            transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 }}
+            className="relative bg-white p-6 rounded-[2.5rem] border-t border-x border-blue-50 border-b-[8px] border-b-blue-200/60 shadow-[0_20px_40px_rgba(59,130,246,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden group min-h-[200px]"
+            style={{
+              background: "linear-gradient(135deg, #ffffff 0%, #f7faff 100%)"
+            }}
           >
             <div className="absolute inset-0 pointer-events-none opacity-5">
               <div className="absolute -right-4 -bottom-4 animate-spin-slow">
@@ -1776,8 +2072,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-white p-5 rounded-[2.5rem] border border-blue-50 shadow-xl overflow-hidden min-h-[180px] relative"
+          whileHover={{ y: -6, scale: 1.02 }}
+          transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 }}
+          className="bg-white p-6 rounded-[2.5rem] border-t border-x border-indigo-50 border-b-[8px] border-b-indigo-200/50 shadow-[0_20px_40px_rgba(99,102,241,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative"
+          style={{
+            background: "linear-gradient(135deg, #ffffff 0%, #fbfbfe 100%)"
+          }}
         >
           {/* Dynamic Hourly Bank Animation Layer */}
           <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
@@ -1851,8 +2151,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white p-5 rounded-[2.5rem] border border-blue-50 shadow-xl overflow-hidden min-h-[180px] relative"
+          whileHover={{ y: -6, scale: 1.02 }}
+          transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.3 }}
+          className="bg-white p-6 rounded-[2.5rem] border-t border-x border-sky-50 border-b-[8px] border-b-sky-200/50 shadow-[0_20px_40px_rgba(14,165,233,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative"
+          style={{
+            background: "linear-gradient(135deg, #ffffff 0%, #f6fcff 100%)"
+          }}
         >
           {/* Dynamic Hourly Bank 2 Animation Layer */}
           <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
@@ -1937,22 +2241,56 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           </div>
           <h3 className="text-xl font-display font-bold mb-6">Smart Business Insights</h3>
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Auto-Accounting Status */}
-            <div className="bg-white/5 border border-white/10 p-4 rounded-3xl backdrop-blur-sm">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center">
-                  <ShieldCheck size={20} />
+            <div className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold">Auto-Ledger Active</div>
+                    <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Billing & Sync</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm font-bold">Auto-Ledger Active</div>
-                  <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Billing & Sync</div>
+                <div className="text-xs text-slate-400 leading-relaxed">
+                  Tokens are automatically posted to accounting ledger in real-time. No manual entry needed for sales.
                 </div>
-              </div>
-              <div className="text-xs text-slate-400 leading-relaxed">
-                Tokens are automatically posted to accounting. No manual entry needed for sales.
               </div>
             </div>
+
+             {/* Daily Tanker Dispatches Card */}
+             <div className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-sm flex flex-col justify-between relative overflow-hidden group">
+               <div className="absolute -right-4 -bottom-4 opacity-5 text-sky-500 group-hover:scale-110 transition-transform">
+                 <Truck size={80} />
+               </div>
+               <div className="relative z-10">
+                 <div className="flex items-center gap-3 mb-3">
+                   <div className="w-10 h-10 bg-sky-500/20 text-sky-450 rounded-xl flex items-center justify-center">
+                     <Truck size={20} className="text-sky-400" />
+                   </div>
+                   <div>
+                     <div className="text-xs text-slate-400 uppercase font-bold tracking-widest">Tanker Trips</div>
+                     <div className="text-sm font-bold">Dispatch Stats</div>
+                   </div>
+                 </div>
+                 <div className="space-y-2 mt-4">
+                   <div className="flex items-baseline justify-between">
+                     <span className="text-xs text-slate-400">Today:</span>
+                     <span className="text-lg font-black text-sky-400">
+                       {stats.todayTankerTrips} {stats.todayTankerTrips === 1 ? 'Trip' : 'Trips'}
+                     </span>
+                   </div>
+                   <div className="flex items-baseline justify-between border-t border-white/10 pt-2">
+                     <span className="text-xs text-slate-400">This Month (MTD):</span>
+                     <span className="text-lg font-black text-white">
+                       {stats.monthTankerTrips} {stats.monthTankerTrips === 1 ? 'Trip' : 'Trips'}
+                     </span>
+                   </div>
+                 </div>
+               </div>
+             </div>
 
             {/* Rebooking Suggestion */}
             {(() => {
@@ -1963,22 +2301,24 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
               if (suggestions.length === 0) return null;
               
               return suggestions.map(c => (
-                <div key={c.id} className="bg-white/5 border border-white/10 p-4 rounded-3xl backdrop-blur-sm border-l-orange-500 border-l-4">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 bg-orange-500/20 text-orange-400 rounded-xl flex items-center justify-center">
-                      <BellRing size={20} />
+                <div key={c.id} className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-sm border-l-orange-500 border-l-4 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 bg-orange-500/20 text-orange-400 rounded-xl flex items-center justify-center">
+                        <BellRing size={20} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold">High Likelihood Rebook</div>
+                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Insight</div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-sm font-bold">High Likelihood Rebook</div>
-                      <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Insight</div>
+                    <div className="text-xs text-slate-400 leading-relaxed mb-3">
+                      <span className="text-white font-bold">{c.name}</span> hasn't ordered in 5 days. Usually orders every 3 days.
                     </div>
-                  </div>
-                  <div className="text-xs text-slate-400 leading-relaxed mb-3">
-                    <span className="text-white font-bold">{c.name}</span> hasn't ordered in 5 days. Usually orders every 3 days.
                   </div>
                   <button 
                     onClick={() => window.open(`https://wa.me/91${c.mobile}?text=${encodeURIComponent(`Hi ${c.name}, hope you're doing well! Need a water tanker refilled? - TankerWala Powered by Rajhans`)}`, '_blank')}
-                    className="w-full py-2 bg-orange-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-orange-700 transition-all"
+                    className="w-full py-2 bg-orange-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-orange-700 transition-all mt-3"
                   >
                     Send Friendly Nudge
                   </button>
@@ -1996,10 +2336,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           </div>
           <div>
             <div className="text-xs text-slate-400 font-medium">Delivered</div>
-            <div className="font-bold text-slate-800">{stats.deliveredCount} Tokens</div>
+            <div className="font-bold text-slate-800">{stats.deliveredCount} Bills</div>
           </div>
         </div>
-        <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-50 shadow-sm">
+        <div 
+          onClick={() => setActiveTab('customers')}
+          className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-50 shadow-sm cursor-pointer hover:border-purple-200 transition-all active:scale-95"
+        >
           <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
             <Users size={20} />
           </div>
@@ -2127,11 +2470,43 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
         )}
       </AnimatePresence>
 
+      {/* Feedbacks */}
+      {feedbacks.length > 0 && (
+        <div className="mb-8 space-y-3">
+          <h3 className="font-display font-bold text-lg flex items-center gap-2 px-2">
+            <MessageSquare size={20} className="text-yellow-500" />
+            Recent Customer Feedback
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {feedbacks.slice(0, 6).map((fb) => (
+              <div key={fb.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                <div className="flex justify-between items-start mb-2">
+                   <div>
+                     <div className="font-bold text-slate-900">{fb.customerName}</div>
+                     <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Bill #{fb.billNumber}</div>
+                   </div>
+                   <div className="flex items-center gap-0.5 text-yellow-400">
+                     {[...Array(5)].map((_, i) => (
+                       <Star key={i} size={14} className={i < (fb.rating || 5) ? 'fill-yellow-400 text-yellow-400' : 'text-slate-200'} />
+                     ))}
+                   </div>
+                </div>
+                {fb.comment && (
+                  <p className="text-sm text-slate-600 mt-2 bg-slate-50 p-2 rounded-lg italic">
+                    "{fb.comment}"
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Recent Tokens */}
       <div>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
           <div className="flex items-center gap-3">
-            <h3 className="font-display font-bold text-lg">Recent Tokens</h3>
+            <h3 className="font-display font-bold text-lg">Recent Bills</h3>
             <button 
               onClick={async (e) => {
                 e.stopPropagation();
@@ -2236,20 +2611,65 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
                 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={() => setEditingBill(bill)}
-                className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-50 shadow-sm relative overflow-hidden text-left cursor-pointer"
+                className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-50 shadow-sm relative overflow-hidden text-left cursor-pointer hover:border-slate-200 transition-all duration-200"
               >
+              <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${
+                bill.status === 'Cancelled' 
+                  ? 'bg-slate-300' 
+                  : bill.category === 'MONTHLY_CAN'
+                  ? 'bg-purple-600'
+                  : bill.category === 'CAN'
+                  ? 'bg-amber-500'
+                  : bill.category === 'BOTTLE'
+                  ? 'bg-emerald-500'
+                  : 'bg-sky-500'
+              }`} />
+              
               {!bill.isSettled && bill.status !== 'Cancelled' && (
-                <div className="absolute top-0 left-0 bottom-0 w-1 bg-orange-400" />
+                <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" title="Unsettled Payment" />
               )}
+
               <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs ${
-                  bill.status === 'Cancelled' ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-500'
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                  bill.status === 'Cancelled' 
+                    ? 'bg-red-50 text-red-500' 
+                    : bill.category === 'MONTHLY_CAN'
+                    ? 'bg-purple-50 text-purple-600 ring-2 ring-purple-100'
+                    : bill.category === 'CAN'
+                    ? 'bg-orange-50 text-orange-600'
+                    : bill.category === 'BOTTLE'
+                    ? 'bg-green-50 text-green-600'
+                    : 'bg-blue-50 text-blue-600'
                 }`}>
-                  {bill.tankerSize[0]}
+                  {(bill.category === 'CAN' || bill.category === 'MONTHLY_CAN') ? (
+                    <Flask size={18} />
+                  ) : bill.category === 'BOTTLE' ? (
+                    <Package size={18} />
+                  ) : (
+                    <Truck size={18} />
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate">
-                    {bill.customerName}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                      {bill.customerName}
+                    </span>
+                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                      bill.status === 'Cancelled'
+                        ? 'bg-slate-100 text-slate-500'
+                        : bill.category === 'MONTHLY_CAN'
+                        ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                        : bill.category === 'CAN'
+                        ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                        : bill.category === 'BOTTLE'
+                        ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                        : 'bg-sky-100 text-sky-700 border border-sky-200'
+                    }`}>
+                      {bill.category === 'MONTHLY_CAN' ? '🔄 Pass' :
+                       bill.category === 'CAN' ? '🏺 Can' :
+                       bill.category === 'BOTTLE' ? '📦 Packaged' : '🚛 Tanker'}
+                      {bill.category === 'BOTTLE' ? '' : bill.tankerSize ? ` • ${bill.tankerSize}` : ''}
+                    </span>
                   </div>
                   <div className="flex flex-col gap-1 mt-1">
                     <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium leading-none">
@@ -2510,7 +2930,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
                   <button 
                     onClick={() => editingBill && setDeleteConfirm({ id: editingBill.id, number: editingBill.billNumber })}
                     className="w-10 h-10 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors"
-                    title="Delete Token"
+                    title="Delete Bill"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -2536,7 +2956,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
                         </div>
                         <div>
                           <h4 className="font-bold text-green-900 leading-tight">Trip Delivered</h4>
-                          <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider">Finalize Payment - Token #{editingBill.billNumber}</p>
+                          <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider">Finalize Payment - Bill #{editingBill.billNumber}</p>
                         </div>
                       </div>
                       
@@ -2766,7 +3186,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
                     }}
                     className="col-span-2 material-btn bg-white border-2 border-slate-100 text-slate-900 flex items-center justify-center gap-2 py-4 shadow-sm"
                   >
-                    <Printer size={20} /> Print Token
+                    <Printer size={20} /> Print Bill
                   </button>
                 </div>
               </div>
@@ -2786,8 +3206,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
         isOpen={!!deleteConfirm}
         onClose={() => setDeleteConfirm(null)}
         onConfirm={() => deleteConfirm && handleDeleteToken(deleteConfirm.id)}
-        title="Delete Trip Token?"
-        message={`Are you sure you want to delete Token #${deleteConfirm?.number}? This will remove the record from history, but will NOT reverse manual payments or existing customer balance changes.`}
+        title="Delete Trip Bill?"
+        message={`Are you sure you want to delete Bill #${deleteConfirm?.number}? This will remove the record from history, but will NOT reverse manual payments or existing customer balance changes.`}
       />
 
       {/* Quick Voucher Modal */}
@@ -2929,7 +3349,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
       </AnimatePresence>
 
       {/* Admin System Maintenance */}
-      {isMilan && (
+      {isSystemAdmin && (
         <div className="mt-12 pt-8 border-t border-slate-200">
           <div className="bg-white p-6 rounded-[2.5rem] border border-red-100 shadow-sm">
             <h3 className="text-lg font-black text-slate-900 mb-2 flex items-center gap-2">
@@ -2972,6 +3392,153 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage }: {
           </div>
         </div>
       )}
+      {/* Monthly Can Monitoring Details Modal */}
+      <AnimatePresence>
+        {selectedMonthlyCust && (
+          <MonthlyCanCalendar 
+            customer={selectedMonthlyCust} 
+            bills={bills} 
+            onClose={() => setSelectedMonthlyCust(null)} 
+          />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function MonthlyCanCalendar({ customer, bills, onClose }: { customer: Customer, bills: Bill[], onClose: () => void }) {
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  
+  const monthStart = startOfMonth(currentMonth);
+  const monthEnd = endOfMonth(currentMonth);
+  const calendarDays = eachDayOfInterval({ start: startOfWeek(monthStart), end: endOfWeek(monthEnd) });
+
+  const customerBills = bills.filter(b => b.customerId === customer.id && b.status === 'Delivered');
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 sm:p-6"
+    >
+      <motion.div
+        initial={{ scale: 0.9, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        className="bg-white w-full max-w-4xl rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+      >
+        {/* Modal Header */}
+        <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="flex items-center gap-4">
+            <button onClick={onClose} className="p-3 hover:bg-white rounded-2xl text-slate-400 group transition-all">
+              <ArrowLeft className="group-hover:-translate-x-1 transition-transform" />
+            </button>
+            <div>
+              <h3 className="text-2xl font-black text-slate-900">{customer.name}</h3>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <Calendar size={12} /> Yearly Monitoring • {format(currentMonth, 'MMMM yyyy')}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200">
+             <button 
+               onClick={() => setCurrentMonth(prev => subMonths(prev, 1))}
+               className="p-2 hover:bg-slate-50 rounded-xl text-slate-600"
+             >
+               <ChevronLeft size={20} />
+             </button>
+             <span className="px-4 font-black text-sm min-w-[120px] text-center">{format(currentMonth, 'MMM yyyy')}</span>
+             <button 
+               onClick={() => setCurrentMonth(prev => addMonths(prev, 1))}
+               className="p-2 hover:bg-slate-50 rounded-xl text-slate-600"
+             >
+               <ChevronRight size={20} />
+             </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8">
+           <div className="grid grid-cols-7 gap-2 mb-2">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                <div key={d} className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest py-2">
+                  {d}
+                </div>
+              ))}
+           </div>
+           
+           <div className="grid grid-cols-7 gap-2">
+              {calendarDays.map((day, idx) => {
+                const dayBills = customerBills.filter(b => isSameDay(new Date(b.date), day));
+                const totalCans = dayBills.reduce((acc, curr) => acc + (curr.quantity || 0), 0);
+                const isCurrentMonth = isSameMonth(day, monthStart);
+                const isTodayDate = isToday(day);
+
+                return (
+                  <div 
+                    key={idx} 
+                    className={`min-h-[100px] p-3 rounded-2xl border transition-all flex flex-col justify-between ${
+                      !isCurrentMonth ? 'bg-slate-50/30 border-transparent opacity-30' :
+                      isTodayDate ? 'bg-blue-50 border-blue-200 scale-105 shadow-lg shadow-blue-100 z-10' :
+                      'bg-white border-slate-100 hover:border-blue-100 hover:shadow-md'
+                    }`}
+                  >
+                    <div className={`text-sm font-black ${isTodayDate ? 'text-blue-600' : 'text-slate-400'}`}>
+                      {format(day, 'd')}
+                    </div>
+                    
+                    {totalCans > 0 && (
+                      <div className="flex flex-col gap-1.5 overflow-hidden">
+                        <div className="flex items-center justify-between">
+                           <div className="flex items-center gap-1">
+                             <Droplet size={10} className="text-blue-500" />
+                             <span className="text-xs font-black text-slate-900">{totalCans}</span>
+                           </div>
+                           <div className="flex -space-x-1.5 overflow-hidden">
+                             {dayBills.map((b, i) => (
+                               <div key={b.id} title={b.driverName} className={`w-3 h-3 rounded-full border border-white shadow-sm flex items-center justify-center text-[5px] font-black text-white ${['bg-blue-400', 'bg-indigo-400', 'bg-purple-400', 'bg-cyan-400'][i % 4]}`}>
+                                 {b.driverName?.charAt(0) || 'D'}
+                               </div>
+                             ))}
+                           </div>
+                        </div>
+                        <div className="space-y-0.5 max-h-[40px] overflow-hide scrollbar-hide">
+                          {dayBills.slice(0, 2).map((b, i) => (
+                            <div key={i} className="text-[7px] text-slate-500 font-bold leading-tight truncate flex items-center gap-1">
+                               <span className="w-1 h-1 rounded-full bg-slate-300 shrink-0" />
+                               {b.quantity} Can by {b.driverName?.split(' ')[0]}
+                            </div>
+                          ))}
+                          {dayBills.length > 2 && (
+                            <div className="text-[6px] text-blue-500 font-black uppercase tracking-tighter">+{dayBills.length - 2} more...</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+           </div>
+        </div>
+
+        <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-blue-400" />
+                <span className="text-xs font-bold text-slate-500">Delivered</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-blue-100 animate-pulse" />
+                <span className="text-xs font-bold text-slate-500">Today</span>
+              </div>
+            </div>
+            <div className="text-right">
+               <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Month Cans</div>
+               <div className="text-2xl font-black text-blue-600">
+                  {customerBills.filter(b => isSameMonth(new Date(b.date), currentMonth)).reduce((acc, curr) => acc + (curr.quantity || 0), 0)}
+               </div>
+            </div>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

@@ -3,11 +3,18 @@ export interface Franchise {
   email: string;
   name: string;
   location?: string;
+  coordinates?: {
+    lat: number;
+    lng: number;
+  };
   commissionPercentage: number;
   authorizedBy: string;
   status: 'Active' | 'Inactive' | 'Suspended';
   lockedFeatures?: string[];
   createdAt: any;
+  gstNumber?: string;
+  proprietorName?: string;
+  aadharNumber?: string;
 }
 
 export interface Customer {
@@ -15,6 +22,7 @@ export interface Customer {
   franchiseId?: string;
   name: string;
   mobile: string;
+  email?: string;
   secondaryMobiles?: string[];
   address: string;
   alternateMobile?: string;
@@ -23,10 +31,12 @@ export interface Customer {
   pendingAmount: number;
   lastRate?: number;
   pin?: string;
+  nextDayCans?: number;
+  category?: ProductCategory;
   createdAt: any;
 }
 
-export type ProductCategory = 'TANKER' | 'STANDBY_TANKER' | 'MONTHLY_TANKER' | 'BOTTLE' | 'CAN' | 'DONATION';
+export type ProductCategory = 'TANKER' | 'STANDBY_TANKER' | 'MONTHLY_TANKER' | 'MONTHLY_CAN' | 'BOTTLE' | 'CAN' | 'DONATION';
 
 export interface Bill {
   id?: string;
@@ -192,6 +202,8 @@ export interface Account {
   description?: string;
   isHidden?: boolean;
   driverId?: string;
+  customerId?: string;
+  group?: string;
 }
 
 export type VoucherType = 'Receipt' | 'Payment' | 'Journal' | 'Contra' | 'Sales' | 'Purchase';
@@ -225,6 +237,7 @@ export interface Driver {
   monthlySalary: number;
   status?: 'Active' | 'Inactive' | 'pending';
   pin?: string;
+  email?: string;
   createdAt?: any;
 }
 

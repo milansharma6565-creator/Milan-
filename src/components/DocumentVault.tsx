@@ -39,7 +39,7 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
 
   const isAdmin = userEmail === 'milan.sharma6565@gmail.com';
 
-  const defaultFolders = [
+  const defaultFolders: {id: string, name: string, parentId?: string}[] = [
     { id: 'phed', name: 'PHED Documents' },
     { id: 'vehicle', name: 'Vehicle Document' },
     { id: 'kyc', name: 'Owner KYC Document' },
@@ -48,7 +48,7 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
     { id: 'drivers', name: 'Tractor Drivers' }
   ];
 
-  const [customFolders, setCustomFolders] = useState<{id: string, name: string}[]>([]);
+  const [customFolders, setCustomFolders] = useState<{id: string, name: string, parentId?: string}[]>([]);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
 
@@ -183,7 +183,7 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
         });
         setUploading(false);
       } catch (storageErr: any) {
-        console.warn("Firebase Storage failed, attempting Database Fallback...", storageErr);
+        console.warn("Firebase Storage failed, attempting Database Fallback...", storageErr instanceof Error ? storageErr.message : String(storageErr));
         // Fallback to database for small files
         if (file.size > 1000000) {
           setUploading(false);
@@ -247,7 +247,7 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
         const fileRef = ref(storage, docObj.url);
         await deleteObject(fileRef);
       } catch (e: any) {
-        console.warn("Storage object not found or couldn't be deleted", e);
+        console.warn("Storage object not found or couldn't be deleted", e instanceof Error ? e.message : String(e));
       }
       
       await deleteDoc(doc(db, 'documents', docObj.id));

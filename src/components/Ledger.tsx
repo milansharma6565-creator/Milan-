@@ -85,8 +85,8 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
   useEffect(() => {
     // 1. Fetch Groups
     let groupsQuery = query(collection(db, 'accountGroups'));
-    if (!isSuperAdmin && franchiseId) {
-      groupsQuery = query(collection(db, 'accountGroups'), where('franchiseId', '==', franchiseId));
+    if (franchiseId) {
+      groupsQuery = query(collection(db, 'accountGroups'), where('franchiseId', 'in', [franchiseId, null]));
     }
     const groupsUnsub = onSnapshot(groupsQuery, 
       (snapshot) => {
@@ -101,7 +101,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
     // 2. Fetch Accounts
     let accountsQuery = query(collection(db, 'accounts'));
-    if (!isSuperAdmin && franchiseId) {
+    if (franchiseId) {
       accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
     }
     const accountsUnsub = onSnapshot(accountsQuery, 
@@ -113,7 +113,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
     // 3. Fetch Vouchers
     let vouchersBaseQuery = query(collection(db, 'vouchers'));
-    if (!isSuperAdmin && franchiseId) {
+    if (franchiseId) {
       vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', franchiseId));
     }
     const vouchersUnsub = onSnapshot(query(vouchersBaseQuery, orderBy('date', 'desc'), limit(500)), 
@@ -343,7 +343,7 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
     try {
       doc = new jsPDF();
     } catch (e) {
-      console.error('jsPDF failed:', e);
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
       alert('PDF generation is not supported in this browser.');
       return;
     }
@@ -1014,7 +1014,7 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
     try {
       doc = new jsPDF();
     } catch (e) {
-      console.error('jsPDF failed:', e);
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
       alert('PDF generation is not supported in this browser.');
       return;
     }
@@ -1252,7 +1252,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
     try {
       doc = new jsPDF();
     } catch (e) {
-      console.error('jsPDF failed:', e);
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
       alert('PDF generation is not supported in this browser.');
       return;
     }

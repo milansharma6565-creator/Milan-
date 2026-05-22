@@ -62,7 +62,7 @@ export async function bulkDeleteDrivers() {
     
     return { success: true, count: 0 };
   } catch (error) {
-    console.error("Bulk Delete Error:", error);
+    console.error("Bulk Delete Error:", error instanceof Error ? error.message : String(error));
     throw error;
   }
 }

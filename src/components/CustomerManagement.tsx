@@ -102,7 +102,7 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
 
   useEffect(() => {
     let q = query(collection(db, 'customers'), orderBy('name'));
-    if (!isSuperAdmin && franchiseId) {
+    if (franchiseId) {
       q = query(collection(db, 'customers'), where('franchiseId', '==', franchiseId), orderBy('name'));
     }
     const unsubCustomers = onSnapshot(q, 
@@ -164,7 +164,7 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
         return;
       }
 
-      await addDoc(collection(db, 'customers'), {
+      const docRef = await addDoc(collection(db, 'customers'), {
         ...newCustomer,
         franchiseId: franchiseId || null,
         name: newCustomer.name.trim(),
@@ -172,6 +172,9 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
         pendingAmount: 0,
         createdAt: serverTimestamp()
       });
+
+      // Auto-create ledger account for customer
+      await ledgerAutomation.ensureCustomerAccount(docRef.id, newCustomer.name.trim(), franchiseId || null);
       setIsAdding(false);
       setNewCustomer({ name: '', mobile: '', address: '', alternateMobile: '', vehicleNumber: '', notes: '', pin: '' });
     } catch (error) {
@@ -967,10 +970,11 @@ function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: {
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
 
-      // 1. Fetch Bills
+      // 1. Fetch Delivered Bills
       let billsQ = query(
         collection(db, 'bills'),
         where('customerId', '==', customer.id),
+        where('status', '==', 'Delivered'),
         where('date', '>=', startDate),
         where('date', '<=', endDate)
       );
@@ -979,6 +983,7 @@ function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: {
           collection(db, 'bills'),
           where('franchiseId', '==', franchiseId),
           where('customerId', '==', customer.id),
+          where('status', '==', 'Delivered'),
           where('date', '>=', startDate),
           where('date', '<=', endDate)
         );
@@ -1045,7 +1050,7 @@ function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: {
       const tableRows = allEntries.map((entry: any) => {
         const isBill = !!entry.billNumber;
         const date = format(entry.sortDate, 'dd/MM/yyyy');
-        const desc = isBill ? `Trip Token #${entry.billNumber} (${entry.tankerSize})` : entry.description || 'Manual Payment';
+        const desc = isBill ? `Trip Bill #${entry.billNumber} (${entry.tankerSize})` : entry.description || 'Manual Payment';
         const debit = isBill ? (entry.grandTotal || 0) : 0;
         const credit = isBill ? 0 : (entry.amount || 0);
         runningBalance += debit - credit;
@@ -1061,7 +1066,7 @@ function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: {
 
       autoTable(doc, {
         startY: 60,
-        head: [['Date', 'Description', 'Token Amount', 'Payment Recvd', 'Balance']],
+        head: [['Date', 'Description', 'Bill Amount', 'Payment Recvd', 'Balance']],
         body: tableRows,
         theme: 'grid',
         headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
@@ -1107,7 +1112,7 @@ function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: {
           canShareFile = navigator.canShare({ files: [file] });
         }
       } catch (canShareErr) {
-        console.warn('canShare check failed', canShareErr);
+        console.warn('canShare check failed', canShareErr instanceof Error ? canShareErr.message : String(canShareErr));
         canShareFile = false;
       }
 
@@ -1225,6 +1230,7 @@ function CustomerHistoryModal({
     let q = query(
       collection(db, 'bills'), 
       where('customerId', '==', customer.id),
+      where('status', '==', 'Delivered'),
       orderBy('createdAt', 'desc')
     );
     if (!isSuperAdmin && franchiseId) {
@@ -1232,6 +1238,7 @@ function CustomerHistoryModal({
         collection(db, 'bills'),
         where('franchiseId', '==', franchiseId),
         where('customerId', '==', customer.id),
+        where('status', '==', 'Delivered'),
         orderBy('createdAt', 'desc')
       );
     }
@@ -1244,7 +1251,7 @@ function CustomerHistoryModal({
   const handlePrint = async () => {
     if (printRef.current) {
       try {
-        const fileName = `Token_${selectedBillForPrint?.billNumber || 'Order'}`;
+        const fileName = `Bill_${selectedBillForPrint?.billNumber || 'Order'}`;
         await generatePDF(printRef.current, fileName);
         setSelectedBillForPrint(null);
       } catch (err) {
@@ -1376,7 +1383,7 @@ function CustomerHistoryModal({
           {/* List */}
           <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-2">Token History</h3>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-2">Bill History</h3>
               {bills?.map((bill) => (
                 <div 
                   key={bill.id} 

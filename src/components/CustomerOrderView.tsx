@@ -132,8 +132,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
   if (error || !bill) return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
       <XCircle className="text-red-500 mb-4" size={64} />
-      <h1 className="text-2xl font-bold text-slate-900 mb-2">Invalid Token</h1>
-      <p className="text-slate-500">This order link is invalid or has expired.</p>
+      <h1 className="text-2xl font-bold text-slate-900 mb-2">Invalid Bill</h1>
+      <p className="text-slate-500">This bill link is invalid or has expired.</p>
     </div>
   );
 
@@ -156,8 +156,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
             <div className="w-20 h-20 bg-white/20 rounded-3xl flex items-center justify-center mx-auto mb-4">
               <Truck size={40} />
             </div>
-            <h2 className="text-2xl font-bold">Order Details</h2>
-            <p className="opacity-80">Token: {bill.billNumber}</p>
+            <h2 className="text-2xl font-bold">Bill Details</h2>
+            <p className="opacity-80">Bill #: {bill.billNumber}</p>
           </div>
 
           <div className="p-8 space-y-6">

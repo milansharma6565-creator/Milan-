@@ -67,7 +67,7 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
           setCenter(pos);
         },
         (error) => {
-          console.error("Geolocation error:", error?.message || String(error));
+          console.error("Geolocation error:", error instanceof Error ? error.message : String(error));
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -93,10 +93,10 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
           const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${googleKey}`);
           const data = await res.json();
           if (data.status === 'OK' && data.results && data.results.length > 0) {
-            addressStr = data.results[0].formatted_address;
+            addressStr = `📍 Exact GPS Pin [${lat.toFixed(5)}, ${lng.toFixed(5)}] ~ ${data.results[0].formatted_address}`;
           }
         } catch (e) {
-          console.warn("Google Maps Geocoding failed, falling back to OSM.", e);
+          console.warn("Google Maps Geocoding failed, falling back to OSM.", e instanceof Error ? e.message : String(e));
         }
       }
 
@@ -114,10 +114,10 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
             a.house_number, a.road, a.neighbourhood, a.suburb, 
             a.village || a.town || a.city, a.postcode
           ].filter(x => !!x);
-          addressStr = parts.join(', ');
+          addressStr = `📍 Exact GPS Pin [${lat.toFixed(5)}, ${lng.toFixed(5)}]${parts.length > 0 ? ' ~ ' + parts.join(', ') : ''}`;
         }
         if (!addressStr) {
-           addressStr = data.display_name;
+           addressStr = `📍 Exact GPS Pin [${lat.toFixed(5)}, ${lng.toFixed(5)}] ~ ${data.display_name}`;
         }
       }
 
@@ -147,7 +147,7 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
         },
         (err) => {
           setFindingMe(false);
-          console.error("Geolocation error (Find Me):", err?.message || String(err));
+          console.error("Geolocation error (Find Me):", err instanceof Error ? err.message : String(err));
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
@@ -194,7 +194,7 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
       const data = await response.json();
       setSuggestions(data);
     } catch (err) {
-      console.error("Search error handled:", err?.message || String(err));
+      console.error("Search error handled:", err instanceof Error ? err.message : String(err));
       // Silently fail search for UI but maybe show no results found
       setSuggestions([]);
     } finally {

@@ -11,7 +11,7 @@ interface ThermalInvoiceProps {
 export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
   // UPI Payment Link
   const upiId = "rajha94133@barodampay"; // Business UPI ID
-  const upiLink = `upi://pay?pa=${upiId}&pn=TankerWala%20Powered%20by%20Rajhans&am=${bill.grandTotal}&cu=INR&tn=Token%20${bill.billNumber}`;
+  const upiLink = `upi://pay?pa=${upiId}&pn=TankerWala%20Powered%20by%20Rajhans&am=${bill.grandTotal}&cu=INR&tn=Bill%20${bill.billNumber}`;
 
   return (
     <div className="bg-white p-6 shadow-sm border border-slate-200" style={{ width: '80mm', margin: '0 auto', fontFamily: 'Inter' }}>
@@ -26,7 +26,7 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
       </div>
 
       <div className="space-y-1 text-xs mb-4">
-        <div className="flex justify-between"><span>Token No:</span> <span className="font-bold">{bill.billNumber}</span></div>
+        <div className="flex justify-between"><span>Bill No:</span> <span className="font-bold">{bill.billNumber}</span></div>
         <div className="flex justify-between"><span>Date:</span> <span>{new Date(bill.date).toLocaleDateString()}</span></div>
         {bill.driverName && (
           <div className="flex justify-between items-center">
@@ -56,7 +56,15 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
         </thead>
         <tbody>
           <tr>
-            <td className="py-2">Tanker {bill.tankerSize}L</td>
+            <td className="py-2">
+              {bill.category === 'CAN' 
+                ? '20L RO Water Can' 
+                : bill.category === 'MONTHLY_CAN'
+                ? '20L RO Water Can (Monthly Plan)'
+                : bill.category === 'BOTTLE' 
+                ? `Packaged Water (${bill.bottleSize || 'Standard'})` 
+                : `Tanker ${bill.tankerSize || 'Std'}L`}
+            </td>
             <td className="text-right">{bill.quantity}</td>
             <td className="text-right">{formatCurrency(bill.totalAmount)}</td>
           </tr>

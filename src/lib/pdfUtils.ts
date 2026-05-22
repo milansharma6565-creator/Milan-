@@ -32,14 +32,14 @@ export const generatePDF = async (element: HTMLElement, fileName: string) => {
         format: [width, height],
       });
     } catch (e) {
-      console.error('jsPDF failed:', e);
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
       throw new Error('PDF Generation failed: Illegal constructor or unsupported environment');
     }
 
     pdf.addImage(dataUrl, 'PNG', 0, 0, width, height, undefined, 'FAST');
     pdf.save(`${fileName}.pdf`);
   } catch (error) {
-    console.error('PDF Export Error:', error?.message || error);
+    console.error('PDF Export Error:', error instanceof Error ? error.message : String(error));
     throw error;
   }
 };

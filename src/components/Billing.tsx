@@ -186,6 +186,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       if (size) setForm(prev => ({ ...prev, rate: size.defaultRate }));
     } else if (form.category === 'CAN') {
       setForm(prev => ({ ...prev, rate: 80 })); // Assuming ₹80 for CAN
+    } else if (form.category === 'MONTHLY_CAN') {
+      setForm(prev => ({ ...prev, rate: 600 })); // ₹600 for Monthly Can Plan
     }
   }, [form.category, form.tankerSize, form.bottleSize, form.quantity]);
 
@@ -228,7 +230,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           canShareFile = navigator.canShare({ files: [file] });
         }
       } catch (canShareErr) {
-        console.warn('canShare check failed', canShareErr);
+        console.warn('canShare check failed', canShareErr instanceof Error ? canShareErr.message : String(canShareErr));
         canShareFile = false;
       }
 
@@ -237,7 +239,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
         try {
           await navigator.share({
             files: [file],
-            title: `Token #${bill.billNumber}`,
+            title: `Bill #${bill.billNumber}`,
             text: `Trip Token from TankerWala Powered by Rajhans for amount ₹${bill.grandTotal}`
           });
           return;
@@ -246,7 +248,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
             console.log('Share canceled by user');
             return; // Exit silently
           }
-          console.warn('Web Share failed, trying fallback:', shareErr);
+          console.warn('Web Share failed, trying fallback:', shareErr instanceof Error ? shareErr.message : String(shareErr));
         }
       }
 
@@ -372,8 +374,10 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       const bookedBillWithId = { ...billData, id: docRef.id };
       setBookedBill(bookedBillWithId);
 
-      // Automatically post to Ledger (Automation)
-      ledgerAutomation.postBillToLedger(bookedBillWithId);
+      // Automatically post to Ledger (Automation) - ONLY if already delivered
+      if (bookedBillWithId.status === 'Delivered') {
+        ledgerAutomation.postBillToLedger(bookedBillWithId);
+      }
 
       // If a driver is assigned, create an active trip for them
       if (form.driverId) {
@@ -389,6 +393,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           customerMobile: selectedCustomer.mobile,
           siteLocation: form.customAddress || selectedCustomer.address,
           category: form.category,
+          remarks: form.remarks.trim(),
           ...(deliveryLocation && {
             deliveryLocation: {
               ...deliveryLocation,
@@ -398,7 +403,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           quantity: form.quantity,
           tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
           bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
-          tankerNumber: 'T-01', // Default or could be dynamic
+          tractorId: 'T-01', // Default, can be updated from dashboard
           status: 'Active',
           createdAt: serverTimestamp()
         });
@@ -483,6 +488,10 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       };
 
       const docRef = await addDoc(collection(db, 'customers'), newCust);
+      
+      // Auto-create ledger account for customer
+      await ledgerAutomation.ensureCustomerAccount(docRef.id, newCust.name, franchiseId || null);
+
       const added = { ...newCust, id: docRef.id } as Customer;
       setSelectedCustomer(added);
       setForm(prev => ({ ...prev, customAddress: added.address }));
@@ -498,8 +507,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
     <div className="p-4 md:p-0 pb-32">
       <div className="flex items-center justify-between mb-10">
         <div>
-          <h1 className="text-3xl font-display font-bold">Create New Token</h1>
-          <p className="text-slate-500">Generate trip bill and token</p>
+          <h1 className="text-3xl font-display font-bold">Create New Bill</h1>
+          <p className="text-slate-500">Generate trip bill for customer</p>
         </div>
         <div className="bg-blue-50 text-blue-600 px-4 py-2 rounded-2xl border border-blue-100 text-sm font-bold">
           Bill No: {form.billNumber}
@@ -722,6 +731,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">
                 {form.category === 'STANDBY_TANKER' ? 'Duration (Days)' : 
                  form.category === 'MONTHLY_TANKER' ? 'Duration (Months)' : 
+                 form.category === 'MONTHLY_CAN' ? 'No. of Passes' :
                  'Quantity'}
               </label>
               <input
@@ -758,8 +768,32 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                     const qTrp = query(collection(db, 'trips'), where('driverId', '==', dId), where('status', 'in', ['Active', 'Filling', 'On the way', 'Reached']));
                     const snap = await getDocs(qTrp);
                     if (!snap.empty) {
-                       alert('Driver is already on an active trip! Please wait until they finish.');
-                       return;
+                      let actuallyBusy = false;
+                      for (const tDoc of snap.docs) {
+                        const tData = tDoc.data();
+                        if (tData.billId) {
+                          const bRef = doc(db, 'bills', tData.billId);
+                          const bSnap = await getDoc(bRef);
+                          if (bSnap.exists()) {
+                            const bStatus = bSnap.data().status;
+                            if (['Delivered', 'Cancelled'].includes(bStatus)) {
+                              // Associated bill is delivered/cancelled, free driver self-healingly
+                              await updateDoc(doc(db, 'trips', tDoc.id), { status: bStatus, completedAt: serverTimestamp() });
+                            } else {
+                              actuallyBusy = true;
+                            }
+                          } else {
+                            // Bill doesn't exist anymore, free driver
+                            await updateDoc(doc(db, 'trips', tDoc.id), { status: 'Delivered', completedAt: serverTimestamp() });
+                          }
+                        } else {
+                          actuallyBusy = true;
+                        }
+                      }
+                      if (actuallyBusy) {
+                        alert('Driver Busy: Currently on an active trip.');
+                        return;
+                      }
                     }
                   }
                   const driver = drivers.find(d => d.id === dId);
@@ -825,7 +859,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
         </div>
 
         <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white h-16 rounded-2xl font-black text-lg transition-all shadow-xl shadow-blue-100 flex items-center justify-center gap-3 active:scale-[0.98]">
-           Commit Token
+           Commit Bill
         </button>
       </form>
 
@@ -849,9 +883,9 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 <CheckCircle2 size={40} />
               </div>
 
-              <h2 className="text-3xl font-display font-black text-slate-900 mb-2">Token Generated!</h2>
+              <h2 className="text-3xl font-display font-black text-slate-900 mb-2">Bill Generated!</h2>
               <p className="text-slate-500 font-medium mb-8">
-                Trip Token <span className="font-bold text-slate-900">#{bookedBill.billNumber}</span> has been generated successfully at <span className="text-slate-900 font-bold">{format(new Date(), 'hh:mm a')}</span>.
+                Trip Bill <span className="font-bold text-slate-900">#{bookedBill.billNumber}</span> has been generated successfully at <span className="text-slate-900 font-bold">{format(new Date(), 'hh:mm a')}</span>.
               </p>
 
               <div className="bg-slate-50 rounded-3xl p-6 mb-8 border border-slate-100">

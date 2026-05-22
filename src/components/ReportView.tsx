@@ -139,7 +139,7 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
         await generatePDF(printRef.current, fileName);
         setSelectedBillForPrint(null);
       } catch (err) {
-        console.error("PDF Export Error:", err);
+        console.error("PDF Export Error:", err instanceof Error ? err.message : String(err));
         alert("Failed to generate PDF. Please try again.");
       }
     }
@@ -255,7 +255,7 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
                     <div className="w-2 h-2 rounded-full bg-blue-500" />
                     <span className="text-slate-600 font-medium">{size}L Tankers</span>
                   </div>
-                  <span className="font-bold">{count} Delivered</span>
+                  <span className="font-bold">{(count as number)} Delivered</span>
                 </div>
               ))}
             </div>

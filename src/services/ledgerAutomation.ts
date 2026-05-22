@@ -1,24 +1,131 @@
 import { db } from '../firebase';
-import { collection, addDoc, getDocs, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { VoucherItem, Account } from '../types';
 
 export const ledgerAutomation = {
   /**
+   * Ensures a customer has a ledger account. Creates one if missing.
+   */
+  ensureCustomerAccount: async (customerId: string, customerName: string, franchiseId: any): Promise<string | null> => {
+    try {
+      const accountsSnap = await getDocs(collection(db, 'accounts'));
+      const customerAccDoc = accountsSnap.docs.find(d => {
+        const data = d.data();
+        return (data.customerId === customerId) || 
+               (data.name && data.name.toLowerCase() === customerName.toLowerCase());
+      });
+
+      if (customerAccDoc) {
+        // If it exists but doesn't have customerId, update it to link it
+        if (!customerAccDoc.data().customerId) {
+          await updateDoc(doc(db, 'accounts', customerAccDoc.id), { customerId });
+        }
+        return customerAccDoc.id;
+      }
+
+      // Find or create 'Sundry Debtors' group
+      const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+      let debtorsGroup = groupsSnap.docs.find(d => d.data().name === 'Sundry Debtors');
+      let debtorsGroupId = debtorsGroup?.id;
+
+      if (!debtorsGroupId) {
+        let assetsGroup = groupsSnap.docs.find(d => d.data().name === 'Current Assets');
+        let assetsGroupId = assetsGroup?.id;
+        if (!assetsGroupId) {
+          const newAssetsGroupRef = await addDoc(collection(db, 'accountGroups'), {
+            name: 'Current Assets',
+            type: 'Asset',
+            franchiseId: franchiseId || null,
+            createdAt: serverTimestamp()
+          });
+          assetsGroupId = newAssetsGroupRef.id;
+        }
+        const newDebtorsGroupRef = await addDoc(collection(db, 'accountGroups'), {
+          name: 'Sundry Debtors',
+          parentGroupId: assetsGroupId,
+          type: 'Asset',
+          franchiseId: franchiseId || null,
+          createdAt: serverTimestamp()
+        });
+        debtorsGroupId = newDebtorsGroupRef.id;
+      }
+
+      const newCustAccRef = await addDoc(collection(db, 'accounts'), {
+        name: customerName,
+        groupId: debtorsGroupId,
+        group: 'Sundry Debtors',
+        openingBalance: 0,
+        currentBalance: 0,
+        balanceType: 'Dr',
+        customerId: customerId,
+        franchiseId: franchiseId || null,
+        createdAt: serverTimestamp()
+      });
+
+      return newCustAccRef.id;
+    } catch (error) {
+      console.error('Error ensuring customer ledger account:', error);
+      return null;
+    }
+  },
+
+  /**
    * Automatically posts a Sales Voucher when a bill is generated
    */
   postBillToLedger: async (bill: any) => {
+    if (bill.ledgerPosted) return;
     try {
-      // 1. Find or assume standard account names
+      // 1. Ensure customer ledger account exists and is linked
+      const customerAccId = await ledgerAutomation.ensureCustomerAccount(bill.customerId, bill.customerName, bill.franchiseId);
+
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       const accounts = accountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Account));
 
-      // Standard Ledger Architecture:
-      // Debit: Customer Account (Increases what they owe us)
-      // Credit: Water Sales Account (Increases our revenue)
-      
-      const customerAcc = accounts.find(a => a.name.toLowerCase() === bill.customerName.toLowerCase());
-      const salesAcc = accounts.find(a => a.name.toLowerCase() === 'water sales') || 
-                       accounts.find(a => a.name.toLowerCase().includes('sales'));
+      const customerAcc = accounts.find(a => a.id === customerAccId) || 
+                          accounts.find(a => a.name.toLowerCase() === bill.customerName.toLowerCase());
+
+      let salesAcc = accounts.find(a => a.name.toLowerCase() === 'service income') ||
+                     accounts.find(a => a.name.toLowerCase() === 'water sales') || 
+                     accounts.find(a => a.name.toLowerCase().includes('sales')) ||
+                     accounts.find(a => a.name.toLowerCase().includes('income'));
+
+      if (!salesAcc) {
+        // Create Service Income account under Direct Incomes group
+        try {
+          const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+          let incomeGroup = groupsSnap.docs.find(d => d.data().name === 'Direct Incomes' || d.data().name === 'Direct Income');
+          let incomeGroupId = incomeGroup?.id;
+          if (!incomeGroupId) {
+            const newIncomeGroupRef = await addDoc(collection(db, 'accountGroups'), {
+              name: 'Direct Incomes',
+              type: 'Income',
+              franchiseId: bill.franchiseId || null,
+              createdAt: serverTimestamp()
+            });
+            incomeGroupId = newIncomeGroupRef.id;
+          }
+          const newSalesAccRef = await addDoc(collection(db, 'accounts'), {
+            name: 'Service Income',
+            groupId: incomeGroupId,
+            openingBalance: 0,
+            balanceType: 'Cr',
+            currentBalance: 0,
+            franchiseId: bill.franchiseId || null,
+            createdAt: serverTimestamp()
+          });
+          salesAcc = {
+            id: newSalesAccRef.id,
+            name: 'Service Income',
+            groupId: incomeGroupId,
+            openingBalance: 0,
+            balanceType: 'Cr',
+            currentBalance: 0,
+            franchiseId: bill.franchiseId || null
+          } as Account;
+        } catch (e) {
+          console.error("Failed to auto-create Sales account:", e);
+        }
+      }
 
       if (!customerAcc || !salesAcc) {
         console.warn('Could not auto-post to ledger: Customer or Sales account not found.');
@@ -41,22 +148,34 @@ export const ledgerAutomation = {
       ];
 
       const vchSnap = await getDocs(collection(db, 'vouchers'));
-      const vchNumber = `VCH-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
+      const vchNumber = `SLS-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
 
       await addDoc(collection(db, 'vouchers'), {
-        type: 'Journal',
+        type: 'Sales',
         voucherNumber: vchNumber,
         date: bill.date,
         items,
-        narration: `Auto-generated from Token #${bill.billNumber} | ${bill.tankerSize}`,
+        narration: `Auto-generated from Token #${bill.billNumber} | ${bill.tankerSize || 'Water Can'}`,
         totalAmount: bill.grandTotal,
         billId: bill.id,
+        franchiseId: bill.franchiseId || null,
         createdAt: serverTimestamp()
       });
 
+      // Update balances in ledger accounts
+      await updateDoc(doc(db, 'accounts', customerAcc.id!), {
+        currentBalance: (customerAcc.currentBalance || 0) + bill.grandTotal
+      });
+      await updateDoc(doc(db, 'accounts', salesAcc.id!), {
+        currentBalance: (salesAcc.currentBalance || 0) + bill.grandTotal
+      });
+
+      // Mark bill as posted
+      await updateDoc(doc(db, 'bills', bill.id), { ledgerPosted: true });
+
       console.log(`Auto-posted Bill #${bill.billNumber} to Ledger.`);
     } catch (error) {
-      console.error('Ledger Automation Error:', error?.message || error);
+      console.error('Ledger Automation Error:', error instanceof Error ? error.message : String(error));
     }
   },
 
@@ -64,18 +183,61 @@ export const ledgerAutomation = {
    * Posts a Receipt Voucher when payment is received
    */
   postPaymentToLedger: async (bill: any, amount: number, mode: string) => {
+    if (bill.paymentLedgerPosted) return;
     try {
+      const customerAccId = await ledgerAutomation.ensureCustomerAccount(bill.customerId, bill.customerName, bill.franchiseId);
+
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       const accounts = accountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Account));
 
-      // Debit: Cash/Bank (Increases our money)
-      // Credit: Customer Account (Decreases what they owe us)
+      const paymentAccName = mode === 'Cash' ? 'Cash' : 'Bank Account';
+      let paymentAcc = accounts.find(a => a.name.toLowerCase() === paymentAccName.toLowerCase());
       
-      const paymentAccName = mode === 'Cash' ? 'Cash' : 
-                            (mode === 'UPI' || mode === 'Bank Transfer') ? 'Bank Account' : 'Cash';
+      // Secondary check for specific bank names if 'Bank Account' is not found
+      if ((mode === 'UPI' || mode === 'Bank') && !paymentAcc) {
+          paymentAcc = accounts.find(a => a.name === 'BARODA129') || 
+                       accounts.find(a => a.name.toLowerCase().includes('bank'));
+      }
       
-      const paymentAcc = accounts.find(a => a.name.toLowerCase() === paymentAccName.toLowerCase());
-      const customerAcc = accounts.find(a => a.name.toLowerCase() === bill.customerName.toLowerCase());
+      const customerAcc = accounts.find(a => a.id === customerAccId) || 
+                          accounts.find(a => a.name.toLowerCase() === bill.customerName.toLowerCase());
+
+      if (!paymentAcc) {
+        // Create Cash/Bank Account if missing under Current Assets
+        try {
+          const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+          let assetsGroup = groupsSnap.docs.find(d => d.data().name === 'Current Assets');
+          let assetsGroupId = assetsGroup?.id;
+          if (!assetsGroupId) {
+            const newGrp = await addDoc(collection(db, 'accountGroups'), {
+              name: 'Current Assets',
+              type: 'Asset',
+              franchiseId: bill.franchiseId || null,
+              createdAt: serverTimestamp()
+            });
+            assetsGroupId = newGrp.id;
+          }
+          const newAccRef = await addDoc(collection(db, 'accounts'), {
+            name: paymentAccName,
+            groupId: assetsGroupId,
+            openingBalance: 0,
+            balanceType: 'Dr',
+            currentBalance: 0,
+            franchiseId: bill.franchiseId || null,
+            createdAt: serverTimestamp()
+          });
+          paymentAcc = {
+            id: newAccRef.id,
+            name: paymentAccName,
+            groupId: assetsGroupId,
+            openingBalance: 0,
+            balanceType: 'Dr',
+            currentBalance: 0
+          } as Account;
+        } catch (e) {
+          console.error("Failed to auto-create Payment account:", e);
+        }
+      }
 
       if (!paymentAcc || !customerAcc) return;
 
@@ -95,7 +257,7 @@ export const ledgerAutomation = {
       ];
 
       const vchSnap = await getDocs(collection(db, 'vouchers'));
-      const vchNumber = `VCH-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
+      const vchNumber = `RCP-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
 
       await addDoc(collection(db, 'vouchers'), {
         type: 'Receipt',
@@ -105,10 +267,23 @@ export const ledgerAutomation = {
         narration: `Payment received for Token #${bill.billNumber} via ${mode}`,
         totalAmount: amount,
         billId: bill.id,
+        franchiseId: bill.franchiseId || null,
         createdAt: serverTimestamp()
       });
+
+      // Update balances in ledger accounts
+      await updateDoc(doc(db, 'accounts', paymentAcc.id!), {
+        currentBalance: (paymentAcc.currentBalance || 0) + amount
+      });
+      await updateDoc(doc(db, 'accounts', customerAcc.id!), {
+        currentBalance: (customerAcc.currentBalance || 0) - amount
+      });
+
+      // Mark payment as posted in the bill
+      await updateDoc(doc(db, 'bills', bill.id), { paymentLedgerPosted: true });
+      
     } catch (error) {
-      console.error('Payment Auto-posting error:', error?.message || error);
+      console.error('Payment Auto-posting error:', error instanceof Error ? error.message : String(error));
     }
   },
 
@@ -145,7 +320,7 @@ export const ledgerAutomation = {
       if (mode === 'Penalty' && !creditAcc) {
         try {
           const groupsSnap = await getDocs(collection(db, 'accountGroups'));
-          const incomeGroup = groupsSnap.docs.find(d => d.data().name === 'Direct Income');
+          const incomeGroup = groupsSnap.docs.find(d => d.data().name === 'Direct Income' || d.data().name === 'Direct Incomes');
           if (incomeGroup) {
             const newAccRef = await addDoc(collection(db, 'accounts'), {
               name: 'Penalty Recovery',
@@ -158,7 +333,7 @@ export const ledgerAutomation = {
             creditAcc = { id: newAccRef.id, name: 'Penalty Recovery', balanceType: 'Cr', currentBalance: 0 } as Account;
           }
         } catch (e) {
-          console.error("Failed to auto-create Penalty account:", e?.message || e);
+          console.error("Failed to auto-create Penalty account:", e instanceof Error ? e.message : String(e));
         }
       }
 
@@ -198,7 +373,103 @@ export const ledgerAutomation = {
       
       console.log(`Auto-posted Driver Payment (${mode}) to Ledger.`);
     } catch (error) {
-      console.error('Driver Payment Automation Error:', error?.message || error);
+      console.error('Driver Payment Automation Error:', error instanceof Error ? error.message : String(error));
+    }
+  },
+
+  /**
+   * Sets up default groups and accounts for a newly created franchise
+   */
+  setupFranchiseLedgers: async (franchiseId: string, franchiseName: string) => {
+    try {
+      // 1. Create or Find Current Assets group
+      const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+      let assetsGroup = groupsSnap.docs.find(d => {
+        const data = d.data();
+        return data.name === 'Current Assets' && data.franchiseId === franchiseId;
+      });
+      let assetsGroupId = assetsGroup?.id;
+      if (!assetsGroupId) {
+        const newAssetsGroupRef = await addDoc(collection(db, 'accountGroups'), {
+          name: 'Current Assets',
+          type: 'Asset',
+          franchiseId: franchiseId,
+          createdAt: serverTimestamp()
+        });
+        assetsGroupId = newAssetsGroupRef.id;
+      }
+
+      // 2. Create Cash ledger under Current Assets
+      const accountsSnap = await getDocs(collection(db, 'accounts'));
+      let cashAcc = accountsSnap.docs.find(d => {
+        const data = d.data();
+        return data.name === 'Cash' && data.franchiseId === franchiseId;
+      });
+      if (!cashAcc) {
+        await addDoc(collection(db, 'accounts'), {
+          name: 'Cash',
+          groupId: assetsGroupId,
+          openingBalance: 0,
+          currentBalance: 0,
+          balanceType: 'Dr',
+          franchiseId: franchiseId,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      // 3. Create Bank Account ledger under Current Assets
+      let bankAcc = accountsSnap.docs.find(d => {
+        const data = d.data();
+        return data.name === 'Bank Account' && data.franchiseId === franchiseId;
+      });
+      if (!bankAcc) {
+        await addDoc(collection(db, 'accounts'), {
+          name: 'Bank Account',
+          groupId: assetsGroupId,
+          openingBalance: 0,
+          currentBalance: 0,
+          balanceType: 'Dr',
+          franchiseId: franchiseId,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      // 4. Create Direct Incomes group
+      let incomeGroup = groupsSnap.docs.find(d => {
+        const data = d.data();
+        return data.name === 'Direct Incomes' && data.franchiseId === franchiseId;
+      });
+      let incomeGroupId = incomeGroup?.id;
+      if (!incomeGroupId) {
+        const newIncomeGroupRef = await addDoc(collection(db, 'accountGroups'), {
+          name: 'Direct Incomes',
+          type: 'Income',
+          franchiseId: franchiseId,
+          createdAt: serverTimestamp()
+        });
+        incomeGroupId = newIncomeGroupRef.id;
+      }
+
+      // 5. Create Service Income ledger under Direct Incomes
+      let serviceAcc = accountsSnap.docs.find(d => {
+        const data = d.data();
+        return data.name === 'Service Income' && data.franchiseId === franchiseId;
+      });
+      if (!serviceAcc) {
+        await addDoc(collection(db, 'accounts'), {
+          name: 'Service Income',
+          groupId: incomeGroupId,
+          openingBalance: 0,
+          currentBalance: 0,
+          balanceType: 'Cr',
+          franchiseId: franchiseId,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      console.log(`Successfully initialized default ledgers (Cash, Bank Account, Service Income) for franchise: ${franchiseName}`);
+    } catch (e) {
+      console.error('Error setupFranchiseLedgers:', e);
     }
   }
 };

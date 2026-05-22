@@ -2,6 +2,7 @@ export const PRODUCT_CATEGORIES = [
   { label: 'Water Tanker (Trip)', value: 'TANKER' },
   { label: 'Standby Tanker (Daily)', value: 'STANDBY_TANKER' },
   { label: 'Monthly Tanker', value: 'MONTHLY_TANKER' },
+  { label: 'Monthly RO Can', value: 'MONTHLY_CAN' },
   { label: 'Packaged Bottle', value: 'BOTTLE' },
   { label: '20L Water Can', value: 'CAN' },
 ] as const;
@@ -49,7 +50,7 @@ export function getPublicAppUrl() {
     }
     return new URL(currentUrl);
   } catch (e) {
-    console.error('URL constructor failed:', e);
+    console.error('URL constructor failed:', e instanceof Error ? e.message : String(e));
     // Fallback to basic link building if URL constructor fails
     return {
       searchParams: {

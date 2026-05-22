@@ -143,7 +143,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
         }, 1000);
       }
     } catch (e) {
-      console.error('Print Error:', e);
+      console.error('Print Error:', e instanceof Error ? e.message : String(e));
       alert('Printing failed. Please ensure popups are allowed or try again.');
     }
   };
@@ -172,7 +172,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
       link.click();
       setDownloadingFilling(null);
     } catch (e) {
-      console.error('Download Error:', e);
+      console.error('Download Error:', e instanceof Error ? e.message : String(e));
       alert('Download failed. Please try again.');
     }
   };
@@ -821,7 +821,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
                   className="w-full h-20 bg-slate-900 text-white rounded-[2rem] font-display font-black text-xl shadow-2xl shadow-slate-200 active:scale-95 transition-all disabled:opacity-50"
                   type="submit"
                 >
-                  {isSaving ? 'Processing...' : `Issue Token - ${formatCurrency(Number(formData.rate) * Number(formData.quantity))}`}
+                  {isSaving ? 'Processing...' : `Issue Bill - ${formatCurrency(Number(formData.rate) * Number(formData.quantity))}`}
                 </button>
               </form>
             </motion.div>

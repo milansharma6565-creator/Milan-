@@ -5,6 +5,7 @@ import {
   browserPopupRedirectResolver, 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithRedirect,
   onAuthStateChanged,
   RecaptchaVerifier,
   signInWithPhoneNumber
@@ -30,7 +31,7 @@ export const auth = initializeAuth(app, {
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export { signInWithPopup, onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber };
+export { signInWithPopup, signInWithRedirect, onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber };
 
 // Test connection as required by constraints
 async function testConnection() {
@@ -77,39 +78,59 @@ export interface FirestoreErrorInfo {
 
 export const safeJson = (obj: any) => {
   try {
-    const cache = new WeakSet();
+    const seen = new WeakSet();
     return JSON.stringify(obj, (key, value) => {
       if (typeof value === 'object' && value !== null) {
-        if (cache.has(value)) {
+        if (seen.has(value)) {
           return '[Circular]';
         }
-        cache.add(value);
+        seen.add(value);
+        
+        // Specifically avoid DOM elements
+        if (value instanceof Node) return '[DOM Node]';
+
+        // Check constructor
+        const ctor = value.constructor;
+        if (ctor && ctor !== Object && ctor !== Array) {
+          if (ctor === Date) {
+            return value.toISOString();
+          }
+          if (ctor === RegExp) {
+            return value.toString();
+          }
+          if (value instanceof Error) {
+            return { message: value.message, stack: value.stack, name: value.name };
+          }
+          return `[Object:${ctor.name || 'Custom'}]`;
+        }
       }
       return value;
     });
   } catch (e) {
-    try {
-      // Fallback for objects that might fail with WeakSet (rare) or other issues
-      const simpleCache: any[] = [];
-      return JSON.stringify(obj, (key, value) => {
-        if (typeof value === 'object' && value !== null) {
-          if (simpleCache.includes(value)) return '[Circular]';
-          simpleCache.push(value);
-        }
-        return value;
-      });
-    } catch (innerError) {
-      return "[Serialization Failed]";
-    }
+    return "[Serialization Failed]";
   }
 };
+
+export function safeString(val: any): string {
+  try {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val;
+    if (val instanceof Error) return { message: val.message, stack: val.stack, name: val.name }.message || 'Error';
+    if (typeof val === 'object') {
+      return safeJson(val);
+    }
+    return String(val);
+  } catch (e) {
+    return '[Unserializable Object]';
+  }
+}
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const currentUser = auth.currentUser;
   
   // Extract only needed data to avoid circular references in the first place
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: error instanceof Error ? error.message : safeString(error),
     authInfo: {
       userId: currentUser?.uid || null,
       email: currentUser?.email || null,
@@ -126,12 +147,8 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   };
   
   const jsonString = safeJson(errInfo);
-  console.error(`Firestore Error [${operationType}] at [${path || 'unknown'}]:`, jsonString);
+  console.error(`🔴 FIRESTORE ERROR [${operationType}] at [${path || 'unknown'}]:`, jsonString);
   
-  // For the throw message, we'll try to use the JSON but fallback to a simple message if needed
-  const finalMessage = jsonString && jsonString !== "[Serialization Failed]" 
-    ? jsonString 
-    : `Firestore ${operationType} failed at ${path}. Error: ${errInfo.error}`;
-    
-  throw new Error(finalMessage);
+  // Do NOT throw here to prevent app-wide crashes from single component query failures
+  // Instead, the calling component can decide if it wants to show an error UI
 }

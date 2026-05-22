@@ -1,15 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, handleFirestoreError, OperationType, auth, onAuthStateChanged, signInWithPopup, googleProvider } from '../firebase';
 import { collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot, updateDoc, doc, setDoc, arrayUnion } from 'firebase/firestore';
 import { Customer, Bill, ProductCategory, BookingRequest as BookingRequestType } from '../types';
+import { ledgerAutomation } from '../services/ledgerAutomation';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Phone, CheckCircle2, Navigation, MapPin, AlertCircle, Calendar, Truck, Lock, User as UserIcon, Plus, X, Receipt, QrCode, FileText, MessageCircle, Send, Bell, Droplets, FlaskConical as Flask, Package } from 'lucide-react';
+import { Phone, CheckCircle2, Navigation, MapPin, AlertCircle, Calendar, Truck, Lock, User as UserIcon, Plus, X, Receipt, QrCode, FileText, MessageCircle, Send, Bell, Droplets, FlaskConical as Flask, Package, Smartphone } from 'lucide-react';
 
 import { Logo } from './Logo';
+import { PremiumTractor } from './PremiumTractor';
 import { LocationPicker } from './LocationPicker';
 import { InstallPWA } from './InstallPWA';
-import { startOfMonth, endOfMonth, format } from 'date-fns';
+import { WishesOverlay } from './WishesOverlay';
+import { ThermalInvoice } from './ThermalInvoice';
+import { startOfMonth, endOfMonth, format, eachDayOfInterval, addDays, isSameDay } from 'date-fns';
 import { formatCurrency } from '../constants';
 
 const BASE_LAT = 27.592172;
@@ -72,6 +76,116 @@ function TripCountdown({ createdAt }: { createdAt: any }) {
   );
 }
 
+function CanCalendar({ bills }: { bills: Bill[] }) {
+  const canBills = bills.filter(b => b.category === 'CAN' && b.status !== 'Cancelled');
+  
+  // Find the date of the very first can delivery
+  const firstCanBill = canBills.length > 0 
+    ? [...canBills].sort((a, b) => {
+        const dA = a.createdAt?.toDate?.() || new Date(a.date);
+        const dB = b.createdAt?.toDate?.() || new Date(b.date);
+        return dA.getTime() - dB.getTime();
+      })[0]
+    : null;
+
+  const firstDate = firstCanBill 
+    ? (firstCanBill.createdAt?.toDate?.() || new Date(firstCanBill.date))
+    : new Date();
+
+  // Calculate the current 30-day cycle
+  const now = new Date();
+  const diffTime = Math.abs(now.getTime() - firstDate.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const currentCycleIndex = Math.floor(diffDays / 30);
+  
+  const cycleStartDate = addDays(firstDate, currentCycleIndex * 30);
+  const cycleEndDate = addDays(cycleStartDate, 29);
+
+  const days = eachDayOfInterval({
+    start: cycleStartDate,
+    end: cycleEndDate
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+          Cycle: {format(cycleStartDate, 'dd MMM')} - {format(cycleEndDate, 'dd MMM')}
+        </span>
+        <div className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-blue-600" />
+          <span className="text-[9px] font-bold text-slate-400 uppercase">Deliveries</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
+          <div key={d} className="text-[10px] font-black text-slate-400 text-center py-2">{d}</div>
+        ))}
+        {days.map(day => {
+          const dayBills = canBills.filter(b => {
+            const bDate = b.createdAt?.toDate?.() || new Date(b.date);
+            return isSameDay(bDate, day);
+          });
+          const totalCans = dayBills.reduce((acc, curr) => acc + curr.quantity, 0);
+          const isToday = isSameDay(day, new Date());
+
+          return (
+            <div 
+              key={day.toISOString()} 
+              className={`aspect-square rounded-lg flex flex-col items-center justify-center p-1 border transition-all ${
+                totalCans > 0 
+                  ? 'bg-blue-600 border-blue-400 text-white shadow-md scale-105 z-10' 
+                  : isToday 
+                    ? 'bg-white border-blue-200 ring-1 ring-blue-100 ring-offset-1' 
+                    : 'bg-slate-50 border-slate-100 text-slate-400'
+              }`}
+            >
+              <span className={`text-[9px] font-bold leading-none ${totalCans > 0 ? 'opacity-100' : 'opacity-40'}`}>{format(day, 'd')}</span>
+              {totalCans > 0 && <span className="text-xs font-black leading-none mt-1">{totalCans}</span>}
+              {isToday && totalCans === 0 && <div className="w-1 h-1 bg-blue-400 rounded-full mt-1" />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BottleLog({ bills }: { bills: Bill[] }) {
+  const bottleBills = bills.filter(b => b.category === 'BOTTLE' && b.status !== 'Cancelled');
+  
+  if (bottleBills.length === 0) {
+    return (
+      <div className="text-center py-8 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+        <Package size={32} className="mx-auto text-slate-300 mb-2" />
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No Bottle History</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {bottleBills.slice(0, 10).map(bill => (
+        <div key={bill.id} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-600 shadow-sm">
+              <Droplets size={18} />
+            </div>
+            <div>
+              <div className="text-xs font-black text-slate-800">{bill.bottleSize} Bundle</div>
+              <div className="text-[10px] font-bold text-slate-500">{format(bill.createdAt?.toDate?.() || new Date(bill.date), 'dd MMM yyyy')}</div>
+            </div>
+          </div>
+          <div className="text-right">
+             <div className="text-sm font-black text-slate-900">Qty: {bill.quantity}</div>
+             <div className="text-[10px] font-bold text-blue-600">{formatCurrency(bill.grandTotal)}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function LiveChatModal({ bill, onClose, customerName }: { bill: Bill, onClose: () => void, customerName: string }) {
    const [rating, setRating] = useState(5);
    const [text, setText] = useState('');
@@ -83,6 +197,7 @@ function LiveChatModal({ bill, onClose, customerName }: { bill: Bill, onClose: (
        billId: bill.id,
        billNumber: bill.billNumber,
        customerName,
+       franchiseId: bill.franchiseId || null,
        rating,
        comment: text.trim(),
        createdAt: serverTimestamp()
@@ -124,8 +239,11 @@ function LiveChatModal({ bill, onClose, customerName }: { bill: Bill, onClose: (
                value={text}
                onChange={(e) => setText(e.target.value)}
                placeholder="Tell us about the delivery quality..."
-               className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-sm font-medium focus:border-blue-500 outline-none resize-none h-32 mb-6"
+               className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-sm font-medium focus:border-blue-500 outline-none resize-none h-32 mb-2"
              />
+             <p className="text-[10px] text-slate-500 font-bold mb-6 italic leading-tight">
+               Feedback will be shared to Head Office and also with Franchise.
+             </p>
 
              <button 
                onClick={handleSubmit}
@@ -145,23 +263,19 @@ export function CustomerBookingPortal() {
   const [franchises, setFranchises] = useState<any[]>([]);
   
   const [mobileNumber, setMobileNumber] = useState('');
-  const [loginStep, setLoginStep] = useState<'MOBILE' | 'PIN_LOGIN' | 'PIN_SETUP' | 'NEW_REGISTER'>('MOBILE');
+  const [loginStep, setLoginStep] = useState<'MOBILE_LOGIN' | 'PIN_LOGIN' | 'PIN_SETUP' | 'NEW_REGISTER' | 'GOOGLE_LINK'>('MOBILE_LOGIN');
   const [pin, setPin] = useState('');
   const [newName, setNewName] = useState('');
+  const [tempGoogleUser, setTempGoogleUser] = useState<{ email: string; name: string } | null>(null);
 
   useEffect(() => {
-    // Detect franchise from URL
-    const params = new URLSearchParams(window.location.search);
-    const fId = params.get('f');
-    if (fId) {
-      setFranchiseId(fId);
+    // Check local storage for persistent login
+    const savedMobile = localStorage.getItem('customerBookingMobile');
+    const isLoggedIn = localStorage.getItem('isCustomerLoggedIn');
+    if (savedMobile && isLoggedIn === 'true') {
+      setMobileNumber(savedMobile);
+      bypassLogin(savedMobile);
     }
-
-    // Fetch active franchises
-    const unsub = onSnapshot(query(collection(db, 'franchises'), where('status', '==', 'Active')), (snap) => {
-      setFranchises(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-    return () => unsub();
   }, []);
   
   const [isLogged, setIsLogged] = useState(false);
@@ -178,10 +292,14 @@ export function CustomerBookingPortal() {
   const [pipeLength, setPipeLength] = useState<number>(50);
   const [totalEstimate, setTotalEstimate] = useState(0);
 
+  const [activeSlide, setActiveSlide] = useState<'TANKER' | 'CAN' | 'BOTTLE'>('TANKER');
   const [primaryView, setPrimaryView] = useState<'HOME' | 'TANKER_SECTION' | 'CAN_SECTION' | 'BOTTLE_SECTION'>('HOME');
   const [selectedCategory, setSelectedCategory] = useState<ProductCategory | null>(null);
   const [bottleSize, setBottleSize] = useState<'500ml' | '1L' | '2L'>('1L');
   const [quantity, setQuantity] = useState(1);
+  const [isFastDelivery, setIsFastDelivery] = useState(false);
+  const [nextDayCans, setNextDayCans] = useState<number>(0);
+  const [updatingNextDay, setUpdatingNextDay] = useState(false);
 
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
@@ -192,9 +310,20 @@ export function CustomerBookingPortal() {
   
   const [isMonthlyCan, setIsMonthlyCan] = useState(false);
 
+  useEffect(() => {
+    if (selectedCategory === 'CAN' && isMonthlyCan) {
+      setSelectedCategory('MONTHLY_CAN');
+    } else if (selectedCategory === 'MONTHLY_CAN' && !isMonthlyCan) {
+      setSelectedCategory('CAN');
+    }
+  }, [isMonthlyCan, selectedCategory]);
+
   // Analytics
-  const [monthlyTrips, setMonthlyTrips] = useState(0);
-  const [monthlyExpense, setMonthlyExpense] = useState(0);
+  const [analytics, setAnalytics] = useState({
+    TANKER: { trips: 0, spent: 0 },
+    CAN: { trips: 0, spent: 0 },
+    BOTTLE: { trips: 0, spent: 0 }
+  });
   const [bills, setBills] = useState<Bill[]>([]);
   const [expandedTripId, setExpandedTripId] = useState<string | null>(null);
   const [modalView, setModalView] = useState<{ type: 'BILL' | 'QR' | 'ACCOUNT' | 'CHAT', bill: Bill } | null>(null);
@@ -205,6 +334,43 @@ export function CustomerBookingPortal() {
   const beepAudio = useRef<HTMLAudioElement | null>(null);
   const prevStatuses = useRef<Record<string, string>>({});
   const [driverLocations, setDriverLocations] = useState<Record<string, any>>({});
+  const [bookingRequests, setBookingRequests] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!isLogged || !customer?.id) return;
+    const qReqs = query(
+      collection(db, 'bookingRequests'),
+      where('customerId', '==', customer.id),
+      where('status', '==', 'Pending')
+    );
+    const unsubReqs = onSnapshot(qReqs, (snap) => {
+      const reqs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setBookingRequests(reqs);
+    });
+    return () => unsubReqs();
+  }, [isLogged, customer?.id]);
+
+  const handleCancelRequest = async (requestId: string) => {
+    if (window.confirm('Are you sure you want to cancel this booking request?')) {
+      try {
+        await updateDoc(doc(db, 'bookingRequests', requestId), {
+          status: 'Cancelled',
+          updatedAt: serverTimestamp()
+        });
+        alert('Booking request cancelled successfully.');
+      } catch (err: any) {
+        alert('Failed to cancel booking: ' + (err.message || String(err)));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (customer?.nextDayCans) {
+      setNextDayCans(customer.nextDayCans);
+    } else {
+      setNextDayCans(0);
+    }
+  }, [customer]);
 
   useEffect(() => {
     // Check for "Reached" status to trigger alarm
@@ -265,12 +431,7 @@ export function CustomerBookingPortal() {
   }, [bills, isAlarmSilenced]);
 
   useEffect(() => {
-    const savedMobile = localStorage.getItem('customerBookingMobile');
-    const isLoggedIn = localStorage.getItem('isCustomerLoggedIn');
-    if (savedMobile && isLoggedIn === 'true') {
-      setMobileNumber(savedMobile);
-      bypassLogin(savedMobile);
-    }
+    // Already handled in the modified block above
   }, []);
 
   useEffect(() => {
@@ -288,6 +449,9 @@ export function CustomerBookingPortal() {
       } else if (pipeLength > 100) {
         calc += 50 + ((pipeLength - 100) * 3); // 3 rs per feet beyond 100 ft
       }
+      if (isFastDelivery) {
+        calc += 100; // Emergency +100
+      }
       setTotalEstimate(calc);
     } else if (selectedCategory === 'STANDBY_TANKER') {
       // Day 1: 900, Day 2+: +600 per day
@@ -302,18 +466,31 @@ export function CustomerBookingPortal() {
       const rates = { '500ml': 10, '1L': 20, '2L': 35 };
       setTotalEstimate(rates[bottleSize] * quantity);
     } else if (selectedCategory === 'CAN') {
-      if (isMonthlyCan) {
-        setTotalEstimate(600 * quantity);
-      } else {
-        const distCost = Math.max(1, Math.ceil(distanceKm || 1)) * 10;
-        setTotalEstimate((30 * quantity) + distCost);
-      }
+      const distCost = Math.max(1, Math.ceil(distanceKm || 1)) * 10;
+      setTotalEstimate((30 * quantity) + distCost);
+    } else if (selectedCategory === 'MONTHLY_CAN') {
+      setTotalEstimate(600 * quantity);
     } else if (selectedCategory === 'DONATION') {
       setTotalEstimate(donationAmount);
     } else {
       setTotalEstimate(0);
     }
   }, [distanceKm, floors, pipeLength, selectedCategory, bottleSize, quantity, donationAmount, isMonthlyCan]);
+
+  useEffect(() => {
+    // Detect franchise from URL
+    const params = new URLSearchParams(window.location.search);
+    const fId = params.get('f');
+    if (fId) {
+      setFranchiseId(fId);
+    }
+
+    // Fetch active franchises
+    const unsub = onSnapshot(query(collection(db, 'franchises'), where('status', '==', 'Active')), (snap) => {
+      setFranchises(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, []);
 
   const bypassLogin = async (mobile: string) => {
     try {
@@ -365,9 +542,107 @@ export function CustomerBookingPortal() {
   const completeLogin = (custData: Customer) => {
     setCustomer(custData);
     setIsLogged(true);
-    localStorage.setItem('customerBookingMobile', mobileNumber);
+    setMobileNumber(custData.mobile);
+    localStorage.setItem('customerBookingMobile', custData.mobile);
     localStorage.setItem('isCustomerLoggedIn', 'true');
-    // fetchCustomerData(custData.id!); // Removed missing function call
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      const email = user.email || '';
+      
+      if (!email) {
+        setError('Google sign-in did not return an email address.');
+        setLoading(false);
+        return;
+      }
+
+      // Query customers collection for this email
+      const q = query(collection(db, 'customers'), where('email', '==', email));
+      const snap = await getDocs(q);
+
+      if (!snap.empty) {
+        // Customer exists with this email! Log them in directly.
+        const custData = { id: snap.docs[0].id, ...snap.docs[0].data() } as Customer;
+        completeLogin(custData);
+      } else {
+        // No customer exists with this email. We need to link a mobile number.
+        setTempGoogleUser({
+          email: email,
+          name: user.displayName || 'Google User'
+        });
+        setMobileNumber(''); // Reset phone number input
+        setNewName(user.displayName || 'Google User');
+        setLoginStep('GOOGLE_LINK');
+      }
+    } catch (err: any) {
+      console.error('Google login failed:', err?.message || String(err));
+      setError('Google login failed. ' + (err?.message || String(err)));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLinkSubmit = async () => {
+    if (mobileNumber.length !== 10) {
+      setError('Enter a valid 10-digit mobile number.');
+      return;
+    }
+    if (!newName.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+    if (!tempGoogleUser) {
+      setError('Session expired. Please try Google login again.');
+      setLoginStep('MOBILE_LOGIN');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      // Check if a customer already exists with this mobile number
+      const q = query(collection(db, 'customers'), where('mobile', '==', mobileNumber));
+      const snap = await getDocs(q);
+
+      if (!snap.empty) {
+        // Link email to existing customer
+        const existingCust = snap.docs[0];
+        const updatedData = {
+          email: tempGoogleUser.email,
+          name: newName.trim(),
+          updatedAt: serverTimestamp()
+        };
+        await updateDoc(doc(db, 'customers', existingCust.id), updatedData);
+        const custData = { id: existingCust.id, ...existingCust.data(), ...updatedData } as unknown as Customer;
+        completeLogin(custData);
+      } else {
+        // Create a new customer
+        const newCustData = {
+          name: newName.trim(),
+          mobile: mobileNumber,
+          email: tempGoogleUser.email,
+          address: '',
+          pendingAmount: 0,
+          totalAdvance: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          franchiseId: franchiseId || 'legacy-rajhans'
+        };
+        const docRef = await addDoc(collection(db, 'customers'), newCustData);
+        await ledgerAutomation.ensureCustomerAccount(docRef.id, newCustData.name, newCustData.franchiseId || null);
+        completeLogin({ id: docRef.id, ...newCustData } as Customer);
+      }
+    } catch (err: any) {
+      console.error('Linking failed:', err?.message || String(err));
+      setError('Verification failed. ' + (err?.message || String(err)));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAuthSubmit = async () => {
@@ -388,9 +663,13 @@ export function CustomerBookingPortal() {
           totalAdvance: 0,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-          franchiseId: franchiseId // Link to detected franchise
+          franchiseId: franchiseId || 'legacy-rajhans' // Link to detected franchise
         };
         const docRef = await addDoc(collection(db, 'customers'), newCustData);
+        
+        // Auto-create ledger account for customer
+        await ledgerAutomation.ensureCustomerAccount(docRef.id, newCustData.name, newCustData.franchiseId || null);
+
         completeLogin({ id: docRef.id, ...newCustData } as Customer);
       } catch (err: any) {
         handleFirestoreError(err, OperationType.CREATE, 'customers');
@@ -435,8 +714,11 @@ export function CustomerBookingPortal() {
 
     const unsubscribe = onSnapshot(billsQ, (snapshot) => {
       const allBills: Bill[] = [];
-      let mTrips = 0;
-      let mExpense = 0;
+      const newAnalytics = {
+        TANKER: { trips: 0, spent: 0 },
+        CAN: { trips: 0, spent: 0 },
+        BOTTLE: { trips: 0, spent: 0 }
+      };
 
       snapshot.forEach(doc => {
         const b = { id: doc.id, ...doc.data() } as Bill;
@@ -444,8 +726,16 @@ export function CustomerBookingPortal() {
         
         const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.date);
         if (bDate >= startObj && bDate <= endObj && b.status !== 'Cancelled') {
-          mTrips += 1;
-          mExpense += b.grandTotal;
+          if (b.category === 'TANKER' || b.category === 'STANDBY_TANKER' || b.category === 'MONTHLY_TANKER') {
+            newAnalytics.TANKER.trips += 1;
+            newAnalytics.TANKER.spent += b.grandTotal;
+          } else if (b.category === 'CAN' || b.category === 'MONTHLY_CAN') {
+            newAnalytics.CAN.trips += 1;
+            newAnalytics.CAN.spent += b.grandTotal;
+          } else if (b.category === 'BOTTLE') {
+            newAnalytics.BOTTLE.trips += 1;
+            newAnalytics.BOTTLE.spent += b.grandTotal;
+          }
         }
       });
       
@@ -456,8 +746,7 @@ export function CustomerBookingPortal() {
       });
 
       setBills(allBills);
-      setMonthlyTrips(mTrips);
-      setMonthlyExpense(mExpense);
+      setAnalytics(newAnalytics);
     }, (error) => {
        handleFirestoreError(error, OperationType.LIST, 'bills');
     });
@@ -467,13 +756,45 @@ export function CustomerBookingPortal() {
 
   const handleLocationSelectWrapper = (lat: number, lng: number, address: string) => {
     setLocation({ lat, lng, address });
-    const dist = getDistanceFromLatLonInKm(BASE_LAT, BASE_LNG, lat, lng);
-    setDistanceKm(dist);
+    
+    // Proximity Assignment Logic: Check nearest franchise HQ
+    if (franchises.length > 0) {
+      let nearestDist = Infinity;
+      let nearestId = franchiseId; // Default to existing if set via URL
+      
+      // If URL explicitly forced a franchise, we stay with it
+      const forcedById = new URLSearchParams(window.location.search).get('f');
+      
+      if (!forcedById) {
+        franchises.forEach(f => {
+          // If franchise has no coordinates, fallback to BASE_LAT
+          const fLat = f.coordinates?.lat || BASE_LAT;
+          const fLng = f.coordinates?.lng || BASE_LNG;
+          const d = getDistanceFromLatLonInKm(fLat, fLng, lat, lng);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearestId = f.id;
+          }
+        });
+        setFranchiseId(nearestId);
+        setDistanceKm(nearestDist);
+      } else {
+        // Use forced franchise coordinates for distance calculation
+        const forcedF = franchises.find(f => f.id === forcedById);
+        const fLat = forcedF?.coordinates?.lat || BASE_LAT;
+        const fLng = forcedF?.coordinates?.lng || BASE_LNG;
+        setDistanceKm(getDistanceFromLatLonInKm(fLat, fLng, lat, lng));
+      }
+    } else {
+      // Fallback if no franchises fetched yet
+      const dist = getDistanceFromLatLonInKm(BASE_LAT, BASE_LNG, lat, lng);
+      setDistanceKm(dist);
+    }
   };
 
   const handleBookNow = async () => {
     if (!customer) return;
-    const needsLocation = ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'CAN', 'BOTTLE'].includes(selectedCategory!);
+    const needsLocation = ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'CAN', 'MONTHLY_CAN', 'BOTTLE'].includes(selectedCategory!);
     
     if (needsLocation && !location) {
       setError('Please select a delivery location on the map.');
@@ -493,10 +814,11 @@ export function CustomerBookingPortal() {
       if (selectedCategory === 'TANKER') {
         if (pipeLength > 50) finalRemarks += ` | Required Pipe: ${pipeLength} feet`;
         if (floors > 0) finalRemarks += ` | Delivery up to ${floors} floors`;
+        if (isFastDelivery) finalRemarks += ` | 🔥 FASTEST EMERGENCY DELIVERY (Paid +₹100)`;
       }
       
-      if (selectedCategory === 'CAN') {
-        finalRemarks += isMonthlyCan 
+      if (selectedCategory === 'CAN' || selectedCategory === 'MONTHLY_CAN') {
+        finalRemarks += selectedCategory === 'MONTHLY_CAN' 
           ? ` | Monthly Plan (₹600/can) with Free Water Dispenser`
           : ` | One-Time Delivery`;
       }
@@ -521,7 +843,7 @@ export function CustomerBookingPortal() {
         status: 'Pending',
         requestedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        franchiseId: franchiseId || customer?.franchiseId || null
+        franchiseId: franchiseId || customer?.franchiseId || 'legacy-rajhans'
       });
       
       setBookingSuccess(true);
@@ -535,10 +857,11 @@ export function CustomerBookingPortal() {
   };
 
   const handleLogout = () => {
+    auth.signOut();
     setIsLogged(false);
     setCustomer(null);
     setMobileNumber('');
-    setLoginStep('MOBILE');
+    setLoginStep('MOBILE_LOGIN');
     setPin('');
     localStorage.removeItem('customerBookingMobile');
     localStorage.removeItem('isCustomerLoggedIn');
@@ -570,24 +893,29 @@ export function CustomerBookingPortal() {
           className="bg-white p-8 rounded-[2.5rem] shadow-xl max-w-md w-full text-center border border-slate-100"
         >
           <div className="bg-slate-900 w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-blue-200">
-            {loginStep !== 'MOBILE' ? <Lock size={40} className="text-white" /> : <Logo size={48} color="white" />}
+             <Logo size={48} color="white" />
           </div>
           <h2 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">
             Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
           </h2>
-          <h1 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-8">
+          
+          <h1 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-8 mt-2">
             {loginStep === 'NEW_REGISTER' ? 'Register' :
              loginStep === 'PIN_SETUP' ? 'Setup Profile' :
-             loginStep === 'PIN_LOGIN' ? 'Enter PIN' : 'Booking Portal'}
+             loginStep === 'PIN_LOGIN' ? 'Enter PIN' : 
+             loginStep === 'GOOGLE_LINK' ? 'Secure Link / Register' : 'Booking Portal'}
           </h1>
-          <p className="text-slate-500 font-medium mb-8 text-sm">
-            {loginStep === 'NEW_REGISTER' ? 'Enter your details to start booking' :
-             loginStep === 'PIN_SETUP' ? 'Create a secure 4-digit PIN for future logins' :
-             loginStep === 'PIN_LOGIN' ? `Welcome back, ${customer?.name}` : 'Login with your registered mobile number'}
-          </p>
           
           <div className="space-y-4 mb-6 text-left">
-            {loginStep === 'MOBILE' && (
+            {loginStep === 'GOOGLE_LINK' && tempGoogleUser && (
+              <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl mb-4 text-xs font-medium text-blue-800 leading-relaxed">
+                <span className="font-bold text-blue-900 block mb-1">Google account connected:</span>
+                <span className="font-bold underline">{tempGoogleUser.email}</span>
+                <span className="text-slate-500 mt-2 block">Please confirm your Name and Mobile Number to link or register your account securely.</span>
+              </div>
+            )}
+
+            {(loginStep === 'MOBILE_LOGIN' || loginStep === 'NEW_REGISTER' || loginStep === 'GOOGLE_LINK') && (
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <span className="text-slate-400 font-bold">+91</span>
@@ -602,7 +930,7 @@ export function CustomerBookingPortal() {
               </div>
             )}
 
-            {loginStep === 'NEW_REGISTER' && (
+            {(loginStep === 'NEW_REGISTER' || loginStep === 'GOOGLE_LINK') && (
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <UserIcon size={18} className="text-slate-400" />
@@ -617,7 +945,7 @@ export function CustomerBookingPortal() {
               </div>
             )}
 
-            {loginStep !== 'MOBILE' && (
+            {['PIN_SETUP', 'PIN_LOGIN'].includes(loginStep) && (
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <Lock size={18} className="text-slate-400" />
@@ -650,38 +978,95 @@ export function CustomerBookingPortal() {
             )}
           </div>
           
-          <button 
-            onClick={loginStep === 'MOBILE' ? handleMobileSubmit : handleAuthSubmit}
-            disabled={loading || (loginStep === 'MOBILE' && mobileNumber.length < 10) || (loginStep !== 'MOBILE' && pin.length < 4)}
-            className={`w-full h-14 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${
-              loading ? 'bg-blue-100 text-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'
-            }`}
-          >
-            {loading ? (
-               <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
-            ) : (
-              <>
-                Continue securely <CheckCircle2 size={18} />
-              </>
-            )}
-          </button>
-          
-          {loginStep !== 'MOBILE' && (
+          {(loginStep === 'MOBILE_LOGIN' || loginStep === 'NEW_REGISTER' || loginStep === 'PIN_SETUP' || loginStep === 'PIN_LOGIN' || loginStep === 'GOOGLE_LINK') && (
             <button 
-              onClick={() => { setLoginStep('MOBILE'); setPin(''); setError(''); }}
-              className="mt-4 text-xs font-bold text-slate-500 hover:text-slate-700"
+              onClick={loginStep === 'MOBILE_LOGIN' ? handleMobileSubmit : (loginStep === 'GOOGLE_LINK' ? handleGoogleLinkSubmit : handleAuthSubmit)}
+              disabled={loading || (loginStep === 'MOBILE_LOGIN' && mobileNumber.length < 10) || (loginStep === 'GOOGLE_LINK' && (mobileNumber.length < 10 || !newName.trim())) || (['PIN_SETUP', 'PIN_LOGIN'].includes(loginStep) && pin.length < 4)}
+              className={`w-full h-14 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${
+                loading ? 'bg-blue-100 text-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'
+              }`}
             >
-              Change Mobile Number
+              {loading ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+              ) : (
+                <>
+                  Continue securely <CheckCircle2 size={18} />
+                </>
+              )}
             </button>
           )}
 
+          {loginStep === 'GOOGLE_LINK' && (
+            <button 
+              type="button"
+              onClick={() => {
+                setLoginStep('MOBILE_LOGIN');
+                setTempGoogleUser(null);
+                setError('');
+              }}
+              className="mt-3 w-full text-xs font-bold text-slate-500 hover:text-slate-700 transition"
+            >
+              Cancel Setup
+            </button>
+          )}
+
+          {loginStep === 'MOBILE_LOGIN' && (
+            <>
+              <div className="relative my-6 flex items-center justify-center">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-100"></div>
+                </div>
+                <span className="relative bg-white px-4 text-xs font-black text-slate-400 uppercase tracking-widest">OR</span>
+              </div>
+              
+              <button 
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                className="w-full border-2 border-slate-100 hover:border-slate-200 active:scale-98 text-slate-700 h-14 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all"
+              >
+                {loading ? (
+                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-slate-400 border-t-transparent" />
+                ) : (
+                  <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.92h6.6a5.66 5.66 0 0 1-2.45 3.71v3.08h4c2.32-2.14 3.59-5.3 3.59-8.64Z"/>
+                    <path fill="#34A853" d="M12 24c3.24 0 5.97-1.08 7.96-2.91l-4-3.08c-1.12.75-2.54 1.19-3.96 1.19-3.05 0-5.63-2.06-6.55-4.83H1.31v3.18A12 12 0 0 0 12 24Z"/>
+                    <path fill="#FBBC05" d="M5.45 14.37a7.22 7.22 0 0 1 0-4.56v-3.1h-4.14a12 12 0 0 0 0 10.84l4.14-3.18Z"/>
+                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.4C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.31 6.71l4.14 3.18C6.37 7.08 8.95 4.75 12 4.75Z"/>
+                  </svg>
+                )}
+                Login with Google
+              </button>
+            </>
+          )}
+          
           <div className="mt-6 flex items-center justify-center gap-2 text-xs font-bold text-green-600 bg-green-50 py-2 rounded-lg border border-green-100">
-             <Lock size={14} /> Secured via PIN Authentication
+             <Lock size={14} /> Secured via Mobile PIN / Google Auth
           </div>
         </motion.div>
       </div>
     );
   }
+
+  if (!customer && isLogged) return null;
+
+  const handleUpdateNextDayCans = async (count: number) => {
+    if (!customer?.id) return;
+    setUpdatingNextDay(true);
+    try {
+      await updateDoc(doc(db, 'customers', customer.id), {
+        nextDayCans: count,
+        updatedAt: serverTimestamp()
+      });
+      setNextDayCans(count);
+      setCustomer(prev => prev ? { ...prev, nextDayCans: count } : null);
+    } catch (err: any) {
+      console.error("Failed to update next day cans:", err instanceof Error ? err.message : String(err));
+      setError("Failed to update next day request.");
+    } finally {
+      setUpdatingNextDay(false);
+    }
+  };
 
   if (bookingSuccess) {
     return (
@@ -725,6 +1110,7 @@ export function CustomerBookingPortal() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <WishesOverlay />
       {/* Alarm Modal for Reached Status */}
       <AnimatePresence>
         {activeAlarmBill && (
@@ -789,29 +1175,153 @@ export function CustomerBookingPortal() {
       </header>
 
       <main className="max-w-md mx-auto p-4 pb-24 space-y-6">
-        {/* Monthly Analytics */}
-        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[2rem] p-6 text-white shadow-xl shadow-blue-200">
-          <div className="flex items-center gap-2 mb-6">
-            <Calendar size={18} className="text-blue-200" />
-            <span className="font-bold text-sm text-blue-100 uppercase tracking-widest">{format(new Date(), 'MMMM yyyy')}</span>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-blue-200 text-xs font-bold uppercase tracking-wider mb-1">Trips</p>
-              <div className="flex items-end gap-2">
-                <span className="text-4xl font-display font-black leading-none">{monthlyTrips}</span>
-                <Truck size={20} className="text-blue-300 pb-1" />
-              </div>
-            </div>
-            <div>
-              <p className="text-blue-200 text-xs font-bold uppercase tracking-wider mb-1">Spent</p>
-              <div className="flex items-end gap-1">
-                <span className="text-2xl font-display font-black leading-none">{formatCurrency(monthlyExpense)}</span>
-              </div>
-            </div>
-          </div>
+        {/* Premium Intro Section */}
+        <div className="bg-white rounded-[3rem] p-8 shadow-sm border border-slate-100 flex flex-col items-center">
+           <div className="w-full mb-8">
+              <PremiumTractor />
+           </div>
+           <h3 className="text-2xl font-display font-black text-slate-900 tracking-tight text-center">Premium Water Flow</h3>
+           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Smart Distribution Network</p>
         </div>
+
+        {/* Horizontal Slide Selector - Requested Feature */}
+        <div className="bg-white rounded-[2rem] p-3 shadow-sm border border-slate-100 flex items-center gap-2 sticky top-[4.5rem] z-40">
+          {(['TANKER', 'CAN', 'BOTTLE'] as const).map((slide) => (
+            <button
+              key={slide}
+              onClick={() => setActiveSlide(slide)}
+              className={`flex-1 h-12 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                activeSlide === slide 
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              {slide === 'TANKER' ? 'Tanker Trips' : slide === 'CAN' ? '20L Cans' : 'Packaged Water'}
+            </button>
+          ))}
+        </div>
+
+        <AnimatePresence mode="wait">
+          {activeSlide === 'TANKER' && (
+            <motion.div 
+              key="tanker-slide"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[2.5rem] p-6 text-white shadow-xl shadow-blue-200">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <Calendar size={18} className="text-blue-200" />
+                    <span className="font-bold text-sm text-blue-100 uppercase tracking-widest">{format(new Date(), 'MMMM yyyy')}</span>
+                  </div>
+                  <div className="text-[10px] font-black bg-blue-500/30 px-3 py-1 rounded-full text-blue-100 border border-blue-400/30">
+                     Tanker Summary
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-3xl font-black">{formatCurrency(analytics.TANKER.spent)}</div>
+                    <div className="text-[10px] font-bold text-blue-300 uppercase tracking-widest">{analytics.TANKER.trips} Trips Delivered</div>
+                  </div>
+                  <button 
+                    onClick={() => { setPrimaryView('TANKER_SECTION'); setSelectedCategory('TANKER'); }}
+                    className="w-full bg-white text-blue-600 h-14 rounded-2xl font-black text-sm active:scale-95 transition-all mt-2"
+                  >
+                    Book Tanker Trip (Starts ₹350)
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeSlide === 'CAN' && (
+            <motion.div 
+              key="can-slide"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-[2.5rem] p-6 text-white shadow-xl shadow-orange-200">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <Flask size={18} className="text-orange-200" />
+                    <span className="font-bold text-sm text-orange-100 uppercase tracking-widest">20L RO Cans</span>
+                  </div>
+                  <div className="text-[10px] font-black bg-orange-400/30 px-3 py-1 rounded-full text-orange-100 border border-orange-300/30">
+                     Can Summary
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-3xl font-black">{formatCurrency(analytics.CAN.spent)}</div>
+                    <div className="text-[10px] font-bold text-orange-200 uppercase tracking-widest">{analytics.CAN.trips} Deliveries</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <button 
+                      onClick={() => { setPrimaryView('CAN_SECTION'); setSelectedCategory('CAN'); setIsMonthlyCan(false); }}
+                      className="bg-white text-orange-600 h-14 rounded-2xl font-black text-xs active:scale-95 transition-all"
+                    >
+                      Single Can Trip
+                    </button>
+                    <button 
+                      onClick={() => { setPrimaryView('CAN_SECTION'); setSelectedCategory('MONTHLY_CAN'); setIsMonthlyCan(true); }}
+                      className="bg-orange-900/20 border border-white/30 text-white h-14 rounded-2xl font-black text-xs active:scale-95 transition-all"
+                    >
+                      Monthly Pass
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeSlide === 'BOTTLE' && (
+            <motion.div 
+              key="bottle-slide"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              <div className="bg-gradient-to-br from-green-600 to-green-700 rounded-[2.5rem] p-6 text-white shadow-xl shadow-green-200">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <Package size={18} className="text-green-200" />
+                    <span className="font-bold text-sm text-green-100 uppercase tracking-widest">Packaged Items</span>
+                  </div>
+                  <div className="text-[10px] font-black bg-green-500/30 px-3 py-1 rounded-full text-green-100 border border-green-400/30">
+                     Bottle Summary
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-3xl font-black text-white">{formatCurrency(analytics.BOTTLE.spent)}</div>
+                    <div className="text-[10px] font-bold text-green-200 uppercase tracking-widest">{analytics.BOTTLE.trips} bundles ordered</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <button 
+                      onClick={() => { setPrimaryView('BOTTLE_SECTION'); setSelectedCategory('BOTTLE'); }}
+                      className="bg-white text-green-600 h-14 rounded-2xl font-black text-xs active:scale-95 transition-all shadow-sm"
+                    >
+                      500ml Case
+                    </button>
+                    <button 
+                      onClick={() => { setPrimaryView('BOTTLE_SECTION'); setSelectedCategory('BOTTLE'); }}
+                      className="bg-green-800/30 border border-white/30 text-white h-14 rounded-2xl font-black text-xs active:scale-95 transition-all"
+                    >
+                      1L & 2L Bundles
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Existing Sections Below */}
 
         {/* Booking Section */}
         {primaryView === 'HOME' ? (
@@ -834,7 +1344,10 @@ export function CustomerBookingPortal() {
                 <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-blue-600">
                   <Truck size={24} />
                 </div>
-                <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 text-center px-2">Water Tanker</span>
+                <div className="text-center">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">Tanker</span>
+                  <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Large Volume Tankers</span>
+                </div>
               </button>
 
               <button 
@@ -844,7 +1357,10 @@ export function CustomerBookingPortal() {
                 <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-orange-600">
                   <Flask size={24} />
                 </div>
-                <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 text-center px-2 text-nowrap">20L Can</span>
+                <div className="text-center">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">20L Can</span>
+                  <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Home/Office Cans</span>
+                </div>
               </button>
 
               <button 
@@ -854,7 +1370,10 @@ export function CustomerBookingPortal() {
                 <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-green-600">
                   <Package size={24} />
                 </div>
-                <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 text-center px-2">Packaged Water</span>
+                <div className="text-center">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">Packaged</span>
+                  <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Bottles & Bundles</span>
+                </div>
               </button>
             </div>
 
@@ -885,46 +1404,46 @@ export function CustomerBookingPortal() {
               </div>
             </div>
 
-            <div className="space-y-4">
-              <button 
-                onClick={() => { setSelectedCategory('TANKER'); setPipeLength(50); }}
-                className="w-full bg-slate-50 p-5 rounded-3xl border-2 border-slate-100 flex items-center gap-4 text-left hover:border-blue-500 transition-all"
-              >
-                <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-blue-600 shadow-sm">
-                  <Truck size={24} />
-                </div>
-                <div className="flex-1">
-                  <div className="font-black text-slate-900">Trip Tanker</div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Fastest for Domestic/Constr</div>
-                </div>
-              </button>
+              <div className="space-y-4">
+                <button 
+                  onClick={() => { setSelectedCategory('TANKER'); setPipeLength(50); }}
+                  className="w-full bg-slate-50 p-5 rounded-3xl border-2 border-slate-100 flex items-center gap-4 text-left hover:border-blue-500 transition-all"
+                >
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-blue-600 shadow-sm">
+                    <Truck size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-black text-slate-900 leading-tight">Trip Tanker</div>
+                    <p className="text-[10px] text-slate-500 font-medium leading-tight mt-1 capitalize">One-time bulk delivery for house filling & construction.</p>
+                  </div>
+                </button>
 
-              <button 
-                onClick={() => { setSelectedCategory('STANDBY_TANKER'); setQuantity(1); setPipeLength(50); }}
-                className="w-full bg-slate-50 p-5 rounded-3xl border-2 border-slate-100 flex items-center gap-4 text-left hover:border-blue-500 transition-all"
-              >
-                <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-orange-600 shadow-sm">
-                  <Calendar size={24} />
-                </div>
-                <div className="flex-1">
-                  <div className="font-black text-slate-900">Day Tanker (Standby)</div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">₹900/Day - Perfect for Functions</div>
-                </div>
-              </button>
+                <button 
+                  onClick={() => { setSelectedCategory('STANDBY_TANKER'); setQuantity(1); setPipeLength(50); }}
+                  className="w-full bg-slate-50 p-5 rounded-3xl border-2 border-slate-100 flex items-center gap-4 text-left hover:border-blue-500 transition-all"
+                >
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-orange-600 shadow-sm">
+                    <Calendar size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-black text-slate-900 leading-tight">Day Tanker (Standby)</div>
+                    <p className="text-[10px] text-slate-500 font-medium leading-tight mt-1 capitalize">Perfect for marriage functions & events. Tanker stays with you.</p>
+                  </div>
+                </button>
 
-              <button 
-                onClick={() => { setSelectedCategory('MONTHLY_TANKER'); setQuantity(1); setPipeLength(20); }}
-                className="w-full bg-slate-50 p-5 rounded-3xl border-2 border-slate-100 flex items-center gap-4 text-left hover:border-blue-500 transition-all"
-              >
-                <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-green-600 shadow-sm">
-                  <Receipt size={24} />
-                </div>
-                <div className="flex-1">
-                  <div className="font-black text-slate-900">Monthly Booking</div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">₹10,000 / Month Rental</div>
-                </div>
-              </button>
-            </div>
+                <button 
+                  onClick={() => { setSelectedCategory('MONTHLY_TANKER'); setQuantity(1); setPipeLength(20); }}
+                  className="w-full bg-slate-50 p-5 rounded-3xl border-2 border-slate-100 flex items-center gap-4 text-left hover:border-blue-500 transition-all"
+                >
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-green-600 shadow-sm">
+                    <Receipt size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-black text-slate-900 leading-tight">Monthly Booking</div>
+                    <p className="text-[10px] text-slate-500 font-medium leading-tight mt-1 capitalize">Subscription-based regular water supply for commercial use.</p>
+                  </div>
+                </button>
+              </div>
           </div>
         ) : primaryView === 'CAN_SECTION' && !selectedCategory ? (
           <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-200">
@@ -941,23 +1460,23 @@ export function CustomerBookingPortal() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 mb-8">
               <button 
                 onClick={() => setSelectedCategory('CAN')}
-                className="bg-slate-50 p-6 rounded-[2.5rem] border-2 border-slate-100 flex flex-col items-center text-center gap-4 hover:border-blue-500 transition-all"
+                className="bg-blue-600 p-6 rounded-[2.5rem] border-2 border-blue-500 flex flex-col items-center text-center gap-4 hover:bg-blue-700 transition-all shadow-xl shadow-blue-100"
               >
                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center text-blue-600 shadow-sm">
                   <Flask size={32} />
                 </div>
                 <div>
-                   <div className="font-black text-slate-900">20L RO Can</div>
-                   <div className="text-[10px] font-bold text-slate-500 uppercase mt-1">For Home/Office</div>
+                  <div className="font-black text-white leading-tight">Book 20L RO Can</div>
+                  <p className="text-[9px] text-blue-100 font-medium leading-tight mt-1 capitalize px-2">Standard Chilled RO Water at your door.</p>
                 </div>
               </button>
 
               <button 
                 onClick={() => setSelectedCategory('DONATION')}
-                className="relative overflow-hidden bg-slate-900 p-6 rounded-[2.5rem] border-2 border-slate-800 flex flex-col items-center text-center gap-4 hover:border-orange-500 transition-all group"
+                className="relative overflow-hidden bg-slate-900 p-6 rounded-[2.5rem] border-2 border-slate-800 flex flex-col items-center text-center gap-4 hover:border-orange-500 transition-all group shadow-xl"
               >
                 <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-150 transition-transform">
                   <CheckCircle2 size={60} />
@@ -966,11 +1485,82 @@ export function CustomerBookingPortal() {
                   <Droplets size={32} />
                 </div>
                 <div className="relative z-10">
-                   <div className="font-black text-white">Water Donation</div>
-                   <div className="text-[9px] font-bold text-orange-400 uppercase mt-1 tracking-widest text-pretty">Help Poor People on Road</div>
+                   <div className="font-black text-white leading-tight">Water Donation</div>
+                   <p className="text-[9px] font-bold text-orange-400 uppercase mt-1 tracking-widest text-pretty">Help poor people on road.</p>
                 </div>
               </button>
             </div>
+
+            {/* Spent & Calendar Intro */}
+            <div className="bg-blue-50 rounded-[2rem] p-5 text-slate-800 mb-6 border border-blue-100">
+              <div className="flex items-center justify-between mb-4">
+                 <span className="text-[10px] font-black uppercase tracking-widest text-blue-100">Total Spent (Cans)</span>
+                 <div className="w-8 h-8 bg-blue-500/30 rounded-lg flex items-center justify-center">
+                    <Flask size={16} />
+                 </div>
+              </div>
+              <div className="text-3xl font-display font-black mb-1">{formatCurrency(analytics.CAN.spent)}</div>
+              <div className="text-[10px] font-bold text-blue-200 uppercase tracking-widest">{analytics.CAN.trips} Total Delivered</div>
+            </div>
+
+              <div className="mb-8">
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Calendar size={14} className="text-blue-600" /> 30-Day Delivery Calendar
+                </h4>
+                <CanCalendar bills={bills} />
+
+                {/* Monthly User Next Day Request */}
+                <div className="mt-8 bg-blue-50 border border-blue-100 rounded-3xl p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-blue-600 shadow-sm border border-blue-50">
+                      <Plus size={20} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-slate-900 leading-none">Next Day Quantity</h4>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">For Monthly Users</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-600 font-medium mb-4 leading-relaxed">
+                    Want more or fewer cans tomorrow? Update here and your driver will be notified.
+                  </p>
+                  <div className="flex items-center gap-4 bg-white p-2 rounded-2xl shadow-sm border border-blue-50">
+                    <div className="flex-1 flex flex-col pl-2">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Requested Cans</span>
+                    </div>
+                    <div className="flex items-center gap-3 pr-2">
+                      <button 
+                        onClick={() => {
+                          const currentReq = customer?.nextDayCans || 2;
+                          const newVal = Math.max(0, currentReq - 1);
+                          updateDoc(doc(db, 'customers', customer!.id!), { nextDayCans: newVal });
+                          setCustomer(c => c ? { ...c, nextDayCans: newVal } : null);
+                        }}
+                        className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 font-bold active:scale-90 transition-all border border-slate-200"
+                      >
+                        -
+                      </button>
+                      <span className="text-lg font-black text-slate-900 min-w-4 text-center">
+                        {customer?.nextDayCans || 2}
+                      </span>
+                      <button 
+                        onClick={() => {
+                          const currentReq = customer?.nextDayCans || 2;
+                          const newVal = currentReq + 1;
+                          updateDoc(doc(db, 'customers', customer!.id!), { nextDayCans: newVal });
+                          setCustomer(c => c ? { ...c, nextDayCans: newVal } : null);
+                        }}
+                        className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold active:scale-90 transition-all shadow-md shadow-blue-100"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-center gap-2">
+                     <span className="w-1 h-1 rounded-full bg-blue-400 animate-pulse" />
+                     <p className="text-[9px] font-bold text-blue-500 uppercase tracking-widest">Notification will be sent tonight at 9 PM</p>
+                  </div>
+                </div>
+              </div>
 
             {/* Emotional Appeal for Donation */}
             <div 
@@ -1021,6 +1611,48 @@ export function CustomerBookingPortal() {
                  </div>
                </div>
             </div>
+
+            {/* Pending Requests Section */}
+            {bookingRequests.length > 0 && (
+              <div className="mt-6 bg-slate-50 rounded-3xl p-5 border border-slate-100 text-slate-800 text-left">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="w-2.5 h-2.5 bg-yellow-500 rounded-full animate-pulse" />
+                   <h4 className="text-sm font-black text-slate-950 uppercase tracking-tight">Pending Bookings ({bookingRequests.length})</h4>
+                </div>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide mb-3">Awaiting Franchise Confirmation</p>
+                <div className="space-y-3">
+                  {bookingRequests.map((req) => (
+                    <div key={req.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex flex-col justify-between md:flex-row md:items-center gap-3 shadow-sm hover:border-yellow-200 transition-all">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-black text-slate-900 border border-slate-200 bg-slate-50 px-2 py-0.5 rounded-md">
+                            {req.category || 'Tanker'}
+                          </span>
+                          {req.quantity && (
+                            <span className="text-[10px] text-blue-600 font-bold">Qty: {req.quantity}</span>
+                          )}
+                          {req.tankerSize && (
+                            <span className="text-[10px] text-purple-600 font-bold">({req.tankerSize})</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] font-bold text-slate-400 font-mono">
+                          {req.date ? new Date(req.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Requested just now'}
+                        </p>
+                        {req.remark && (
+                          <p className="text-[10px] text-slate-500 italic mt-1 font-medium">"{req.remark}"</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleCancelRequest(req.id)}
+                        className="py-2 px-4 bg-red-50 text-red-600 hover:bg-red-100 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all self-end md:self-center active:scale-95 shadow-sm border border-red-100"
+                      >
+                        Cancel Order
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : primaryView === 'BOTTLE_SECTION' && !selectedCategory ? (
           <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-200">
@@ -1035,6 +1667,25 @@ export function CustomerBookingPortal() {
                 <h2 className="font-bold text-slate-900">Packaged Water</h2>
                 <p className="text-xs text-slate-500 font-medium">Bundles & Cases</p>
               </div>
+            </div>
+
+            {/* Spent Summary */}
+            <div className="bg-green-600 rounded-[2rem] p-5 text-white mb-6 shadow-lg shadow-green-100">
+              <div className="flex items-center justify-between mb-4">
+                 <span className="text-[10px] font-black uppercase tracking-widest text-green-100">Total Spent (Bottles)</span>
+                 <div className="w-8 h-8 bg-green-500/30 rounded-lg flex items-center justify-center">
+                    <Package size={16} />
+                 </div>
+              </div>
+              <div className="text-3xl font-display font-black mb-1">{formatCurrency(analytics.BOTTLE.spent)}</div>
+              <div className="text-[10px] font-bold text-green-200 uppercase tracking-widest">{analytics.BOTTLE.trips} Total Bundles</div>
+            </div>
+
+            <div className="mb-8">
+              <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <Smartphone size={14} className="text-green-600" /> Case/Bundle Delivery Log
+              </h4>
+              <BottleLog bills={bills} />
             </div>
 
             <button 
@@ -1131,9 +1782,9 @@ export function CustomerBookingPortal() {
                </div>
                {location && (
                   <div className="mt-3 space-y-2">
-                    <div className="bg-green-50 text-green-700 p-3 rounded-xl text-sm font-medium flex items-start gap-2 border border-green-100">
-                      <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
-                      <span className="line-clamp-2">{location.address}</span>
+                    <div className="bg-green-50 text-green-700 p-3 rounded-xl text-sm font-bold flex items-start gap-2 border border-green-100 justify-center">
+                      <Navigation size={16} className="shrink-0 mt-0.5" />
+                      <span>{location.lat.toFixed(6)}, {location.lng.toFixed(6)}</span>
                     </div>
                     <div className="bg-blue-50 text-blue-700 p-3 rounded-xl text-xs font-bold flex items-center justify-between border border-blue-100 tracking-wider">
                       <span>DISTANCE FROM BASE</span>
@@ -1175,8 +1826,30 @@ export function CustomerBookingPortal() {
                 )}
 
                 {selectedCategory === 'TANKER' && (
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Delivery Floor</label>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-3 flex items-center gap-2">
+                        <AlertCircle size={14} className="text-orange-500" /> Delivery Plan
+                      </label>
+                      <button 
+                        onClick={() => setIsFastDelivery(!isFastDelivery)}
+                        className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center gap-4 text-left ${isFastDelivery ? 'border-orange-500 bg-orange-50' : 'border-slate-100 bg-slate-50'}`}
+                      >
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm ${isFastDelivery ? 'bg-orange-500 text-white animate-pulse' : 'bg-white text-slate-400 border border-slate-100'}`}>
+                          <Truck size={24} />
+                        </div>
+                        <div className="flex-1">
+                          <div className={`text-sm font-black ${isFastDelivery ? 'text-orange-900' : 'text-slate-900'}`}>Fastest Emergency Delivery</div>
+                          <div className={`text-[10px] font-bold uppercase tracking-wider ${isFastDelivery ? 'text-orange-600' : 'text-slate-500'}`}>Requires Pipe & adds +₹100 charge</div>
+                        </div>
+                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${isFastDelivery ? 'border-orange-500 bg-orange-500 text-white' : 'border-slate-200'}`}>
+                          {isFastDelivery && <CheckCircle2 size={14} />}
+                        </div>
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Delivery Floor</label>
                     <select 
                       value={floors}
                       onChange={(e) => setFloors(Number(e.target.value))}
@@ -1190,7 +1863,8 @@ export function CustomerBookingPortal() {
                       <option value={5}>5th Floor (+₹210)</option>
                     </select>
                   </div>
-                )}
+                </div>
+              )}
 
                 {/* Extra Pipe */}
                 {selectedCategory === 'TANKER' && (
@@ -1240,6 +1914,7 @@ export function CustomerBookingPortal() {
                           {floors > 2 && <>Floors: +₹{(floors - 2) * 70} <br/></>}
                           {pipeLength > 50 && pipeLength <= 100 && <>Pipe: +₹50 <br/></>}
                           {pipeLength > 100 && <>Pipe: +₹{50 + ((pipeLength - 100) * 3)} <br/></>}
+                          {isFastDelivery && <>Emergency: +₹100 <br/></>}
                         </>
                       ) : selectedCategory === 'STANDBY_TANKER' ? (
                         <>
@@ -1341,14 +2016,14 @@ export function CustomerBookingPortal() {
                <div className="h-48 rounded-2xl overflow-hidden border-2 border-slate-100 mb-2">
                  <LocationPicker onLocationSelect={handleLocationSelectWrapper} />
                </div>
-               {location && (
-                  <div className="space-y-2">
-                    <div className="bg-green-50 text-green-700 p-2 rounded-xl text-xs font-medium flex items-start gap-2 border border-green-100">
-                      <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
-                      <span className="line-clamp-2">{location.address}</span>
-                    </div>
-                  </div>
-               )}
+                {location && (
+                   <div className="space-y-2">
+                     <div className="bg-green-50 text-green-700 p-2 rounded-xl text-xs font-medium flex items-start gap-2 border border-green-100 justify-center">
+                       <Navigation size={14} className="shrink-0 mt-0.5" />
+                       <span className="line-clamp-2">{location.lat.toFixed(6)}, {location.lng.toFixed(6)}</span>
+                     </div>
+                   </div>
+                )}
             </div>
 
             <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between shadow-lg">
@@ -1441,9 +2116,9 @@ export function CustomerBookingPortal() {
                </div>
                {location && (
                   <div className="space-y-2">
-                    <div className="bg-green-50 text-green-700 p-2 rounded-xl text-xs font-medium flex items-start gap-2 border border-green-100">
-                      <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
-                      <span className="line-clamp-2">{location.address}</span>
+                    <div className="bg-green-50 text-green-700 p-2 rounded-xl text-xs font-medium flex items-start gap-2 border border-green-100 justify-center">
+                      <Navigation size={14} className="shrink-0 mt-0.5" />
+                      <span className="line-clamp-2">{location.lat.toFixed(6)}, {location.lng.toFixed(6)}</span>
                     </div>
                     {!isMonthlyCan && (
                       <div className="bg-blue-50 text-blue-700 p-2 rounded-xl text-[10px] font-bold flex items-center justify-between border border-blue-100 tracking-wider">
@@ -1568,13 +2243,14 @@ export function CustomerBookingPortal() {
                         initial={{ opacity: 0, height: 0 }} 
                         animate={{ opacity: 1, height: 'auto' }} 
                         exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden"
                       >
                         <div className="grid grid-cols-4 gap-2 mt-4 pt-4 border-t border-slate-100">
-                           <button onClick={(e) => { e.stopPropagation(); setModalView({ type: 'BILL', bill }); }} className="flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl border border-slate-100 hover:bg-slate-50 hover:border-slate-300 transition-all text-slate-600">
-                             <Receipt size={18} className="text-blue-500" />
-                             <span className="text-[10px] font-bold">View Bill</span>
-                           </button>
+                           {bill.status === 'Delivered' && (
+                             <button onClick={(e) => { e.stopPropagation(); setModalView({ type: 'BILL', bill }); }} className="flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl border border-slate-100 hover:bg-slate-50 hover:border-slate-300 transition-all text-slate-600">
+                               <Receipt size={18} className="text-blue-500" />
+                               <span className="text-[10px] font-bold">View Bill</span>
+                             </button>
+                           )}
                            <button onClick={(e) => { e.stopPropagation(); setModalView({ type: 'QR', bill }); }} className="flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl border border-slate-100 hover:bg-slate-50 hover:border-slate-300 transition-all text-slate-600">
                              <QrCode size={18} className="text-purple-500" />
                              <span className="text-[10px] font-bold">Pay (QR)</span>
@@ -1617,23 +2293,10 @@ export function CustomerBookingPortal() {
                       modalView.type === 'QR' ? 'Payment QR' : 'Account Summary'
                     }</span>
                     <button onClick={() => setModalView(null)} className="p-1.5 bg-white text-slate-400 hover:text-slate-700 rounded-full shadow-sm"><X size={18} /></button>
-                 </div>
-                 <div className="p-6 overflow-y-auto">
+                  </div>
+                  <div className="p-0 overflow-y-auto max-h-[70vh]">
                     {modalView.type === 'BILL' && (
-                      <div className="text-center font-mono space-y-2">
-                        <h2 className="text-xl font-bold border-b-2 border-dashed pb-5 mb-4 uppercase flex flex-col items-center gap-3">
-                          <Logo size={40} />
-                          <span>Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">Powered by Rajhans</span></span></span>
-                        </h2>
-                        <div className="flex justify-between text-sm"><span>Token:</span> <span className="font-bold">{modalView.bill.billNumber}</span></div>
-                        <div className="flex justify-between text-sm"><span>Date:</span> <span>{modalView.bill.date}</span></div>
-                        <div className="flex justify-between text-sm"><span>Name:</span> <span>{modalView.bill.customerName}</span></div>
-                        <div className="border-t-2 border-dashed my-4 pt-4 flex justify-between font-bold text-lg">
-                           <span>Total:</span>
-                           <span>{formatCurrency(modalView.bill.grandTotal)}</span>
-                        </div>
-                        <p className="text-xs text-slate-500 italic mt-8">Thank you for booking with us.</p>
-                      </div>
+                       <ThermalInvoice bill={modalView.bill} />
                     )}
                     {modalView.type === 'QR' && (
                       <div className="flex flex-col items-center py-4">
@@ -1662,8 +2325,8 @@ export function CustomerBookingPortal() {
                              <span className="font-medium text-slate-900">{customer.mobile}</span>
                           </div>
                           <div className="text-sm flex justify-between py-1">
-                             <span className="text-slate-500">Total Trips (Month)</span>
-                             <span className="font-medium text-slate-900">{monthlyTrips}</span>
+                             <span className="text-slate-500">Total Deliveries (Month)</span>
+                             <span className="font-medium text-slate-900">{analytics.TANKER.trips + analytics.CAN.trips + analytics.BOTTLE.trips}</span>
                           </div>
                         </div>
                       </div>

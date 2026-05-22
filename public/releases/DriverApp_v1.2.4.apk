@@ -1,0 +1,4 @@
+Please use an external service like PWABuilder (pwabuilder.com) or Capacitor to convert your web application into a real native Android APK.
+
+Since this environment only produces Web applications code, I've created this placeholder.
+Once you compile your real .apk file, you can upload it into the \`public/releases/\` directory of your project replacing this file, and the download link in the Ecosystem tab will correctly download your native application!

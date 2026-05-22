@@ -7,12 +7,13 @@ import {
   MapPin, 
   Percent, 
   ShieldCheck, 
-  MoreVertical, 
   Trash2, 
-  AlertCircle,
   TrendingUp,
   Receipt,
-  X
+  X,
+  FileText,
+  Edit,
+  Navigation
 } from 'lucide-react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { 
@@ -26,11 +27,13 @@ import {
   doc,
   updateDoc,
   getDocs,
-  orderBy
+  orderBy,
+  setDoc
 } from 'firebase/firestore';
 import { Franchise, Bill } from '../types';
 import { formatCurrency } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
+import { ledgerAutomation } from '../services/ledgerAutomation';
 
 export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?: (f: Franchise | null) => void }) {
   const [franchises, setFranchises] = useState<Franchise[]>([]);
@@ -39,24 +42,78 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
   const [isSaving, setIsSaving] = useState(false);
   const [selectedFranchiseBills, setSelectedFranchiseBills] = useState<Bill[]>([]);
   const [viewStatsId, setViewStatsId] = useState<string | null>(null);
+  const [editingFranchiseId, setEditingFranchiseId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     location: '',
-    commissionPercentage: 5
+    coordinates: null as { lat: number, lng: number } | null,
+    commissionPercentage: 5,
+    gstNumber: '',
+    proprietorName: '',
+    aadharNumber: ''
   });
 
+  const getCurrentLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        setFormData(prev => ({
+          ...prev,
+          coordinates: {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          }
+        }));
+      }, (err) => {
+        alert("Failed to get location. Please enable location permissions.");
+      });
+    }
+  };
+
   useEffect(() => {
-    const q = query(collection(db, 'franchises'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Franchise));
-      setFranchises(data);
-      setLoading(false);
-    }, (err) => {
-      console.error("Error fetching franchises:", err);
-      setLoading(false);
+    let unsub = () => {};
+    
+    const seedLegacyFranchises = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'franchises'));
+        const existingEmails = snap.docs.map(d => d.data().email);
+        
+        const legacy = [
+          { id: "legacy-rajhans", name: "Rajhans Steel and Water", email: "rajhanssikar@gmail.com", location: "Sikar" },
+          { id: "legacy-pile", name: "Rajhans Pile Foundation", email: "rajhanspilefoundation@gmail.com", location: "Sikar" }
+        ];
+
+        for (const leg of legacy) {
+          if (!existingEmails.includes(leg.email)) {
+            await setDoc(doc(db, 'franchises', leg.id), {
+              name: leg.name,
+              email: leg.email,
+              location: leg.location,
+              commissionPercentage: 5,
+              status: 'Active',
+              authorizedBy: 'System',
+              createdAt: serverTimestamp()
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Seed legacy failed", err instanceof Error ? err.message : String(err));
+      }
+    };
+
+    seedLegacyFranchises().then(() => {
+      const q = query(collection(db, 'franchises'), orderBy('createdAt', 'desc'));
+      unsub = onSnapshot(q, (snap) => {
+        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Franchise));
+        setFranchises(data);
+        setLoading(false);
+      }, (err) => {
+        console.error("Error fetching franchises:", err instanceof Error ? err.message : String(err));
+        setLoading(false);
+      });
     });
+
     return () => unsub();
   }, []);
 
@@ -66,19 +123,58 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
     setIsSaving(true);
 
     try {
-      await addDoc(collection(db, 'franchises'), {
-        ...formData,
-        status: 'Active',
-        authorizedBy: auth.currentUser?.email || 'System',
-        createdAt: serverTimestamp()
-      });
+      if (editingFranchiseId) {
+        await updateDoc(doc(db, 'franchises', editingFranchiseId), {
+           ...formData,
+           updatedAt: serverTimestamp()
+        });
+      } else {
+        const newFranchiseRef = await addDoc(collection(db, 'franchises'), {
+          ...formData,
+          status: 'Active',
+          authorizedBy: auth.currentUser?.email || 'System',
+          createdAt: serverTimestamp()
+        });
+        
+        // Auto-provision default ledger accounts (Cash, Bank, Service Income) for this franchise
+        await ledgerAutomation.setupFranchiseLedgers(newFranchiseRef.id, formData.name);
+      }
       setShowAddModal(false);
-      setFormData({ name: '', email: '', location: '', commissionPercentage: 5 });
+      setEditingFranchiseId(null);
+      resetForm();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'franchises');
+      handleFirestoreError(error, editingFranchiseId ? OperationType.UPDATE : OperationType.CREATE, 'franchises');
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const resetForm = () => {
+    setFormData({ 
+      name: '', email: '', location: '', coordinates: null, commissionPercentage: 5, 
+      gstNumber: '', proprietorName: '', aadharNumber: '' 
+    });
+  };
+
+  const handleEditClick = (f: Franchise) => {
+    setEditingFranchiseId(f.id!);
+    setFormData({
+      name: f.name,
+      email: f.email,
+      location: f.location || '',
+      coordinates: f.coordinates || null,
+      commissionPercentage: f.commissionPercentage || 5,
+      gstNumber: f.gstNumber || '',
+      proprietorName: f.proprietorName || '',
+      aadharNumber: f.aadharNumber || ''
+    });
+    setShowAddModal(true);
+  };
+
+  const handleAddNewFranchise = () => {
+    setEditingFranchiseId(null);
+    resetForm();
+    setShowAddModal(true);
   };
 
   const handleDeleteFranchise = async (id: string) => {
@@ -112,7 +208,7 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
       const bills = snap.docs.map(d => d.data() as Bill);
       setSelectedFranchiseBills(bills);
     } catch (error) {
-      console.error("Error fetching franchise stats:", error);
+      console.error("Error fetching franchise stats:", error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -139,7 +235,7 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
           <p className="text-slate-500 text-sm font-medium">Authorize and monitor regional franchisees</p>
         </div>
         <button 
-          onClick={() => setShowAddModal(true)}
+          onClick={handleAddNewFranchise}
           className="bg-slate-900 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 shadow-lg shadow-slate-100 hover:scale-105 active:scale-95 transition-all"
         >
           <Plus size={20} />
@@ -167,25 +263,38 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
                       <Mail size={14} />
                       {f.email}
                     </p>
-                    <p className="flex items-center gap-1.5 text-slate-500 text-xs font-bold uppercase tracking-wider mt-2">
-                       <MapPin size={12} />
+                    <p className="flex items-center gap-1.5 text-slate-500 text-[10px] font-bold uppercase tracking-wider mt-2">
+                       <MapPin size={10} />
                        {f.location || 'Not Specified'}
                     </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                       {f.proprietorName && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-bold uppercase tracking-widest">{f.proprietorName}</span>}
+                       {f.gstNumber && <span className="text-[10px] bg-blue-50 text-blue-500 px-2 py-0.5 rounded-md font-bold uppercase tracking-widest">GST: {f.gstNumber}</span>}
+                       {f.aadharNumber && <span className="text-[10px] bg-green-50 text-green-500 px-2 py-0.5 rounded-md font-bold uppercase tracking-widest">Aadhar: {f.aadharNumber}</span>}
+                    </div>
                   </div>
                 </div>
-                <button 
-                  onClick={() => handleDeleteFranchise(f.id!)}
-                  className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-colors"
-                >
-                  <Trash2 size={20} />
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => handleEditClick(f)}
+                    className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-colors"
+                  >
+                    <Edit size={20} />
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteFranchise(f.id!)}
+                    className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-colors"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-8">
                 <div className="bg-slate-50 p-5 rounded-3xl">
                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Commission Rate</p>
                    <p className="text-2xl font-black text-slate-900 flex items-center gap-1">
-                     {f.commissionPercentage} <Percent size={16} className="text-blue-500" />
+                     {f.commissionPercentage || 0} <Percent size={16} className="text-blue-500" />
                    </p>
                 </div>
                 <div className="bg-slate-50 p-5 rounded-3xl cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => toggleStatus(f)}>
@@ -309,34 +418,50 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
         )}
       </div>
 
+      <AnimatePresence>
       {showAddModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <motion.div 
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="bg-white rounded-[3rem] shadow-2xl w-full max-w-lg overflow-hidden"
+            exit={{ scale: 0.9, opacity: 0 }}
+            className="bg-white rounded-[3rem] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[95vh]"
           >
-            <div className="p-8 bg-slate-900 text-white relative">
-               <button onClick={() => setShowAddModal(false)} className="absolute top-6 right-6 text-white/60 hover:text-white transition-colors">
+            <div className="p-8 bg-slate-900 text-white relative flex-shrink-0">
+               <button onClick={() => setShowAddModal(false)} className="absolute top-6 right-6 text-white/60 hover:text-white transition-colors" type="button">
                  <X size={24} />
                </button>
                <Building2 size={40} className="mb-4 text-blue-400" />
-               <h3 className="text-2xl font-black tracking-tight">Authorize Franchisee</h3>
-               <p className="text-white/60 text-sm">Grant system access to a new regional partner</p>
+               <h3 className="text-2xl font-black tracking-tight">{editingFranchiseId ? 'Edit Franchisee' : 'Authorize Franchisee'}</h3>
+               <p className="text-white/60 text-sm">{editingFranchiseId ? 'Update details of partner' : 'Grant system access to a new regional partner'}</p>
             </div>
 
-            <form onSubmit={handleAddFranchise} className="p-8 space-y-6">
+            <form onSubmit={handleAddFranchise} className="p-8 space-y-6 overflow-y-auto">
               <div className="space-y-4">
                  <div>
-                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block px-2">Owner Name</label>
+                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block px-2">Franchise Name</label>
                    <div className="relative">
-                     <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                     <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                      <input 
                        required
                        value={formData.name}
                        onChange={e => setFormData({...formData, name: e.target.value})}
                        className="w-full h-14 pl-12 pr-6 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-                       placeholder="Enter full name"
+                       placeholder="Enter franchise business name"
+                     />
+                   </div>
+                 </div>
+
+                 <div>
+                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block px-2">Proprietor Name</label>
+                   <div className="relative">
+                     <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                     <input 
+                       required
+                       value={formData.proprietorName}
+                       onChange={e => setFormData({...formData, proprietorName: e.target.value})}
+                       className="w-full h-14 pl-12 pr-6 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                       placeholder="Enter proprietor full name"
                      />
                    </div>
                  </div>
@@ -353,6 +478,35 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
                        className="w-full h-14 pl-12 pr-6 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
                        placeholder="example@gmail.com"
                      />
+                   </div>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-4">
+                   <div>
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block px-2">GST Number</label>
+                     <div className="relative">
+                       <FileText className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                       <input 
+                         required
+                         value={formData.gstNumber}
+                         onChange={e => setFormData({...formData, gstNumber: e.target.value})}
+                         className="w-full h-14 pl-12 pr-6 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                         placeholder="Enter GSTIN"
+                       />
+                     </div>
+                   </div>
+                   <div>
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block px-2">Aadhar Number</label>
+                     <div className="relative">
+                       <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                       <input 
+                         required
+                         value={formData.aadharNumber}
+                         onChange={e => setFormData({...formData, aadharNumber: e.target.value})}
+                         className="w-full h-14 pl-12 pr-6 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                         placeholder="Enter Aadhar"
+                       />
+                     </div>
                    </div>
                  </div>
 
@@ -386,9 +540,21 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
                      </div>
                    </div>
                  </div>
+                 
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block px-2">GPS Coordinates (HQ Location)</label>
+                    <button 
+                      type="button"
+                      onClick={getCurrentLocation}
+                      className="w-full h-12 bg-blue-50 text-blue-600 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-blue-100 transition-all text-xs"
+                    >
+                      <Navigation size={16} />
+                      {formData.coordinates ? `Captured: ${formData.coordinates.lat.toFixed(4)}, ${formData.coordinates.lng.toFixed(4)}` : 'Capture Current GPS Location'}
+                    </button>
+                 </div>
               </div>
 
-              <div className="flex gap-4 pt-4">
+              <div className="flex gap-4 pt-4 sticky bottom-0 bg-white shadow-[0_-20px_20px_-10px_rgba(255,255,255,1)]">
                 <button 
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -409,6 +575,7 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
           </motion.div>
         </div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

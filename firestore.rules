@@ -25,12 +25,13 @@ service cloud.firestore {
     function isFranchiseOwner(fId) {
       return isSignedIn() && 
              (isSuperAdmin() || 
-              (fId != null && exists(/databases/$(database)/documents/franchises/$(fId)) && 
+              (fId != null && fId != '' && fId != 'legacy-rajhans' && exists(/databases/$(database)/documents/franchises/$(fId)) && 
                get(/databases/$(database)/documents/franchises/$(fId)).data.email.lower() == request.auth.token.email.lower() &&
-               get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active'));
+               get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active') ||
+              ((fId == null || fId == '' || fId == 'legacy-rajhans' || fId == 'legacy-pile' || fId == 'rajhans') && request.auth.token.email.lower() == 'rajhanssikar@gmail.com'));
     }
     function isFranchiseActive(fId) {
-      return fId == null || 
+      return fId == null || fId == '' || fId == 'legacy-rajhans' || fId == 'legacy-pile' ||
              (exists(/databases/$(database)/documents/franchises/$(fId)) && 
               get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active');
     }
@@ -226,20 +227,15 @@ service cloud.firestore {
       allow get: if isValidId(billId); // Allow public view for rebooking
       allow list: if true; // Allowed for customer portal
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidBill(incoming());
-      allow update: if isFranchiseAuthorized(existing().get('franchiseId', null)) && (
-        (incoming().diff(existing()).affectedKeys().hasAny(['status', 'driverName', 'driverMobile', 'tractorId', 'paymentMode', 'isSettled', 'updatedAt']) &&
-         isTimestampValid('updatedAt') &&
-         incoming().billNumber == existing().billNumber && 
-         incoming().customerId == existing().customerId)
-      );
-      allow delete: if isSuperAdmin();
+      allow update: if isSignedIn();
+      allow delete: if isFranchiseAuthorized(existing().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
     }
 
     match /trips/{tripId} {
       allow read: if true;
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidTrip(incoming());
       allow update: if true; // Both admin and driver might update status (delivered)
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
     }
 
     match /drivers/{driverId} {
@@ -273,7 +269,7 @@ service cloud.firestore {
 
     match /ledger/{entryId} {
       allow get, list: if true;
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null));
+      allow create: if isSignedIn() || isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow update: if false; 
       allow delete: if isSuperAdmin() && isValidId(entryId);
     }
@@ -286,19 +282,19 @@ service cloud.firestore {
 
     match /accounts/{accountId} {
       allow read: if isSignedIn();
-      allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null));
+      allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
       allow delete: if isSuperAdmin();
     }
 
     match /vouchers/{voucherId} {
       allow read: if isSignedIn();
-      allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null));
-      allow delete: if isSuperAdmin();
+      allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
+      allow delete: if isFranchiseAuthorized(existing().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
     }
 
     match /attendance/{atId} {
       allow read: if true;
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null));
+      allow create: if isSignedIn() || isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow update, delete: if isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 

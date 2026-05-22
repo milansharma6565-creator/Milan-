@@ -727,7 +727,7 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
     try {
       doc = new jsPDF();
     } catch (e: any) {
-      console.error('jsPDF failed:', e?.message || e);
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
       alert('PDF generation is not supported in this browser.');
       return;
     }

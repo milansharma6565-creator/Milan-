@@ -15,10 +15,12 @@ import {
   Truck,
   Camera,
   Plus,
-  Phone
+  Phone,
+  ClipboardList,
+  FlaskConical as Flask
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType, onAuthStateChanged, signInWithPopup, googleProvider, safeString } from '../firebase';
 import { 
   collection, 
   query, 
@@ -36,14 +38,19 @@ import {
   limit
 } from 'firebase/firestore';
 import { format } from 'date-fns';
+import { formatCurrency } from '../constants';
 import { InstallPWA } from './InstallPWA';
 import { Logo } from './Logo';
+import { ThermalInvoice } from './ThermalInvoice';
+import { ledgerAutomation } from '../services/ledgerAutomation';
+
+import { WishesOverlay } from './WishesOverlay';
 
 export function DriverApp() {
   const [driver, setDriver] = useState<any>(null);
   const [activeTrip, setActiveTrip] = useState<any>(null);
   const [trips, setTrips] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'HOME' | 'HISTORY' | 'ALERTS' | 'DIESEL' | 'FUEL_HISTORY'>('HOME');
+  const [activeTab, setActiveTab] = useState<'HOME' | 'HISTORY' | 'ALERTS' | 'DIESEL' | 'FUEL_HISTORY' | 'CANS'>('HOME');
   const [tractors, setTractors] = useState<any[]>([]);
   const [isTracking, setIsTracking] = useState(false);
   const [fillingTime, setFillingTime] = useState<number>(() => {
@@ -57,14 +64,8 @@ export function DriverApp() {
   const timerInterval = useRef<any>(null);
   const sirenRef = useRef<{ oscillator: OscillatorNode, audioContext: AudioContext } | null>(null);
   
-  const [mobileNumber, setMobileNumber] = useState('');
-  const [loginStep, setLoginStep] = useState<'MOBILE' | 'PIN_LOGIN' | 'PIN_SETUP' | 'NEW_REGISTER' | 'PENDING'>('MOBILE');
-  const [pin, setPin] = useState('');
-  const [newName, setNewName] = useState('');
-  const [licenseFront, setLicenseFront] = useState<string>('');
-  const [licenseBack, setLicenseBack] = useState<string>('');
   const [isLogged, setIsLogged] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   // Diesel Entry State
@@ -77,20 +78,86 @@ export function DriverApp() {
   const [dieselSending, setDieselSending] = useState(false);
   const [dieselHistory, setDieselHistory] = useState<any[]>([]);
   const [lastDeliveredTrip, setLastDeliveredTrip] = useState<any>(null);
+  const [nextDayCansRequests, setNextDayCansRequests] = useState<any[]>([]);
+
+  // Automatic Audio/Voice Announcements for Hands-free Driving
+  const [speakAnnouncements, setSpeakAnnouncements] = useState<boolean>(() => {
+    return localStorage.getItem('driverSpeakAnnouncements') === 'true';
+  });
+  const prevTripStatusRef = useRef<string>('');
+  const prevTripIdRef = useRef<string>('');
+
+  useEffect(() => {
+    localStorage.setItem('driverSpeakAnnouncements', String(speakAnnouncements));
+  }, [speakAnnouncements]);
+
+  const playAnnouncement = (text: string) => {
+    if (!speakAnnouncements) return;
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'hi-IN';
+      utterance.rate = 0.85;
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  useEffect(() => {
+    if (!activeTrip) {
+      if (prevTripIdRef.current) {
+        playAnnouncement("Aapka active trip samapt ho gaya hai. Dhanyawad!");
+        prevTripIdRef.current = '';
+        prevTripStatusRef.current = '';
+      }
+      return;
+    }
+
+    const currentStatus = activeTrip.status;
+    const currentId = activeTrip.id;
+
+    if (currentId !== prevTripIdRef.current) {
+      playAnnouncement(`Naya order mila hai. ${activeTrip.customerName} ke liye delivery karein.`);
+      prevTripIdRef.current = currentId;
+      prevTripStatusRef.current = currentStatus;
+    } else if (currentStatus !== prevTripStatusRef.current) {
+      if (currentStatus === 'On the way') {
+        playAnnouncement(`Trip shuru ho chuka hai. On-the-way mark kiya gaya.`);
+      } else if (currentStatus === 'Reached') {
+        playAnnouncement(`Aap location par pahunch gaye hain.`);
+      } else if (currentStatus === 'Delivered') {
+        playAnnouncement(`Order delivered ho gaya hai.`);
+      }
+      prevTripStatusRef.current = currentStatus;
+    }
+  }, [activeTrip, speakAnnouncements]);
 
   // QR & Bill Modals
   const [showQR, setShowQR] = useState(false);
   const [qrAmount, setQrAmount] = useState(0);
   const [qrBillNumber, setQrBillNumber] = useState('');
-  const [showBill, setShowBill] = useState(false);
+  const [viewingBill, setViewingBill] = useState<any>(null);
+
+  const handleViewBill = async (billId: string) => {
+    if (!billId) return;
+    setLoading(true);
+    try {
+      const billSnap = await getDoc(doc(db, 'bills', billId));
+      if (billSnap.exists()) {
+        setViewingBill({ id: billSnap.id, ...billSnap.data() });
+      } else {
+        alert('Bill detail not found.');
+      }
+    } catch (e) {
+      console.error('Error fetching bill:', e);
+      alert('Failed to load bill.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Check for "Reached" status to trigger alarm
-    if (activeTrip?.status === 'Reached') {
-      if (!sirenRef.current) {
-        playSirenSound();
-      }
-    } else {
+    // Siren removed from driver side for "Reached" status as per user request
+    if (activeTrip?.status !== 'Reached') {
       stopSiren();
     }
   }, [activeTrip?.status]);
@@ -131,9 +198,7 @@ export function DriverApp() {
         ctx?.drawImage(img, 0, 0, width, height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.6); // Compress to 60% quality JPEG
         
-        if (side === 'front') setLicenseFront(dataUrl);
-        else if (side === 'back') setLicenseBack(dataUrl);
-        else if (side === 'zero') setPhotoZero(dataUrl);
+        if (side === 'zero') setPhotoZero(dataUrl);
         else if (side === 'amt') setPhotoAmount(dataUrl);
       };
       img.src = readerEvent.target?.result as string;
@@ -142,170 +207,38 @@ export function DriverApp() {
   };
 
   useEffect(() => {
-    const savedMobile = localStorage.getItem('driverMobile');
-    const isLoggedIn = localStorage.getItem('isDriverLoggedIn');
-    if (savedMobile && isLoggedIn === 'true') {
-       bypassLogin(savedMobile);
-    }
-  }, []);
-
-  const bypassLogin = async (mobile: string) => {
-    setLoading(true);
-    try {
-      const q = query(collection(db, 'drivers'), where('mobile', '==', mobile));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const dData = { id: snap.docs[0].id, ...snap.docs[0].data() } as any;
-        if (dData.status === 'Active') {
-          setDriver(dData);
-          setIsLogged(true);
-        } else if (dData.status === 'pending') {
-          setLoginStep('PENDING');
-        } else {
-           // Inactive
-           setError('Account deactivated. Contact Admin.');
-        }
-      }
-    } catch (e: any) {
-      console.error("Bypass login failed:", e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleMobileSubmit = async () => {
-    if (mobileNumber.length !== 10) {
-      setError('Enter a valid 10-digit mobile number.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const q = query(collection(db, 'drivers'), where('mobile', '==', mobileNumber));
-      const snap = await getDocs(q);
-      
-      if (snap.empty) {
-        setLoginStep('NEW_REGISTER');
-      } else {
-        const data = snap.docs[0].data();
-        setDriver({ id: snap.docs[0].id, ...data });
-        if (data.status === 'pending') {
-          setLoginStep('PENDING');
-        } else if (data.status === 'Inactive') {
-          setError('Account deactivated. Contact Admin.');
-          setLoginStep('MOBILE');
-        } else if (data.pin) {
-          setLoginStep('PIN_LOGIN');
-        } else {
-          setLoginStep('PIN_SETUP');
-        }
-      }
-    } catch (err: any) {
-      console.error("Mobile submit failed:", err?.message || String(err));
-      setError('Network error. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const completeLogin = (dData: any) => {
-    setDriver(dData);
-    setIsLogged(true);
-    localStorage.setItem('driverMobile', mobileNumber);
-    localStorage.setItem('isDriverLoggedIn', 'true');
-  };
-
-  const handleAuthSubmit = async () => {
-    setError('');
-    if (loginStep === 'NEW_REGISTER') {
-      if (!newName.trim() || pin.length !== 4) {
-        setError('Please enter your name and a 4-digit PIN.');
-        return;
-      }
-      if (!licenseFront || !licenseBack) {
-        setError('Please upload both photos of your driving license.');
-        return;
-      }
-      setLoading(true);
-      try {
-        const newDData = {
-          name: newName.trim(),
-          mobile: mobileNumber,
-          pin: pin,
-          licenseFrontUrl: licenseFront,
-          licenseBackUrl: licenseBack,
-          status: 'pending',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        };
-        const docRef = await addDoc(collection(db, 'drivers'), newDData);
-        
-        // Setup Vault integration for Tractor Drivers
+    return onAuthStateChanged(auth, async (user) => {
+      if (user && user.email) {
+        setLoading(true);
         try {
-          const newFolderId = `driver_${docRef.id}`;
-          const newFolderName = `${newName.trim()}`;
-          
-          const docSnap = await getDoc(doc(db, 'settings', 'documents'));
-          let newFolders = [];
-          if (docSnap.exists() && docSnap.data().folders) {
-            newFolders = [...docSnap.data().folders];
+          const q = query(collection(db, 'drivers'), where('email', '==', user.email.toLowerCase()));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            const dData = { id: snap.docs[0].id, ...snap.docs[0].data() } as any;
+            if (dData.status === 'Active') {
+              setDriver(dData);
+              setIsLogged(true);
+            } else if (dData.status === 'pending') {
+              setError('Your registration is pending approval.');
+            } else {
+              setError('Account deactivated. Contact Admin.');
+            }
+          } else {
+            setError('Unauthorized: Your Gmail ID is not registered.');
+            await auth.signOut();
           }
-          newFolders.push({ id: newFolderId, name: newFolderName, parentId: 'drivers' });
-          
-          await setDoc(doc(db, 'settings', 'documents'), { folders: newFolders }, { merge: true });
-
-          await addDoc(collection(db, 'documents'), {
-            name: `${newName.trim()} - License Front`,
-            url: licenseFront,
-            folder: newFolderId,
-            type: 'image/jpeg',
-            size: 0,
-            storageType: 'base64',
-            createdAt: serverTimestamp()
-          });
-
-          await addDoc(collection(db, 'documents'), {
-            name: `${newName.trim()} - License Back`,
-            url: licenseBack,
-            folder: newFolderId,
-            type: 'image/jpeg',
-            size: 0,
-            storageType: 'base64',
-            createdAt: serverTimestamp()
-          });
-        } catch (vaultErr: any) {
-          console.error("Failed to sync directly to Document Vault", vaultErr?.message || String(vaultErr));
+        } catch (e) {
+          setError('Failed to fetch driver profile.');
+        } finally {
+          setLoading(false);
         }
-
-        setDriver({ id: docRef.id, ...newDData });
-        setLoginStep('PENDING');
-      } catch (err: any) {
-        setError('Failed to register.');
-      } finally {
+      } else {
+        setIsLogged(false);
+        setDriver(null);
         setLoading(false);
       }
-    } else if (loginStep === 'PIN_SETUP') {
-      if (pin.length !== 4) {
-        setError('Please enter a 4-digit PIN.');
-        return;
-      }
-      setLoading(true);
-      try {
-        await updateDoc(doc(db, 'drivers', driver!.id!), { pin: pin });
-        completeLogin({ ...driver!, pin });
-      } catch (err: any) {
-        setError('Failed to setup PIN.');
-      } finally {
-        setLoading(false);
-      }
-    } else if (loginStep === 'PIN_LOGIN') {
-      if (pin !== driver?.pin) {
-        setError('Incorrect PIN. Try again.');
-        return;
-      }
-      completeLogin(driver);
-    }
-  };
+    });
+  }, []);
 
   useEffect(() => {
     if (!isLogged || !driver?.id) return;
@@ -345,10 +278,16 @@ export function DriverApp() {
       setTractors(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
+    // Listen for next day can requests from monthly customers
+    const unsubCans = onSnapshot(query(collection(db, 'customers'), where('nextDayCans', '>', 0), where('franchiseId', '==', driver.franchiseId || 'legacy-rajhans')), (snap) => {
+      setNextDayCansRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubActive();
       unsubHistory();
       unsubTractors();
+      unsubCans();
     };
   }, [isLogged, driver?.id]);
 
@@ -513,7 +452,7 @@ export function DriverApp() {
       // Create Ledger Entry for 1 day's salary
       const dailyRate = salary ? Math.round(salary / 30) : 0;
       await addDoc(collection(db, 'ledger'), {
-        date: serverTimestamp(),
+        date: today,
         type: 'Expense',
         category: 'Driver Salary',
         partyName: driverName,
@@ -593,7 +532,7 @@ export function DriverApp() {
       
       sirenRef.current = { oscillator, audioContext };
     } catch (e) {
-      console.warn('Siren AudioContext initialization failed:', e);
+      console.warn('Siren AudioContext initialization failed:', e instanceof Error ? e.message : String(e));
       setIsSirenActive(false);
     }
   };
@@ -620,16 +559,16 @@ export function DriverApp() {
 
   if (loading && !isLogged) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
         <div className="relative mb-8">
           <div className="absolute inset-0 flex items-center justify-center opacity-10 animate-pulse scale-[2.5]">
-            <Logo size={120} color="white" />
+            <Logo size={120} color="slate" />
           </div>
-          <div className="w-24 h-24 bg-white rounded-[2rem] flex items-center justify-center relative z-10 shadow-2xl shadow-blue-500/20">
-            <Logo size={48} />
+          <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center relative z-10 shadow-2xl shadow-blue-500/20">
+            <Logo size={48} color="white" />
           </div>
         </div>
-        <h2 className="text-xl font-bold text-white mb-1">TankerWala</h2>
+        <h2 className="text-xl font-bold text-slate-900 mb-1">TankerWala</h2>
         <p className="text-xs text-slate-400 font-bold uppercase tracking-widest animate-pulse">Driver Terminal Loading...</p>
       </div>
     );
@@ -637,170 +576,52 @@ export function DriverApp() {
 
   if (!isLogged) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-[2.5rem] shadow-xl max-w-sm w-full border border-slate-100"
+          className="bg-white p-8 rounded-[2.5rem] shadow-xl max-w-sm w-full border border-slate-100 text-center"
         >
-          <div className="text-center mb-8">
-            <div className={`w-24 h-24 mx-auto ${loginStep === 'PENDING' ? 'bg-orange-100' : 'bg-slate-900'} rounded-[2rem] flex items-center justify-center mb-6 shadow-2xl shadow-slate-900/10`}>
-              {loginStep === 'PENDING' ? <AlertCircle size={40} className="text-orange-500" /> : <Logo size={48} color="white" />}
-            </div>
-            <h1 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">
-              Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
-            </h1>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-8 mb-4">
-              {loginStep === 'PENDING' ? 'Pending Approval' :
-               loginStep === 'NEW_REGISTER' ? 'Register as Driver' :
-               loginStep === 'PIN_SETUP' ? 'Setup Profile' :
-               loginStep === 'PIN_LOGIN' ? 'Driver Login' : 'Fleet Management'}
-            </p>
-            <p className="text-sm font-medium text-slate-500">
-              {loginStep === 'PENDING' ? 'Your account is pending review by an Administrator. Please check back later.' :
-               loginStep === 'NEW_REGISTER' ? 'Enter your details to register in the fleet' :
-               loginStep === 'PIN_SETUP' ? 'Create a secure 4-digit PIN for future logins' :
-               loginStep === 'PIN_LOGIN' ? `Welcome back, ${driver?.name}` : 'Login with your registered mobile number'}
-            </p>
+          <div className="bg-slate-900 w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-2xl">
+            <Logo size={56} color="white" />
           </div>
+          <h1 className="text-3xl font-black text-slate-900 mb-2">Driver App</h1>
+          <p className="text-slate-500 font-medium mb-10 text-sm">Welcome to TankerWala Fleet Management. Please sign in to continue.</p>
 
-          <div className="space-y-4">
-            {loginStep === 'MOBILE' && (
-              <div>
-                <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 block ml-1">Mobile Number</label>
-                <input 
-                  type="tel"
-                  maxLength={10}
-                  value={mobileNumber}
-                  onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, ''))}
-                  placeholder="e.g. 9876543210"
-                  className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3.5 outline-none focus:border-blue-500 focus:bg-white transition-all text-lg font-bold"
-                />
-              </div>
-            )}
-            
-            <div>
-              <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 block ml-1">Full Name</label>
-              <input 
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Your Name"
-                className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3.5 outline-none focus:border-blue-500 focus:bg-white transition-all text-lg font-bold mb-4"
-              />
-              
-              <div className="grid grid-cols-2 gap-3 mb-2">
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1 block ml-1">License Front</label>
-                  <label className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors overflow-hidden">
-                    {licenseFront ? (
-                      <img src={licenseFront} className="w-full h-full object-cover" alt="Front" />
-                    ) : (
-                      <div className="flex flex-col items-center">
-                        <MapPin size={24} className="text-slate-300" />
-                        <span className="text-[8px] font-bold text-slate-400 uppercase mt-1">Upload</span>
-                      </div>
-                    )}
-                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'front')} />
-                  </label>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1 block ml-1">License Back</label>
-                  <label className="w-full aspect-video bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors overflow-hidden">
-                    {licenseBack ? (
-                      <img src={licenseBack} className="w-full h-full object-cover" alt="Back" />
-                    ) : (
-                      <div className="flex flex-col items-center">
-                        <MapPin size={24} className="text-slate-300" />
-                        <span className="text-[8px] font-bold text-slate-400 uppercase mt-1">Upload</span>
-                      </div>
-                    )}
-                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'back')} />
-                  </label>
-                </div>
-              </div>
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-bold border border-red-100">
+              {error}
             </div>
+          )}
 
-            {['NEW_REGISTER', 'PIN_SETUP', 'PIN_LOGIN'].includes(loginStep) && (
-              <div>
-                <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 block ml-1">4-Digit PIN</label>
-                <input 
-                  type="password"
-                  maxLength={4}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                  placeholder="••••"
-                  className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3.5 outline-none focus:border-blue-500 focus:bg-white transition-all text-center text-2xl font-black tracking-[1em]"
-                />
-                {loginStep === 'PIN_LOGIN' && (
-                  <button 
-                    onClick={() => alert("Please call Admin Rahul Hans at +91 96102 96102 to retrieve your PIN. They can see it in their Drivers panel.")}
-                    className="w-full text-xs font-bold text-blue-600 mt-2 text-right hover:underline"
-                  >
-                    Forgot PIN? Ask Admin
-                  </button>
-                )}
-              </div>
-            )}
-
-            {error && (
-              <div className="px-4 py-3 bg-red-50 text-red-600 rounded-2xl text-xs font-bold flex items-center justify-center gap-2">
-                <AlertCircle size={14} /> {error}
-              </div>
-            )}
-            
-            {loginStep !== 'PENDING' && (
-              <button 
-                onClick={loginStep === 'MOBILE' ? handleMobileSubmit : handleAuthSubmit}
-                disabled={loading || (loginStep === 'MOBILE' && mobileNumber.length < 10) || (loginStep !== 'MOBILE' && pin.length < 4)}
-                className="w-full bg-slate-900 text-white h-14 rounded-2xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 shadow-xl shadow-slate-900/20"
-              >
-                {loading ? 'Processing...' : (
-                  <>
-                    {loginStep === 'PIN_LOGIN' ? 'Secure Login' : 'Continue'}
-                    <ChevronRight size={18} className="translate-y-[1px]" />
-                  </>
-                )}
-              </button>
-            )}
-
-            {loginStep !== 'MOBILE' && loginStep !== 'PENDING' && (
-              <button 
-                onClick={() => { setLoginStep('MOBILE'); setPin(''); setMobileNumber(''); setError(''); }}
-                className="w-full h-12 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                Use different number
-              </button>
-            )}
-
-            {loginStep === 'PENDING' && (
-               <button 
-                 onClick={() => { setLoginStep('MOBILE'); setMobileNumber(''); }}
-                 className="w-full bg-slate-100 text-slate-700 h-14 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center mt-4"
-               >
-                 Back
-               </button>
-            )}
-          </div>
+          <button 
+            onClick={() => signInWithPopup(auth, googleProvider)}
+            disabled={loading}
+            className="w-full bg-slate-900 text-white h-16 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-xl disabled:opacity-50"
+          >
+            {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <div className="w-6 h-6 bg-white rounded-full p-1"><Logo size={14} /></div>}
+            {loading ? 'Verifying...' : 'Login with Gmail'}
+          </button>
         </motion.div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-indigo-500/30 pb-24">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-500/30 pb-24">
+      <WishesOverlay />
       {/* Top Header */}
-      <div className="p-6 flex items-center justify-between sticky top-0 bg-slate-950/80 backdrop-blur-xl z-50">
+      <div className="p-6 flex items-center justify-between sticky top-0 bg-white/80 backdrop-blur-xl z-50 border-b border-slate-100">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-500 flex items-center justify-center font-bold text-xl shadow-lg shadow-indigo-500/20">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center font-bold text-xl text-white shadow-lg shadow-indigo-500/20">
             {driver?.name?.[0] || 'D'}
           </div>
           <div>
-            <h1 className="font-black text-lg">{driver?.name || 'Driver Name'}</h1>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest flex items-center gap-1">
+            <h1 className="font-black text-lg text-slate-900">{driver?.name || 'Driver Name'}</h1>
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-widest flex items-center gap-1">
               {isTracking ? (
-                <span className="flex items-center gap-1 text-green-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                <span className="flex items-center gap-1 text-green-600">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                   Live Tracking
                 </span>
               ) : 'Offline'}
@@ -808,35 +629,76 @@ export function DriverApp() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Spoken Alert Toggle */}
+          <button 
+            onClick={() => {
+              const newVal = !speakAnnouncements;
+              setSpeakAnnouncements(newVal);
+              if (newVal) {
+                if ('speechSynthesis' in window) {
+                  window.speechSynthesis.cancel();
+                  const u = new SpeechSynthesisUtterance("Awaaz alert chalu ho gae hain.");
+                  u.lang = 'hi-IN';
+                  window.speechSynthesis.speak(u);
+                }
+              }
+            }} 
+            className={`p-3 rounded-2xl active:scale-95 transition-all border ${speakAnnouncements ? 'bg-indigo-50 text-indigo-600 border-indigo-150' : 'bg-slate-100 text-slate-400 border-slate-200'}`}
+            title={speakAnnouncements ? "Hindi Speak Alerts Active" : "Speak Alerts Off"}
+          >
+            {speakAnnouncements ? <Bell size={20} className="animate-bounce" /> : <BellOff size={20} />}
+          </button>
           <InstallPWA />
           <button onClick={() => {
             localStorage.removeItem('isDriverLoggedIn');
             window.location.reload();
-          }} className="p-3 bg-slate-900 rounded-2xl text-slate-400 active:scale-95 transition-all">
+          }} className="p-3 bg-slate-100 rounded-2xl text-slate-500 active:scale-95 transition-all">
             <LogOut size={20} />
           </button>
         </div>
       </div>
 
-      <div className="px-6 space-y-6">
+      <div className="px-6 space-y-6 max-w-md mx-auto">
         {activeTab === 'HOME' && (
           <>
             {/* Stats Dashboard */}
             <div className="grid grid-cols-2 gap-4">
-               <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Trips Today</p>
-                  <p className="text-3xl font-black text-white">{trips.length}</p>
+               <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Trips Today</p>
+                  <p className="text-3xl font-black text-slate-900">{trips.length}</p>
                </div>
-               <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Status</p>
+               <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-green-500" />
-                    <p className="text-sm font-black text-white">Present</p>
+                    <p className="text-sm font-black text-slate-900">Present</p>
                   </div>
                </div>
             </div>
 
             {/* Active Trip Card */}
+        {nextDayCansRequests.length > 0 && (
+          <div className="bg-orange-50 border border-orange-200 rounded-[2.5rem] p-6">
+            <h3 className="text-xs font-black text-orange-900 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <Bell size={14} /> Upcoming Can Requests (Monthly)
+            </h3>
+            <div className="space-y-3">
+              {nextDayCansRequests.map(req => (
+                <div key={req.id} className="bg-white/80 backdrop-blur-sm p-4 rounded-2xl flex items-center justify-between border border-orange-100 shadow-sm">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">{req.name}</div>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">{req.address?.slice(0, 30)}...</div>
+                  </div>
+                  <div className="bg-orange-600 text-white w-10 h-10 rounded-xl flex flex-col items-center justify-center font-black">
+                    <span className="text-xs leading-none">{req.nextDayCans}</span>
+                    <span className="text-[7px] uppercase tracking-tighter">Cans</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {activeTrip ? (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -877,19 +739,57 @@ export function DriverApp() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="bg-white/10 rounded-3xl p-4 text-center">
-                  <p className="text-[10px] uppercase font-bold text-indigo-200 mb-1">Service</p>
-                  <p className="text-sm font-black text-white">{activeTrip.category || 'TANKER'}</p>
+              <div className="grid grid-cols-3 gap-3 mb-8">
+                <div className="bg-white/10 rounded-2xl p-3 text-center">
+                  <p className="text-[8px] uppercase font-bold text-indigo-200 mb-1">Service</p>
+                  <p className="text-xs font-black text-white">{activeTrip.category || 'TANKER'}</p>
                 </div>
-                <div className="bg-white/10 rounded-3xl p-4 text-center">
-                  <p className="text-[10px] uppercase font-bold text-indigo-200 mb-1">Quantity/Size</p>
-                  <p className="text-sm font-black text-white">
+                <div className="bg-white/10 rounded-2xl p-3 text-center">
+                  <p className="text-[8px] uppercase font-bold text-indigo-200 mb-1">Qty/Size</p>
+                  <p className="text-xs font-black text-white">
                     {activeTrip.category === 'TANKER' ? activeTrip.tankerSize : (activeTrip.bottleSize || '20L')}
                     {' x '}{activeTrip.quantity}
                   </p>
                 </div>
+                <div className="bg-white/10 rounded-2xl p-3 text-center border border-indigo-400">
+                  <p className="text-[8px] uppercase font-bold text-indigo-200 mb-1">Tractor</p>
+                  <p className="text-xs font-black text-white">{activeTrip.tractorId || 'T-01'}</p>
+                </div>
               </div>
+
+              {/* Requirement Badges */}
+              <div className="flex flex-wrap gap-2 mb-6">
+                {activeTrip.remarks?.toLowerCase().includes('emergency') && (
+                  <div className="bg-red-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1 shadow-lg shadow-red-500/20">
+                    <AlertCircle size={10} /> Emergency Delivery
+                  </div>
+                )}
+                {activeTrip.remarks?.toLowerCase().includes('pipe') && (
+                  <div className="bg-orange-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1 shadow-lg shadow-orange-500/20">
+                    <Flask size={10} /> Pipe Required
+                  </div>
+                )}
+                {activeTrip.remarks?.toLowerCase().includes('floor') && (
+                  <div className="bg-blue-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1 shadow-lg shadow-blue-500/20">
+                    <Plus size={10} /> Floor Delivery
+                  </div>
+                )}
+              </div>
+
+              {activeTrip.remarks && (
+                <div className="bg-slate-900/60 rounded-3xl p-5 mb-8 border border-white/5">
+                  <p className="text-[10px] uppercase font-black text-indigo-300 mb-3 tracking-[0.15em] flex items-center gap-2">
+                    <ClipboardList size={14} /> Requirements & Remarks
+                  </p>
+                  <div className="space-y-2">
+                    {activeTrip.remarks.split('|').map((part: string, idx: number) => (
+                      <div key={idx} className="text-xs font-medium text-indigo-50 text-pretty leading-relaxed">
+                        • {part.trim()}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-col gap-3">
                 {activeTrip.customerMobile && (
@@ -952,7 +852,14 @@ export function DriverApp() {
                 {activeTrip.status === 'On the way' && (
                   <>
                     <button 
-                      onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activeTrip.siteLocation || activeTrip.customerName)}`)}
+                      onClick={() => {
+                        const targetLoc = (activeTrip.latitude && activeTrip.longitude)
+                          ? `${activeTrip.latitude},${activeTrip.longitude}`
+                          : (activeTrip.customerLat && activeTrip.customerLng)
+                            ? `${activeTrip.customerLat},${activeTrip.customerLng}`
+                            : encodeURIComponent(activeTrip.siteLocation || activeTrip.customerName);
+                        window.open(`https://www.google.com/maps/search/?api=1&query=${targetLoc}`);
+                      }}
                       className="w-full bg-white/20 text-white h-14 rounded-2xl flex items-center justify-center gap-2 font-black text-sm active:scale-95 transition-all mb-1"
                     >
                       <Navigation size={18} fill="currentColor" />
@@ -986,6 +893,10 @@ export function DriverApp() {
                         alert('Assignment Required: Tractor must be assigned before marking as Delivered.');
                         return;
                       }
+                      if (!activeTrip.billId) {
+                        alert('Error Assignment: This trip is missing a valid Bill ID. Please contact admin.');
+                        return;
+                      }
                       if(window.confirm('Confirm Delivery Completion?')) {
                         try {
                            const tripRef = doc(db, 'trips', activeTrip.id!);
@@ -1000,13 +911,30 @@ export function DriverApp() {
                              updateDoc(tripRef, { status: 'Delivered', completedAt: serverTimestamp() }),
                              updateDoc(billRef, { status: 'Delivered', completedAt: serverTimestamp() })
                            ]);
+
                            setShowQR(true);
-                           // Handle automatic attendance
-                           if (driver?.monthlySalary) {
-                             handleAttendanceAndLedger(driver.id, driver.name, driver.monthlySalary);
+
+                           // Background Auto-post ledger (isolated from main flow to prevent lag/failures)
+                           try {
+                             const fB = await getDoc(billRef);
+                             if (fB.exists() && !fB.data()?.ledgerPosted) {
+                               await ledgerAutomation.postBillToLedger({ id: fB.id, ...fB.data() });
+                             }
+                           } catch (ledgerError) {
+                             console.error('Safe Ledger posting failed in driver app:', ledgerError);
+                           }
+
+                           // Background Handle automatic attendance (isolated)
+                           try {
+                             if (driver?.monthlySalary) {
+                               await handleAttendanceAndLedger(driver.id, driver.name, driver.monthlySalary);
+                             }
+                           } catch (attendanceError) {
+                             console.error('Safe Attendance recording failed in driver app:', attendanceError);
                            }
                         } catch(e) {
-                          alert('Error updating status');
+                          console.error('Error marking delivered:', e);
+                          alert('Error updating status: ' + (e instanceof Error ? e.message : safeString(e)));
                         }
                       }
                     }}
@@ -1019,7 +947,14 @@ export function DriverApp() {
                 
                 {activeTrip.status === 'Active' && (
                    <button 
-                    onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activeTrip.siteLocation || activeTrip.customerName)}`)}
+                     onClick={() => {
+                       const targetLoc = (activeTrip.latitude && activeTrip.longitude)
+                         ? `${activeTrip.latitude},${activeTrip.longitude}`
+                         : (activeTrip.customerLat && activeTrip.customerLng)
+                           ? `${activeTrip.customerLat},${activeTrip.customerLng}`
+                           : encodeURIComponent(activeTrip.siteLocation || activeTrip.customerName);
+                       window.open(`https://www.google.com/maps/search/?api=1&query=${targetLoc}`);
+                     }}
                     className="w-full bg-white/10 text-white h-12 rounded-xl flex items-center justify-center gap-2 font-bold text-xs active:scale-95 transition-all mt-2"
                   >
                     <Navigation size={14} /> View Location
@@ -1048,7 +983,7 @@ export function DriverApp() {
                       Show QR
                     </button>
                     <button 
-                      onClick={() => setShowBill(true)}
+                      onClick={() => handleViewBill(activeTrip.billId)}
                       className="bg-green-600/20 border border-green-500/30 rounded-2xl py-4 flex flex-col items-center gap-2 text-green-400 font-bold text-xs active:scale-95 transition-all"
                     >
                       <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center">
@@ -1107,7 +1042,7 @@ export function DriverApp() {
                       Show QR
                     </button>
                     <button 
-                      onClick={() => setShowBill(true)}
+                      onClick={() => handleViewBill(lastDeliveredTrip.billId)}
                       className="bg-green-600/10 border border-green-500/20 rounded-2xl py-4 flex flex-col items-center gap-2 text-green-400 font-bold text-xs"
                     >
                       Show Bill
@@ -1249,7 +1184,10 @@ export function DriverApp() {
             <div className="space-y-3">
               {trips.length > 0 ? 
                 trips.map((trip) => (
-                <div key={trip.id} className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 flex items-center justify-between">
+                <div key={trip.id} 
+                  onClick={() => handleViewBill(trip.billId)}
+                  className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 flex items-center justify-between cursor-pointer hover:border-slate-700 transition-colors active:scale-[0.98]"
+                >
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center text-green-400">
                       <CheckCircle2 size={24} />
@@ -1280,6 +1218,53 @@ export function DriverApp() {
                 <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-10 text-center text-slate-500">
                   <History size={40} className="mx-auto mb-4 opacity-20" />
                   No trips completed today
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Cans Tab View */}
+        {activeTab === 'CANS' && (
+          <div className="space-y-6 pb-20">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-black">Next Day Cans</h2>
+              <div className="bg-orange-500/10 text-orange-500 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-orange-500/20">
+                Tomorrow's Load
+              </div>
+            </div>
+            
+            <div className="space-y-3">
+              {nextDayCansRequests.length > 0 ? (
+                nextDayCansRequests.map(cust => (
+                  <div key={cust.id} className="bg-slate-900 p-5 rounded-[2rem] border border-slate-800 flex items-center justify-between group active:scale-[0.98] transition-all">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-orange-500/10 text-orange-500 rounded-2xl flex items-center justify-center">
+                        <Flask size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-white">{cust.name}</h4>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{cust.mobile}</p>
+                      </div>
+                    </div>
+                    <div className="text-right flex items-center gap-3">
+                       <div className="bg-orange-600 px-4 py-2 rounded-xl text-white font-black text-lg shadow-lg shadow-orange-600/20">
+                         {cust.nextDayCans}
+                       </div>
+                       <button 
+                        onClick={() => window.open(`tel:${cust.mobile}`)}
+                        className="w-10 h-10 bg-green-500/10 text-green-500 rounded-xl flex items-center justify-center"
+                       >
+                         <Phone size={16} fill="currentColor" />
+                       </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-10 text-center text-slate-500">
+                  <Flask size={40} className="mx-auto mb-4 opacity-20" />
+                  <p className="text-sm font-bold">No extra can requests for today.</p>
+                  <p className="text-[10px] uppercase font-black tracking-widest mt-2">Standard quantities apply</p>
                 </div>
               )}
             </div>
@@ -1343,6 +1328,13 @@ export function DriverApp() {
         >
           <Plus size={22} className="bg-indigo-600 rounded-full text-white p-1" />
           <span className="text-[10px] font-bold">Refuel</span>
+        </button>
+        <button 
+          onClick={() => setActiveTab('CANS')}
+          className={`flex flex-col items-center gap-1 ${activeTab === 'CANS' ? 'text-orange-400' : 'text-slate-500'}`}
+        >
+          <Flask size={22} fill={activeTab === 'CANS' ? "currentColor" : "none"} opacity={activeTab === 'CANS' ? 0.3 : 1} />
+          <span className="text-[10px] font-bold">Cans</span>
         </button>
         <button 
           onClick={() => setActiveTab('ALERTS')}
@@ -1508,60 +1500,58 @@ export function DriverApp() {
                     <p className="mt-4 font-black text-xl text-slate-800 tracking-tight">₹{qrAmount}</p>
                    </div>
                 </div>
-                <button onClick={() => setShowQR(false)} className="w-full h-14 bg-slate-900 text-white rounded-2xl font-black">Close</button>
+                
+                <button 
+                  onClick={async () => {
+                    if (window.confirm(`Digitally confirm receipt of ₹${qrAmount}? This will update the bank ledger.`)) {
+                      try {
+                        const billRef = doc(db, 'bills', activeTrip.billId);
+                        const billSnap = await getDoc(billRef);
+                        if (billSnap.exists()) {
+                          const bData = { id: billSnap.id, ...billSnap.data() };
+                          await updateDoc(billRef, { 
+                            paymentStatus: 'Paid', 
+                            paymentMode: 'UPI',
+                            isSettled: true,
+                            paidAmount: qrAmount,
+                            updatedAt: serverTimestamp() 
+                          });
+                          
+                          // Real-time Ledger Update
+                          await ledgerAutomation.postPaymentToLedger(bData, qrAmount, 'UPI');
+                          
+                          alert('✅ Payment confirmed & Ledger updated!');
+                          setShowQR(false);
+                        }
+                      } catch(e) {
+                         alert('Error updating payment');
+                      }
+                    }
+                  }}
+                  className="w-full h-14 bg-green-500 text-white rounded-2xl font-black mb-3 active:scale-95 transition-all shadow-lg shadow-green-100"
+                >
+                  Confirm Payment Received
+                </button>
+
+                <button onClick={() => setShowQR(false)} className="w-full h-14 bg-slate-900/5 text-slate-500 rounded-2xl font-black">Close QR</button>
               </div>
-           </div>
-         )}
+            </div>
+          )}
       </AnimatePresence>
 
       {/* Bill Modal (Driver Copy) */}
       <AnimatePresence>
-         {showBill && (
-           <div className="fixed inset-0 bg-slate-950/95 z-[110] flex items-center justify-center p-6 overflow-y-auto" onClick={() => setShowBill(false)}>
-              <div className="bg-white p-8 rounded-[3rem] w-full max-w-sm text-slate-950 font-mono text-[10px]" onClick={e => e.stopPropagation()}>
-                <div className="text-center border-b-2 border-dashed border-slate-200 pb-4 mb-4">
-                  <div className="flex justify-center mb-4 scale-75">
-                    <Logo size={40} />
-                  </div>
-                  <h3 className="text-sm font-black uppercase tracking-tight pb-3">
-                    Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[8px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
-                  </h3>
-                  <p className="mt-4">Trip Token #{(activeTrip?.billNumber || '0000')}</p>
+         {viewingBill && (
+            <div className="fixed inset-0 bg-slate-950/95 z-[110] flex items-center justify-center p-6 overflow-y-auto" onClick={() => setViewingBill(null)}>
+               <div className="bg-white rounded-[2rem] w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="max-h-[70vh] overflow-y-auto">
+                   <ThermalInvoice bill={viewingBill} />
                 </div>
-                
-                <div className="space-y-1 mb-4">
-                  <div className="flex justify-between"><span>DATE:</span> <span>{format(new Date(), 'dd/MM/yyyy')}</span></div>
-                  <div className="flex justify-between"><span>DRIVER:</span> <span>{driver?.name}</span></div>
-                  <div className="flex justify-between"><span>TRACTOR:</span> <span>{activeTrip?.tankerNumber || 'T-01'}</span></div>
+                <div className="p-4 bg-white border-t border-slate-100">
+                   <button onClick={() => setViewingBill(null)} className="w-full h-14 bg-slate-900 text-white rounded-2xl font-black font-sans text-sm active:scale-95 transition-all">Close Bill Detail</button>
                 </div>
-
-                <div className="border-b border-dashed border-slate-200 mb-4 pb-4">
-                  <p className="font-bold mb-1">CUSTOMER DETAILS:</p>
-                  <p>{activeTrip?.customerName || 'N/A'}</p>
-                  <p>{activeTrip?.customerMobile || 'N/A'}</p>
-                  <p className="italic">{activeTrip?.siteLocation || 'N/A'}</p>
-                </div>
-
-                <div className="border-b-2 border-dashed border-slate-200 mb-6 pb-2">
-                   <div className="flex justify-between font-black text-sm uppercase mb-2">
-                     <span>Item</span>
-                     <span>Qty</span>
-                   </div>
-                   <div className="flex justify-between">
-                     <span>Water Tanker Delivery</span>
-                     <span>{activeTrip?.quantity || 0} L</span>
-                   </div>
-                </div>
-
-                <div className="text-center mb-8">
-                  <p className="font-bold uppercase mb-2">Driver Copy • Not for Sale</p>
-                  <div className="w-full h-px bg-slate-200 mb-4" />
-                  <p className="text-[8px] text-slate-400">Generated by TankerWala Fleet Mgmt</p>
-                </div>
-
-                <button onClick={() => setShowBill(false)} className="w-full h-14 bg-slate-900 text-white rounded-2xl font-black font-sans text-sm">Close Bill</button>
-              </div>
-           </div>
+               </div>
+            </div>
          )}
       </AnimatePresence>
     </div>

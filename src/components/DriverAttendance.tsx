@@ -262,7 +262,7 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
     try {
       doc = new jsPDF();
     } catch (e) {
-      console.error('jsPDF failed:', e);
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
       alert('PDF generation is not supported in this browser.');
       return;
     }

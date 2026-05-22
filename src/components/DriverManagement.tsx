@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, where, getDocs, runTransaction, serverTimestamp, updateDoc, getDoc } from 'firebase/firestore';
 import { Driver, Account } from '../types';
-import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Download, UserPlus, UserMinus, FileText, IndianRupee, CheckCircle2, Minus, AlertCircle } from 'lucide-react';
+import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Download, UserPlus, UserMinus, FileText, IndianRupee, CheckCircle2, Minus, AlertCircle, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmationModal } from './ConfirmationModal';
 import { ledgerAutomation } from '../services/ledgerAutomation';
@@ -12,7 +12,7 @@ import autoTable from 'jspdf-autotable';
 export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [isAdding, setIsAdding] = useState(false);
   const [activeTab, setActiveTab] = useState<'Active' | 'Inactive' | 'pending'>('Active');
-  const [newDriver, setNewDriver] = useState({ name: '', mobile: '', monthlySalary: '', pin: '' });
+  const [newDriver, setNewDriver] = useState({ name: '', mobile: '', email: '', monthlySalary: '', pin: '' });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
   const [statusConfirm, setStatusConfirm] = useState<{ id: string, name: string, status: 'Active' | 'Inactive' | 'pending' | 'approved' } | null>(null);
 
@@ -26,7 +26,7 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
     date: new Date().toISOString().split('T')[0],
     description: ''
   });
-  const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
+  const [longPressTimer, setLongPressTimer] = useState<any | null>(null);
 
   useEffect(() => {
     let q = query(collection(db, 'drivers'));
@@ -75,6 +75,7 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
             ...newDriver,
             franchiseId: franchiseId || null,
             mobile: newDriver.mobile.replace(/\D/g, ''),
+            email: newDriver.email.trim().toLowerCase(),
             monthlySalary: Number(newDriver.monthlySalary) || 0,
             pin: newDriver.pin || Math.floor(1000 + Math.random() * 9000).toString(),
             status: 'Active',
@@ -113,7 +114,7 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
             driverId: driverRef.id
           });
         });
-        setNewDriver({ name: '', mobile: '', monthlySalary: '', pin: '' });
+        setNewDriver({ name: '', mobile: '', email: '', monthlySalary: '', pin: '' });
         setIsAdding(false);
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'drivers-transaction');
@@ -157,7 +158,7 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
       });
       alert('Entry posted to Ledger successfully!');
     } catch (error) {
-      console.error('Error posting driver payment:', error);
+      console.error('Error posting driver payment:', error instanceof Error ? error.message : String(error));
       alert('Failed to post entry.');
     } finally {
       setIsSavingQuickPayment(false);
@@ -251,21 +252,21 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
   };
 
   const downloadPDF = () => {
-    let doc: any;
+    let pdfDoc: any;
     try {
-      doc = new jsPDF();
+      pdfDoc = new jsPDF();
     } catch (e) {
-      console.error('jsPDF failed:', e);
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
       alert('PDF generation is not supported in this browser.');
       return;
     }
     
-    doc.setFontSize(20);
-    doc.text(`TankerWala Powered by Rajhans - ${activeTab} Drivers`, 14, 22);
+    pdfDoc.setFontSize(20);
+    pdfDoc.text(`TankerWala Powered by Rajhans - ${activeTab} Drivers`, 14, 22);
     
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+    pdfDoc.setFontSize(10);
+    pdfDoc.setTextColor(100);
+    pdfDoc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
 
     const tableData = filteredDrivers.map(d => [
       d.name,
@@ -274,7 +275,7 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
       d.status || 'Active'
     ]);
 
-    autoTable(doc, {
+    autoTable(pdfDoc, {
       startY: 40,
       head: [['Driver Name', 'Mobile Number', 'Monthly Salary', 'Status']],
       body: tableData,
@@ -283,7 +284,7 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
       margin: { top: 40 },
     });
 
-    doc.save(`TankerWala_${activeTab}_Drivers_${new Date().toISOString().split('T')[0]}.pdf`);
+    pdfDoc.save(`TankerWala_${activeTab}_Drivers_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   return (
@@ -377,6 +378,7 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
                     <div>
                       <h3 className="text-lg font-bold text-slate-800">{driver.name}</h3>
                       <p className="text-slate-400 text-xs font-mono">+91 {driver.mobile}</p>
+                      {driver.email && <p className="text-slate-400 text-[10px]">{driver.email}</p>}
                       {driver.monthlySalary > 0 && (
                         <p className={`text-xs font-bold mt-1 ${activeTab === 'Active' ? 'text-indigo-600' : 'text-slate-500'}`}>
                           ₹{driver.monthlySalary.toLocaleString()} / month
@@ -531,6 +533,17 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
                       placeholder="10 digit number"
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Gmail ID (For Login)</label>
+                  <input
+                    required
+                    type="email"
+                    className="material-input h-14 bg-slate-50 border-2 border-transparent focus:border-blue-100 focus:bg-white"
+                    value={newDriver.email}
+                    onChange={e => setNewDriver({...newDriver, email: e.target.value})}
+                    placeholder="driver.gmail@gmail.com"
+                  />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Monthly Salary (₹)</label>
