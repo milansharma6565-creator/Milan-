@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { VoucherItem, Account } from '../types';
 
 export const ledgerAutomation = {
@@ -75,6 +75,57 @@ export const ledgerAutomation = {
   postBillToLedger: async (bill: any) => {
     if (bill.ledgerPosted) return;
     try {
+      // Fetch Franchise configuration to see if loyalty point program is active
+      let loyaltyProgramEnabled = false;
+      let calculatedLoyaltyPointsEarned = 0;
+      let finalCommissionAmount = bill.commissionAmount || 0;
+
+      if (bill.franchiseId) {
+        try {
+          const franchiseDoc = await getDoc(doc(db, 'franchises', bill.franchiseId));
+          if (franchiseDoc.exists()) {
+            const franchiseData = franchiseDoc.data();
+            loyaltyProgramEnabled = !!franchiseData.loyaltyProgramEnabled;
+            // If loyalty program is enabled, award points = 70% of commission amount
+            if (loyaltyProgramEnabled) {
+              const commPct = franchiseData.commissionPercentage || 5;
+              let commissionVal = bill.commissionAmount;
+              if (!commissionVal) {
+                commissionVal = ((bill.totalAmount || bill.grandTotal || 0) * commPct) / 100;
+              }
+              calculatedLoyaltyPointsEarned = Math.round(commissionVal * 0.70);
+              if (!bill.commissionAmount) {
+                finalCommissionAmount = commissionVal;
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching franchise for loyalty program logic:", err);
+        }
+      }
+
+      // Update customer loyaltyPoints balance in database
+      const redeemed = bill.loyaltyPointsRedeemed || 0;
+      let netLoyaltyChange = calculatedLoyaltyPointsEarned - redeemed;
+
+      if (bill.customerId && (calculatedLoyaltyPointsEarned > 0 || redeemed > 0)) {
+        try {
+          const customerRef = doc(db, 'customers', bill.customerId);
+          const customerDoc = await getDoc(customerRef);
+          if (customerDoc.exists()) {
+            const currentLoyaltyCoins = customerDoc.data().loyaltyCoins || 0;
+            const newLoyaltyCoins = Math.max(0, currentLoyaltyCoins + netLoyaltyChange);
+            await updateDoc(customerRef, {
+              loyaltyCoins: newLoyaltyCoins,
+              updatedAt: serverTimestamp()
+            });
+            console.log(`Updated Customer ${bill.customerName} loyalty balance to ${newLoyaltyCoins} (Earned: ${calculatedLoyaltyPointsEarned}, Redeemed: ${redeemed})`);
+          }
+        } catch (err) {
+          console.error("Error updating customer loyalty coins balance:", err);
+        }
+      }
+
       // 1. Ensure customer ledger account exists and is linked
       const customerAccId = await ledgerAutomation.ensureCustomerAccount(bill.customerId, bill.customerName, bill.franchiseId);
 
@@ -127,25 +178,81 @@ export const ledgerAutomation = {
         }
       }
 
+      // Check or create franchise loyalty expense ledger if any points redeemed
+      let loyaltyExpenseAcc = null;
+      if (redeemed > 0) {
+        loyaltyExpenseAcc = accounts.find(a => a.name.toLowerCase() === 'franchise loyalty expense' && a.franchiseId === bill.franchiseId);
+        if (!loyaltyExpenseAcc) {
+          try {
+            const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+            let expenseGroup = groupsSnap.docs.find(d => (d.data().name === 'Indirect Expenses' || d.data().name === 'Direct Expenses') && d.data().franchiseId === bill.franchiseId);
+            let expenseGroupId = expenseGroup?.id;
+            if (!expenseGroupId) {
+              const newGrp = await addDoc(collection(db, 'accountGroups'), {
+                name: 'Direct Expenses',
+                type: 'Expense',
+                franchiseId: bill.franchiseId || null,
+                createdAt: serverTimestamp()
+              });
+              expenseGroupId = newGrp.id;
+            }
+            const newAccRef = await addDoc(collection(db, 'accounts'), {
+              name: 'Franchise Loyalty Expense',
+              groupId: expenseGroupId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: 0,
+              franchiseId: bill.franchiseId || null,
+              createdAt: serverTimestamp()
+            });
+            loyaltyExpenseAcc = {
+              id: newAccRef.id,
+              name: 'Franchise Loyalty Expense',
+              groupId: expenseGroupId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: 0,
+              franchiseId: bill.franchiseId || null
+            } as Account;
+          } catch (e) {
+            console.error("Failed to auto-create Loyalty Expense account:", e);
+          }
+        }
+      }
+
       if (!customerAcc || !salesAcc) {
         console.warn('Could not auto-post to ledger: Customer or Sales account not found.');
         return;
       }
 
-      const items: VoucherItem[] = [
-        {
-          accountId: customerAcc.id!,
-          accountName: customerAcc.name,
+      const items: VoucherItem[] = [];
+      
+      // Debit remaining customer balance payable
+      items.push({
+        accountId: customerAcc.id!,
+        accountName: customerAcc.name,
+        type: 'Dr',
+        amount: bill.grandTotal
+      });
+
+      // Debit redeemed amount from Franchise Loyalty Expense account
+      if (redeemed > 0 && loyaltyExpenseAcc) {
+        items.push({
+          accountId: loyaltyExpenseAcc.id!,
+          accountName: loyaltyExpenseAcc.name,
           type: 'Dr',
-          amount: bill.grandTotal
-        },
-        {
-          accountId: salesAcc.id!,
-          accountName: salesAcc.name,
-          type: 'Cr',
-          amount: bill.grandTotal
-        }
-      ];
+          amount: redeemed
+        });
+      }
+
+      // Credit service income with the full original cost (grandTotal before redemption discount)
+      const salesTotalAmount = bill.grandTotal + redeemed;
+      items.push({
+        accountId: salesAcc.id!,
+        accountName: salesAcc.name,
+        type: 'Cr',
+        amount: salesTotalAmount
+      });
 
       const vchSnap = await getDocs(collection(db, 'vouchers'));
       const vchNumber = `SLS-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
@@ -155,8 +262,8 @@ export const ledgerAutomation = {
         voucherNumber: vchNumber,
         date: bill.date,
         items,
-        narration: `Auto-generated from Token #${bill.billNumber} | ${bill.tankerSize || 'Water Can'}`,
-        totalAmount: bill.grandTotal,
+        narration: `Auto-generated from Token #${bill.billNumber} | ${bill.tankerSize || 'Water Can'} ${redeemed > 0 ? `| Loyalty Coins Redeemed: ₹${redeemed}` : ''}`,
+        totalAmount: salesTotalAmount,
         billId: bill.id,
         franchiseId: bill.franchiseId || null,
         createdAt: serverTimestamp()
@@ -167,13 +274,27 @@ export const ledgerAutomation = {
         currentBalance: (customerAcc.currentBalance || 0) + bill.grandTotal
       });
       await updateDoc(doc(db, 'accounts', salesAcc.id!), {
-        currentBalance: (salesAcc.currentBalance || 0) + bill.grandTotal
+        currentBalance: (salesAcc.currentBalance || 0) + salesTotalAmount
       });
+      if (redeemed > 0 && loyaltyExpenseAcc) {
+        await updateDoc(doc(db, 'accounts', loyaltyExpenseAcc.id!), {
+          currentBalance: (loyaltyExpenseAcc.currentBalance || 0) + redeemed
+        });
+      }
+
+      // Adjust commission amount for this bill
+      if (redeemed > 0) {
+        finalCommissionAmount = Math.max(0, finalCommissionAmount - redeemed);
+      }
 
       // Mark bill as posted
-      await updateDoc(doc(db, 'bills', bill.id), { ledgerPosted: true });
+      await updateDoc(doc(db, 'bills', bill.id), { 
+        ledgerPosted: true,
+        loyaltyPointsEarned: calculatedLoyaltyPointsEarned,
+        commissionAmount: finalCommissionAmount
+      });
 
-      console.log(`Auto-posted Bill #${bill.billNumber} to Ledger.`);
+      console.log(`Auto-posted Bill #${bill.billNumber} to Ledger (Earned loyalty tokens: ${calculatedLoyaltyPointsEarned}, redeemed: ${redeemed}).`);
     } catch (error) {
       console.error('Ledger Automation Error:', error instanceof Error ? error.message : String(error));
     }

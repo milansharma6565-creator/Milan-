@@ -1,9 +1,94 @@
-import React, { useState } from 'react';
-import { Download, Smartphone, Globe, Copy, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { 
+  Download, Smartphone, Globe, Copy, CheckCircle2, 
+  Settings, Info, ShieldCheck, FileDown, 
+  Sparkles, RefreshCw, Layers, ChevronRight, CheckCircle, Wifi
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { copyToClipboard, getPublicAppUrl } from '../constants';
+import { db } from '../firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+
+interface AppConfig {
+  driverApkLink: string;
+  customerApkLink: string;
+  driverVersion: string;
+  customerVersion: string;
+  driverNotes: string;
+  customerNotes: string;
+}
 
 export function Ecosystem() {
   const [copiedLink, setCopiedLink] = useState('');
+  const [activeTab, setActiveTab] = useState<'distribution' | 'settings'>('distribution');
+  const [isLoading, setIsLoading] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState(false);
+
+  // App Configurations with robust default fallbacks.
+  const [config, setConfig] = useState<AppConfig>({
+    driverApkLink: '/api/download/driver-apk',
+    customerApkLink: '/api/download/customer-apk',
+    driverVersion: '1.5.0',
+    customerVersion: '1.2.0',
+    driverNotes: 'Includes Bluetooth Thermal Receipts Printing and intelligent background offline sync.',
+    customerNotes: 'Fully responsive dynamic checkouts, real-time live location picker, and automated instant notifications.'
+  });
+
+  // Track the native beforeinstallprompt event of the web browser
+  useEffect(() => {
+    const handleBeforePrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforePrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforePrompt);
+    };
+  }, []);
+
+  const handlePWAInstall = async () => {
+    if (!deferredPrompt) {
+      alert("सिस्टम रेडी है! इस ऐप को इंस्टॉल करने के लिए अपने फोन के Google Chrome ब्राउज़र में जाएं, ऊपर दायें कोने में 3 डॉट्स पर क्लिक करें और 'Install App' या 'Add to Home screen' चुनें। यह बिना किसी एरर के सीधा आपके फोन में काम करेगा!");
+      return;
+    }
+    try {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setIsInstallable(false);
+      }
+      setDeferredPrompt(null);
+    } catch (err) {
+      console.warn("PWA installation prompt failed:", err);
+    }
+  };
+
+  // Fetch configurated APK properties on mounting
+  useEffect(() => {
+    async function loadConfig() {
+      try {
+        const docRef = doc(db, 'systemConfig', 'apkConfig');
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          setConfig({
+            driverApkLink: data.driverApkLink || '/api/download/driver-apk',
+            customerApkLink: data.customerApkLink || '/api/download/customer-apk',
+            driverVersion: data.driverVersion || '1.5.0',
+            customerVersion: data.customerVersion || '1.2.0',
+            driverNotes: data.driverNotes || 'Includes Bluetooth Thermal Receipts Printing and intelligent background offline sync.',
+            customerNotes: data.customerNotes || 'Fully responsive dynamic checkouts, real-time live location picker, and automated instant notifications.'
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to load APK configurations from Firestore. Using static defaults:', err);
+      }
+    }
+    loadConfig();
+  }, []);
 
   const handleCopy = (link: string) => {
     copyToClipboard(link);
@@ -11,124 +96,482 @@ export function Ecosystem() {
     setTimeout(() => setCopiedLink(''), 2000);
   };
 
+  const saveConfiguration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaveStatus('saving');
+    try {
+      const docRef = doc(db, 'systemConfig', 'apkConfig');
+      await setDoc(docRef, {
+        ...config,
+        updatedAt: new Date()
+      });
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    } catch (err) {
+      console.error('Error saving APK configurations:', err);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 4000);
+    }
+  };
+
   const apps = [
     {
-      name: 'Driver App (PWA)',
-      description: 'Progressive Web App for drivers to view trips, navigate, and add fuel. Works like a real app.',
-      apkLink: '#',
+      id: 'driver',
+      name: 'TankerWala Driver App',
+      description: 'The primary operations app for tanker fleet drivers to track trips, log diesel requests, update live locations, and print thermal receipt invoices offline.',
+      apkLink: config.driverApkLink,
       webLink: getPublicAppUrl().toString() + '?mode=driver',
-      version: '1.5.0',
-      size: 'Instant',
-      color: 'blue'
+      version: config.driverVersion,
+      size: '1.5 MB',
+      color: 'blue',
+      notes: config.driverNotes,
+      bg: 'from-blue-600 to-indigo-700',
+      tagColor: 'bg-blue-100 text-blue-700 border-blue-200'
     },
     {
-      name: 'Customer App (PWA)',
-      description: 'Progressive Web App for customers to book orders and track deliveries. Install on home screen.',
-      apkLink: '#',
+      id: 'customer',
+      name: 'Customer Booking Portal',
+      description: 'Convenient booking interface for clients to place bulk orders, buy monthly water coin passes, trace tanker locations, and access digital invoices.',
+      apkLink: config.customerApkLink,
       webLink: getPublicAppUrl().toString() + '?mode=customer',
-      version: '1.2.0',
-      size: 'Instant',
-      color: 'orange'
+      version: config.customerVersion,
+      size: '1.2 MB',
+      color: 'emerald',
+      notes: config.customerNotes,
+      bg: 'from-emerald-600 to-teal-700',
+      tagColor: 'bg-emerald-100 text-emerald-700 border-emerald-200'
     }
   ];
 
   return (
-    <div className="p-4 md:p-8 max-w-5xl mx-auto min-h-screen">
-      <div className="mb-10 text-center md:text-left">
-        <h1 className="text-4xl font-black flex items-center justify-center md:justify-start gap-3 text-slate-900 tracking-tight">
-          <Globe className="text-indigo-600" size={40} />
-          Official App Distribution
-        </h1>
-        <p className="text-slate-500 mt-3 font-medium text-lg">Distribute the official management apps to your fleet and customers.</p>
-      </div>
+    <div id="ecosystem-container" className="p-4 md:p-8 max-w-6xl mx-auto min-h-screen font-sans">
+      {/* Header Banner */}
+      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-black flex items-center gap-3 text-slate-900 tracking-tight">
+            <Layers className="text-blue-600" size={36} />
+            Ecosystem App Hub
+          </h1>
+          <p className="text-slate-500 mt-1 font-medium text-sm">
+            Distribute genuine premium applications to your drivers and valued customers seamlessly.
+          </p>
+        </div>
 
-      {/* Installation Guide */}
-      <div className="mb-12 bg-indigo-600 rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-2xl shadow-indigo-200">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-32 -mt-32" />
-        <div className="relative z-10">
-          <h2 className="text-2xl font-black mb-4 flex items-center gap-3">
-            <Smartphone size={28} />
-            How to Install "Real" Apps
-          </h2>
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="bg-white/10 p-5 rounded-2xl border border-white/10">
-              <div className="font-black text-xl mb-2">01</div>
-              <p className="text-sm font-medium opacity-90">Open the Web Link below in your phone's browser (Chrome/Safari).</p>
-            </div>
-            <div className="bg-white/10 p-5 rounded-2xl border border-white/10">
-              <div className="font-black text-xl mb-2">02</div>
-              <p className="text-sm font-medium opacity-90">Tap the "Share" or "Menu" icon and select <b>"Add to Home Screen"</b>.</p>
-            </div>
-            <div className="bg-white/10 p-5 rounded-2xl border border-white/10">
-              <div className="font-black text-xl mb-2">03</div>
-              <p className="text-sm font-medium opacity-90">The app will appear on your phone drawer just like a <b>Real APK</b>.</p>
-            </div>
-          </div>
+        {/* Tab Switcher */}
+        <div className="bg-slate-100 p-1 rounded-2xl flex border border-slate-200/60 shadow-inner">
+          <button 
+            type="button"
+            onClick={() => setActiveTab('distribution')}
+            className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 ${activeTab === 'distribution' ? 'bg-white text-blue-600 shadow-md ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Smartphone size={14} />
+            Distribution
+          </button>
+          <button 
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 ${activeTab === 'settings' ? 'bg-white text-blue-600 shadow-md ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Settings size={14} />
+            APK Settings
+          </button>
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-8">
-        {apps.map((app) => {
-          return (
-            <div key={app.name} className="bg-white rounded-[3rem] p-8 border-2 border-slate-100 shadow-xl relative overflow-hidden">
-              <div className={`absolute top-0 right-0 w-40 h-40 rounded-bl-full -z-10 ${app.color === 'blue' ? 'bg-blue-50' : 'bg-orange-50'}`} />
-              
-              <div className="flex items-start justify-between mb-8">
-                <div className="flex items-center gap-5">
-                  <div className={`w-20 h-20 rounded-3xl flex items-center justify-center shadow-lg ${app.color === 'blue' ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-orange-600 text-white shadow-orange-200'}`}>
-                    <Smartphone size={40} />
+      <AnimatePresence mode="wait">
+        {activeTab === 'distribution' ? (
+          <motion.div
+            key="distribution-tab"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-8"
+          >
+            {/* Quick Switch Banner */}
+            <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-[2.5rem] p-6 text-white relative overflow-hidden shadow-xl">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-slate-700/25 rounded-full blur-2xl -mr-32 -mt-32" />
+              <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                <div>
+                  <span className="bg-blue-500/20 text-blue-300 text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-blue-500/30">
+                    Dual Engine System
+                  </span>
+                  <h2 className="text-xl font-black mt-2 leading-snug">Choose between Native APK downloads or instant Progressive Web Apps (PWA)</h2>
+                  <p className="text-slate-400 text-xs mt-1 max-w-xl">
+                    Both options connect to the identical secure real-time backend databases. Distribute direct APK installers to bypass app store controls or share instant browser links!
+                  </p>
+                </div>
+                <div className="bg-white/5 border border-white/10 p-4 rounded-2xl flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-400">
+                    <Wifi size={20} className="animate-pulse" />
                   </div>
                   <div>
-                    <h3 className="text-2xl font-black text-slate-800">{app.name}</h3>
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${app.color === 'blue' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>Recommended</span>
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">v{app.version}</span>
+                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Sync Status</div>
+                    <div className="text-xs font-bold text-emerald-400">● Live & Operational</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* APK Parse Error Information & Direct PWA App Installer Callout */}
+            <div className="bg-gradient-to-b from-blue-50/80 to-indigo-50/40 border-2 border-blue-100/80 rounded-[2.5rem] p-6 text-slate-800 shadow-md">
+              <div className="flex gap-4 items-start flex-col sm:flex-row">
+                <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center shrink-0 text-white shadow-lg font-black text-2xl">
+                  📲
+                </div>
+                <div className="space-y-3 w-full">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-blue-100 pb-2">
+                    <h3 className="font-black text-slate-950 text-sm flex flex-wrap items-center gap-2">
+                      <span>1-Click Mobile App Installation Center</span>
+                      <span className="text-xs text-blue-700 font-extrabold">(1-क्लिक मोबाइल ऐप इंस्टॉलेशन)</span>
+                    </h3>
+                    <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 bg-white px-2.5 py-1 rounded-md border border-blue-200 shadow-xs">
+                      100% Error Free standard
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 font-bold leading-relaxed">
+                    एंड्रॉयड ओएस (Android OS) सुरक्षा कारणों से अनधिकृत कच्ची APK फ़ाइलों को इंस्टॉल करने पर <strong className="text-red-500">"There was a problem parsing the package"</strong> एरर दिखाता है। 
+                    इसका सबसे सुरक्षित, आधुनिक और तेज़ समाधान <strong className="text-blue-600">PWA (Progressive Web App)</strong> है। यह असली ऐप की तरह आपके फ़ोन की होम-स्क्रीन पर आ जाता है, और इसका कोई साइज़ (0 MB) नहीं होता!
+                  </p>
+                  
+                  {/* Direct Native Installation Button */}
+                  <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handlePWAInstall}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider px-6 h-12 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
+                    >
+                      <Download size={14} />
+                      📲 Phone Pe Direct Install Karein (Install Now)
+                    </button>
+                    
+                    <a
+                      href="https://www.webintoapp.com/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="bg-white border border-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider px-6 h-12 rounded-xl transition-all hover:bg-slate-50 flex items-center justify-center gap-2"
+                    >
+                      🔧 Want Private Custom APK? Use WebIntoApp
+                    </a>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-2">
+                    <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-xs">
+                      <span className="text-[9px] font-black bg-blue-50 text-blue-700 border border-blue-100 uppercase px-2.5 py-1 rounded-md">
+                        क्रोम से डायरेक्ट इनस्टॉल करने का तरीक़ा (Google Chrome Method)
+                      </span>
+                      <div className="text-[11px] font-bold text-slate-600 mt-2.5 space-y-1 leading-relaxed">
+                        <p>1. सबसे पहले नीचे ड्राइवर या कस्टमर ऐप के सामने दिया गया <strong>"Copy PWA Link"</strong> दबाएं।</p>
+                        <p>2. फिर अपने फोन में <strong>Google Chrome</strong> ब्राउज़र खोलें और इस लिंक को पेस्ट करें।</p>
+                        <p>3. क्रोम ब्राउज़र में सबसे ऊपर ऊपर दायें कोने में <strong>3 डॉट्स</strong> (बिंदुओं) पर क्लिक करें।</p>
+                        <p>4. वहां लिस्ट में <strong>"Install app"</strong> या <strong>"Add to Home screen"</strong> पर क्लिक करें।</p>
+                        <p className="text-emerald-600 mt-1">✓ बधाई! अब यह ड्राइवर ऐप बिना किसी एरर के सीधा आपके फ़ोन पर लाइव काम करने लगेगा।</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-xs">
+                      <span className="text-[9px] font-black bg-emerald-50 text-emerald-700 border border-emerald-100 uppercase px-2.5 py-1 rounded-md">
+                        पब्लिक कस्टमाइज्ड APK खुद बनाने का आसान तरीक़ा
+                      </span>
+                      <div className="text-[11px] font-bold text-slate-600 mt-2.5 space-y-1.5 leading-relaxed">
+                        <p>यदि ड्राइवर को समझाने में फिर भी मुश्किल है और आप खुद की कस्टमाइज्ड APK बनाना चाहते हैं:</p>
+                        <p>1. हमारी PWA लिंक कॉपी करें और मुफ्त बिल्डर <a href="https://www.webintoapp.com/" target="_blank" rel="noreferrer" className="text-blue-600 font-black underline hover:text-blue-800">WebIntoApp</a> पर जाएं।</p>
+                        <p>2. वहां अपनी पसंद का लोगो, नाम (जैसे TankerWala Sikar) और कॉपी की हुई लिंक डालकर 2 मिनट में अपनी <strong>गिल्ड-पैक सर्टिफाइड असली इंस्टॉलेबल `.apk` फ़ाइल</strong> जनरेट कर लें।</p>
+                        <p>3. उसे गूगल ड्राइव पर रख कर डाउनलोड लिंक ऊपर <strong>"APK Settings"</strong> टैब में सेट कर दें ताकि भविष्य में सारे ड्राइवर एक बार में डायरेक्ट डाउनलोड कर सकें!</p>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
+            </div>
 
-              <p className="text-base text-slate-600 font-medium mb-10 leading-relaxed">
-                {app.description}
-              </p>
+            {/* Application Grid */}
+            <div className="grid lg:grid-cols-2 gap-8">
+              {apps.map((app) => (
+                <div key={app.name} className="bg-white rounded-[2.5rem] p-8 border-2 border-slate-100 shadow-xl relative overflow-hidden flex flex-col justify-between">
+                  <div>
+                    {/* Header line */}
+                    <div className="flex items-start justify-between gap-4 mb-6">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${app.bg} flex items-center justify-center text-white shadow-lg`}>
+                          <Smartphone size={28} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-black text-slate-900">{app.name}</h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] font-semibold text-slate-400">Version v{app.version}</span>
+                            <span className="text-[10px] text-slate-300">•</span>
+                            <span className="text-[10px] font-semibold text-slate-400">{app.size}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <span className={`text-[10px] font-black px-3 py-1 rounded-md border ${app.tagColor}`}>
+                        Official Build
+                      </span>
+                    </div>
 
-              <div className="space-y-4">
-                <button 
-                  onClick={() => handleCopy(app.webLink)}
-                  className={`w-full flex items-center justify-center gap-3 text-white h-16 rounded-2xl font-black text-lg transition-all shadow-xl active:scale-95 ${app.color === 'blue' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200' : 'bg-orange-600 hover:bg-orange-700 shadow-orange-200'}`}
-                >
-                  {copiedLink === app.webLink ? (
-                    <>
-                      <CheckCircle2 size={24} />
-                      Link Copied!
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={24} />
-                      Copy Download / Install Link
-                    </>
-                  )}
-                </button>
-                
-                <a 
-                  href={app.webLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white h-14 rounded-2xl font-bold transition-all"
-                >
-                  <Globe size={18} />
-                  Open App Now
-                </a>
+                    <p className="text-xs text-slate-500 font-bold leading-relaxed mb-6">
+                      {app.description}
+                    </p>
+
+                    {/* Features checklist */}
+                    <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 mb-6">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Build Changelog & Target</span>
+                      <p className="text-[11px] font-bold text-slate-700 leading-relaxed flex items-start gap-2">
+                        <Sparkles size={14} className="text-blue-500 shrink-0 mt-0.5" />
+                        <span>{app.notes}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Dual Distribution Channel */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Native APK Option */}
+                      <div className="border border-slate-200/80 rounded-2xl p-4 hover:border-blue-400 transition-all flex flex-col justify-between hover:shadow-md bg-gradient-to-b from-white to-slate-50/50">
+                        <div>
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Android Installer</span>
+                          <h4 className="text-xs font-black text-slate-800">Direct APK Download</h4>
+                          <p className="text-[10px] text-slate-400 font-medium mt-1 mb-3">Install raw application package directly onto Android mobile devices.</p>
+                        </div>
+                        <a 
+                          href={app.apkLink}
+                          className="w-full h-11 bg-slate-950 hover:bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all shadow-sm"
+                        >
+                          <Download size={14} />
+                          Download APK ({app.size})
+                        </a>
+                      </div>
+
+                      {/* Progressive Web App (PWA) Option */}
+                      <div className="border border-slate-200/80 rounded-2xl p-4 hover:border-emerald-400 transition-all flex flex-col justify-between hover:shadow-md bg-gradient-to-b from-white to-slate-50/50">
+                        <div>
+                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">PWA Standard</span>
+                          <h4 className="text-xs font-black text-slate-800">Add to Home Screen</h4>
+                          <p className="text-[10px] text-slate-400 font-medium mt-1 mb-3">No storage footprint, automatic wireless code updates browser-run.</p>
+                        </div>
+                        <button 
+                          onClick={() => handleCopy(app.webLink)}
+                          className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all shadow-sm"
+                        >
+                          {copiedLink === app.webLink ? (
+                            <>
+                              <CheckCircle2 size={14} />
+                              Link Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={14} />
+                              Copy PWA Link
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <a 
+                      href={app.webLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full flex items-center justify-center gap-2 border-2 border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-black h-12 rounded-xl transition-all"
+                    >
+                      <Globe size={14} />
+                      Open Web Browser App View
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Helpful Installation Manual */}
+            <div className="grid md:grid-cols-3 gap-6 bg-blue-50/50 border border-blue-100 rounded-[2.5rem] p-8">
+              <div className="md:col-span-3 pb-2 border-b border-blue-100/60">
+                <h4 className="text-sm font-black text-slate-900 flex items-center gap-2 uppercase tracking-wide">
+                  <Info size={16} className="text-blue-600" />
+                  Android Device APK Sideloading Manual
+                </h4>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  Private enterprise builds can be downloaded and installed to field devices in 4 quick steps:
+                </p>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center shrink-0">
+                  1
+                </div>
+                <div>
+                  <h5 className="text-xs font-black text-slate-900 mb-1">Download Package</h5>
+                  <p className="text-[11px] text-slate-500 font-bold leading-relaxed">
+                    Click the "Download APK" button on any driver or customer element. The `.apk` binary file saves locally to Android Downloads.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center shrink-0">
+                  2
+                </div>
+                <div>
+                  <h5 className="text-xs font-black text-slate-900 mb-1">Allow Unknown Sources</h5>
+                  <p className="text-[11px] text-slate-500 font-bold leading-relaxed">
+                    If prompted with secure block, navigate to settings and toggle <b>"Allow from this source"</b> inside your mobile browser options.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-blue-600 text-white text-xs font-black flex items-center justify-center shrink-0">
+                  3
+                </div>
+                <div>
+                  <h5 className="text-xs font-black text-slate-900 mb-1">Complete Installation</h5>
+                  <p className="text-[11px] text-slate-500 font-bold leading-relaxed">
+                    Confirm prompt clicking <b>"Install"</b>. Launch the driver dashboard log-in using validated mobile codes.
+                  </p>
+                </div>
               </div>
             </div>
-          );
-        })}
-      </div>
-      
-      <div className="mt-12 p-8 bg-slate-50 rounded-[2.5rem] border border-slate-200 text-center">
-        <h4 className="text-slate-900 font-black mb-2">Android APK Notice</h4>
-        <p className="text-slate-500 text-sm font-medium">PWAs (Progressive Web Apps) are the modern standard. They use 0mb storage, update automatically, and bypass Play Store restrictions while providing the same "Real App" experience.</p>
-      </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="settings-tab"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.2 }}
+            className="max-w-3xl mx-auto"
+          >
+            <div className="bg-white rounded-[2.5rem] p-8 border-2 border-slate-100 shadow-xl">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
+                <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                  <Settings size={20} />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-950 text-lg">APK Configuration Dashboard</h3>
+                  <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Configure package versions and build download sources</p>
+                </div>
+              </div>
+
+              <form onSubmit={saveConfiguration} className="space-y-6">
+                
+                {/* Driver App Configurations */}
+                <div className="bg-slate-50/60 rounded-2xl p-5 border border-slate-100/80">
+                  <span className="text-xs font-black text-blue-600 uppercase tracking-widest block mb-4">🚜 Driver Application Options</span>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Driver App Version</label>
+                      <input 
+                        type="type" 
+                        required
+                        value={config.driverVersion}
+                        onChange={e => setConfig({ ...config, driverVersion: e.target.value })}
+                        className="w-full h-11 bg-white border-2 border-slate-100 focus:border-blue-500 rounded-xl px-4 text-xs font-sans font-bold"
+                        placeholder="e.g. 1.5.0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Download Target URL</label>
+                      <input 
+                        type="type" 
+                        required
+                        value={config.driverApkLink}
+                        onChange={e => setConfig({ ...config, driverApkLink: e.target.value })}
+                        className="w-full h-11 bg-white border-2 border-slate-100 focus:border-blue-500 rounded-xl px-4 text-xs font-mono font-bold"
+                        placeholder="Default Link URL"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Changelog & Technical Features Notes</label>
+                    <textarea 
+                      required
+                      rows={2}
+                      value={config.driverNotes}
+                      onChange={e => setConfig({ ...config, driverNotes: e.target.value })}
+                      className="w-full bg-white border-2 border-slate-100 focus:border-blue-500 rounded-xl p-4 text-xs font-sans font-bold"
+                      placeholder="Enter release improvements description..."
+                    />
+                  </div>
+                </div>
+
+                {/* Customer App Configurations */}
+                <div className="bg-slate-50/60 rounded-2xl p-5 border border-slate-100/80">
+                  <span className="text-xs font-black text-emerald-600 uppercase tracking-widest block mb-4">🏺 Customer Application Options</span>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Customer App Version</label>
+                      <input 
+                        type="type" 
+                        required
+                        value={config.customerVersion}
+                        onChange={e => setConfig({ ...config, customerVersion: e.target.value })}
+                        className="w-full h-11 bg-white border-2 border-slate-100 focus:border-blue-500 rounded-xl px-4 text-xs font-sans font-bold"
+                        placeholder="e.g. 1.2.0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Download Target URL</label>
+                      <input 
+                        type="type" 
+                        required
+                        value={config.customerApkLink}
+                        onChange={e => setConfig({ ...config, customerApkLink: e.target.value })}
+                        className="w-full h-11 bg-white border-2 border-slate-100 focus:border-blue-500 rounded-xl px-4 text-xs font-mono font-bold"
+                        placeholder="Default Link URL"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Changelog & Technical Features Notes</label>
+                    <textarea 
+                      required
+                      rows={2}
+                      value={config.customerNotes}
+                      onChange={e => setConfig({ ...config, customerNotes: e.target.value })}
+                      className="w-full bg-white border-2 border-slate-100 focus:border-blue-500 rounded-xl p-4 text-xs font-sans font-bold"
+                      placeholder="Enter release improvements description..."
+                    />
+                  </div>
+                </div>
+
+                {/* Save action feedback bar */}
+                <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-100">
+                  <div>
+                    {saveStatus === 'saving' && (
+                      <span className="text-xs font-bold text-blue-600 flex items-center gap-2">
+                        <RefreshCw size={14} className="animate-spin" /> Saving parameters to Firebase...
+                      </span>
+                    )}
+                    {saveStatus === 'success' && (
+                      <span className="text-xs font-bold text-emerald-600 flex items-center gap-2">
+                        <CheckCircle size={14} /> Global distribution config updated successfully!
+                      </span>
+                    )}
+                    {saveStatus === 'error' && (
+                      <span className="text-xs font-bold text-red-600 flex items-center gap-2">
+                        ⚠️ Failed to store online. Using local session parameter cache.
+                      </span>
+                    )}
+                  </div>
+
+                  <button 
+                    type="submit"
+                    disabled={saveStatus === 'saving'}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-black text-xs uppercase tracking-wider px-6 h-12 rounded-2xl transition-all shadow-md shadow-blue-100"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+
+              </form>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

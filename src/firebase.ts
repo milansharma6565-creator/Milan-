@@ -35,18 +35,35 @@ export { signInWithPopup, signInWithRedirect, onAuthStateChanged, RecaptchaVerif
 
 // Test connection as required by constraints
 async function testConnection() {
-  try {
-    // Use a very short-lived getDoc from server to verify connectivity
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error: any) {
-    // Only warn if it's a configuration/permission issue, ignore offline/network errors
-    // but log them for debugging
-    if (error?.message?.includes('permission-denied') || error?.code === 'permission-denied') {
-       console.warn("Firestore permissions check failed. This is expected if 'test/connection' doc doesn't exist.");
-    } else {
-       console.log("Initial Firestore connectivity test result:", error?.message);
+  // Add a deferred delay so the browser has time to warm up network sockets (especially in iframe sandboxes)
+  setTimeout(async () => {
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        // Use a very short-lived getDoc from server to verify connectivity
+        await getDocFromServer(doc(db, 'test', 'connection'));
+        console.log("Initial Firestore connectivity test: Connected successfully!");
+        break;
+      } catch (error: any) {
+        retries--;
+        const isOffline = error?.message?.includes('offline') || error?.code === 'unavailable';
+        if (isOffline && retries > 0) {
+          console.log(`Firestore connection transient state, retrying in 2s... (${retries} attempts left)`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          continue;
+        }
+
+        // Only warn if it's a configuration/permission issue, ignore offline/network errors
+        // but log them for debugging
+        if (error?.message?.includes('permission-denied') || error?.code === 'permission-denied') {
+           console.warn("Firestore permissions check failed. This is expected if 'test/connection' doc doesn't exist.");
+        } else {
+           console.log("Initial Firestore connectivity test result:", error?.message);
+        }
+        break;
+      }
     }
-  }
+  }, 1500);
 }
 testConnection();
 

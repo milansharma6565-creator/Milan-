@@ -36,7 +36,8 @@ import {
   Star,
   FlaskConical as Flask,
   Package,
-  HelpCircle
+  HelpCircle,
+  QrCode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -45,9 +46,11 @@ import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay, sta
 import { generatePDF } from '../lib/pdfUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
+import { QRCodeSVG } from 'qrcode.react';
 import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
 import { X as LucideX } from 'lucide-react';
+import { SandboxSimulatorHub } from './SandboxSimulatorHub';
 
 function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void }) {
    const [text, setText] = useState('');
@@ -139,6 +142,187 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   currentFranchise?: any
 }) {
   const todayStart = startOfDay(new Date());
+
+  const [franchiseDetail, setFranchiseDetail] = useState<any>(null);
+  const [isSavingFranchise, setIsSavingFranchise] = useState(false);
+  const [saveFranchiseSuccess, setSaveFranchiseSuccess] = useState(false);
+  
+  // Custom print config states
+  const [editPrintName, setEditPrintName] = useState('');
+  const [editPrintMobile, setEditPrintMobile] = useState('');
+  const [editPrintAddress, setEditPrintAddress] = useState('');
+  const [editUpiId, setEditUpiId] = useState('');
+  
+  const [hidePrintPanel, setHidePrintPanel] = useState(() => localStorage.getItem('hideDashboardPrintSettings') === 'true');
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setHidePrintPanel(localStorage.getItem('hideDashboardPrintSettings') === 'true');
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  // Hydrate print states when franchiseDetail updates
+  useEffect(() => {
+    const fid = franchiseId || currentFranchise?.id;
+    if (!fid) return;
+    const unsub = onSnapshot(doc(db, 'franchises', fid), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setFranchiseDetail({ id: snap.id, ...data });
+        setEditPrintName(data.printName || data.name || '');
+        setEditPrintMobile(data.printMobile || data.operatorMobile || '');
+        setEditPrintAddress(data.printAddress || 'Behind balaji dharm kanta, near puniya wines jaipur road sikar, Rajasthan 332001');
+        setEditUpiId(data.upiId || 'rajha94133@barodampay');
+      }
+    });
+    return () => unsub();
+  }, [franchiseId, currentFranchise]);
+
+  const handleSaveFranchiseSettings = async () => {
+    const fid = franchiseId || currentFranchise?.id;
+    if (!fid) return;
+    setIsSavingFranchise(true);
+    setSaveFranchiseSuccess(false);
+    try {
+      await updateDoc(doc(db, 'franchises', fid), {
+        printName: editPrintName,
+        printMobile: editPrintMobile,
+        printAddress: editPrintAddress,
+        upiId: editUpiId,
+      });
+      setSaveFranchiseSuccess(true);
+      localStorage.setItem('hideDashboardPrintSettings', 'true');
+      setHidePrintPanel(true);
+      window.dispatchEvent(new Event('storage'));
+      setTimeout(() => setSaveFranchiseSuccess(false), 3000);
+    } catch (err) {
+      console.error("Error saving franchise settings:", err);
+      alert("Failed to save settings. Please try again.");
+    } finally {
+      setIsSavingFranchise(false);
+    }
+  };
+
+  const handlePrintBookingPoster = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    const fIdForPoster = franchiseDetail?.id || franchiseId || currentFranchise?.id || '';
+    const bookingUrl = `${getPublicAppUrl().toString()}?mode=booking&f=${fIdForPoster}`;
+    
+    // SVG for the QR code
+    const svgElement = document.getElementById('advertisement-qr-svg');
+    const svgHtml = svgElement ? svgElement.outerHTML : '';
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Customer Booking QR - ${franchiseDetail?.printName || franchiseDetail?.name || 'TankerWala'}</title>
+          <style>
+            body {
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              text-align: center;
+              padding: 40px;
+              color: #1e293b;
+              background-color: #ffffff;
+            }
+            .border-wrap {
+              border: 15px solid #2563eb;
+              border-radius: 40px;
+              padding: 50px 30px;
+              max-width: 600px;
+              margin: 0 auto;
+              box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            }
+            .logo-header {
+              font-size: 54px;
+              font-weight: 900;
+              color: #2563eb;
+              margin: 0 0 10px 0;
+              letter-spacing: -2px;
+            }
+            .power-badge {
+              font-size: 14px;
+              color: #64748b;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 4px;
+              margin-bottom: 25px;
+            }
+            .banner-title {
+              font-size: 32px;
+              font-weight: 800;
+              color: #0f172a;
+              margin-bottom: 5px;
+            }
+            .banner-tagline {
+              font-size: 20px;
+              color: #4b5563;
+              margin-bottom: 35px;
+              font-weight: 500;
+            }
+            .qr-container {
+              display: inline-block;
+              padding: 25px;
+              background: #ffffff;
+              border-radius: 30px;
+              border: 4px solid #f1f5f9;
+              box-shadow: 0 20px 40px rgba(37,99,235,0.06);
+              margin-bottom: 35px;
+            }
+            .scan-instructions {
+              font-size: 18px;
+              font-weight: 700;
+              color: #1e293b;
+              margin-bottom: 15px;
+            }
+            .franchise-info {
+              margin-top: 40px;
+              padding-top: 30px;
+              border-top: 2px dashed #e2e8f0;
+            }
+            .franchise-name {
+              font-size: 24px;
+              font-weight: 700;
+              color: #1e293b;
+            }
+            .franchise-phone {
+              font-size: 22px;
+              font-weight: 800;
+              color: #2563eb;
+              margin-top: 5px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="border-wrap">
+            <h1 class="logo-header">TankerWala</h1>
+            <div class="power-badge">Powered by Rajhans</div>
+            <div class="banner-title">Book Water Tanker Online Instantly</div>
+            <div class="banner-tagline">Book Your Smart Water Supplier From Anywhere!</div>
+            
+            <div class="qr-container">
+              ${svgHtml}
+            </div>
+            
+            <div class="scan-instructions">Scan with your phone camera & Order immediately!</div>
+            
+            <div class="franchise-info">
+              <div class="franchise-name">${franchiseDetail?.printName || franchiseDetail?.name || 'TankerWala'}</div>
+              <div class="franchise-phone">📞 Ph: +91 ${editPrintMobile || franchiseDetail?.operatorMobile || '94133 39987'}</div>
+            </div>
+          </div>
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
   
   const [bills, setBills] = useState<Bill[]>([]);
   const [bookingRequests, setBookingRequests] = useState<any[]>([]);
@@ -358,6 +542,27 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [isSavingQuickVch, setIsSavingQuickVch] = useState(false);
   const [activeCanFilter, setActiveCanFilter] = useState<'Monthly' | 'Packaged' | 'On-Call'>('Monthly');
   const [selectedMonthlyCust, setSelectedMonthlyCust] = useState<Customer | null>(null);
+
+  const hasCanService = (
+    (franchiseDetail?.superAdminServices?.can ?? currentFranchise?.superAdminServices?.can ?? true) !== false &&
+    (franchiseDetail?.servicesEnabled?.can ?? currentFranchise?.servicesEnabled?.can ?? true) !== false
+  );
+  const hasBottleService = (
+    (franchiseDetail?.superAdminServices?.bottle ?? currentFranchise?.superAdminServices?.bottle ?? true) !== false &&
+    (franchiseDetail?.servicesEnabled?.bottle ?? currentFranchise?.servicesEnabled?.bottle ?? true) !== false
+  );
+
+  useEffect(() => {
+    if (!hasCanService && (activeCanFilter === 'Monthly' || activeCanFilter === 'On-Call')) {
+      if (hasBottleService) {
+        setActiveCanFilter('Packaged');
+      }
+    } else if (!hasBottleService && activeCanFilter === 'Packaged') {
+      if (hasCanService) {
+        setActiveCanFilter('Monthly');
+      }
+    }
+  }, [hasCanService, hasBottleService, activeCanFilter]);
   const [smileyMood, setSmileyMood] = useState<'normal' | 'happy' | 'sad'>('normal');
   const [eatingState, setEatingState] = useState<'walking' | 'sitting' | 'eating' | 'idle'>('idle');
   const [removedDigits, setRemovedDigits] = useState<number[]>([]);
@@ -591,25 +796,22 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       if (!paymentAccId) throw new Error("Payment account not found");
       if (!otherAccSnap.exists()) throw new Error("Selected account not found");
 
+      const externalCustId = otherAccSnap.data()?.customerId;
+
       await runTransaction(db, async (transaction) => {
         const paymentAccRef = doc(db, 'accounts', paymentAccId);
         const otherAccRef = doc(db, 'accounts', quickVchForm.accountId);
+        const custRef = (!isPayment && externalCustId) ? doc(db, 'customers', externalCustId) : null;
         
-        const [payDoc, otherDoc] = await Promise.all([
+        const [payDoc, otherDoc, custDoc] = await Promise.all([
           transaction.get(paymentAccRef),
-          transaction.get(otherAccRef)
+          transaction.get(otherAccRef),
+          custRef ? transaction.get(custRef) : Promise.resolve(null)
         ]);
 
         const payBal = payDoc.data()?.currentBalance || 0;
         const otherBal = otherDoc.data()?.currentBalance || 0;
         const otherData = otherDoc.data();
-
-        let custDoc: any = null;
-        let custRef: any = null;
-        if (!isPayment && otherData?.customerId) {
-          custRef = doc(db, 'customers', otherData.customerId);
-          custDoc = await transaction.get(custRef);
-        }
 
         if (isPayment && payBal < amount) {
           throw new Error(`INSUFFICIENT_FUNDS:${paymentAccName}:${payBal}`);
@@ -682,8 +884,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [isWiping, setIsWiping] = useState(false);
   const isAdmin = isSuperAdmin || !!franchiseId;
   const isMilan = isSuperAdmin || (customers.length > 0 && bills.length > 0 && franchiseId === 'legacy-rajhans');
-  // Allow Rajhans main account also for system maintenance
-  const isSystemAdmin = isMilan || (customers.length > 0 && currentFranchise?.email === 'rajhanssikar@gmail.com');
+  // Allow Rajhans main account also for system maintenance unless disabled by Super Admin
+  const isSystemAdmin = isSuperAdmin || (
+    (isMilan || (customers.length > 0 && currentFranchise?.email === 'rajhanssikar@gmail.com')) &&
+    (franchiseDetail?.allowSystemMaintenance !== false && currentFranchise?.allowSystemMaintenance !== false)
+  );
 
   const handleMasterReset = async () => {
     if (!isSystemAdmin) {
@@ -769,17 +974,21 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
     try {
       // Fetch required data outside transaction
-      const [incomeSnap, cashSnap, bankSnap, customerSnap] = await Promise.all([
+      const franchiseIdForBill = editingBill.franchiseId || 'legacy-rajhans';
+      const [incomeSnap, cashSnap, bankSnap, customerSnap, franchiseDoc, loyaltyExpenseAccSnap] = await Promise.all([
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName)))
+        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName))),
+        getDoc(doc(db, 'franchises', franchiseIdForBill)),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense')))
       ]);
 
       let incomeAccId = incomeSnap.docs[0]?.id;
       let cashAccId = cashSnap.docs[0]?.id;
       let bankAccId = bankSnap.docs[0]?.id;
       let customerAccId = customerSnap.docs[0]?.id;
+      let loyaltyExpenseAccId = loyaltyExpenseAccSnap.docs.find(d => d.data().franchiseId === franchiseIdForBill || d.data().franchiseId === null)?.id;
 
       // FETCH TRIPS TO SYNC OUTSIDE TRANSACTION
       const qTrips = query(collection(db, 'trips'), where('billId', '==', editingBill.id));
@@ -789,10 +998,29 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         const billRef = doc(db, 'bills', editingBill.id);
         const customerRef = doc(db, 'customers', editingBill.customerId);
         
-        // --- 1. READS FIRST ---
-        const [billDoc, custDoc] = await Promise.all([
+        const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
+        const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
+        const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
+        const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
+        const loyaltyExpenseAccRef = loyaltyExpenseAccId ? doc(db, 'accounts', loyaltyExpenseAccId) : null;
+
+        // --- 1. COMBINED READS AT THE VERY START ---
+        const [
+          billDoc,
+          custDoc,
+          incomeAccDoc,
+          cashAccDoc,
+          bankAccDoc,
+          customerAccDoc,
+          loyaltyExpenseAccDoc
+        ] = await Promise.all([
           transaction.get(billRef),
-          transaction.get(customerRef)
+          transaction.get(customerRef),
+          incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
+          cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
+          bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
+          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null),
+          loyaltyExpenseAccRef ? transaction.get(loyaltyExpenseAccRef) : Promise.resolve(null)
         ]);
 
         if (!billDoc.exists()) throw new Error("Bill not found");
@@ -801,25 +1029,34 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         const amount = oldBill.grandTotal;
         const oldPaymentMode = oldBill.paymentMode;
 
-        const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
-        const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
-        const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
-        const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
-
-        const [incomeAccDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
-          incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
-          cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
-          bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
-          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null)
-        ]);
-
         // --- 2. WRITES SECOND ---
-        if (wasDelivered && (status === 'Pending' || status === 'Filling' || status === 'Cancelled')) {
+        if (wasDelivered && oldBill.ledgerPosted && (status === 'Pending' || status === 'Filling' || status === 'Cancelled')) {
           // REVERSE ACCOUNTING
           
-          // Reverse Income
+          // Reverse Customer's Loyalty points
+          const prevEarned = oldBill.loyaltyPointsEarned || 0;
+          const prevRedeemed = oldBill.loyaltyPointsRedeemed || 0;
+          const netLoyaltyChange = prevEarned - prevRedeemed;
+          if (custDoc.exists()) {
+            const currentCoins = custDoc.data().loyaltyCoins || 0;
+            const newCoinsVal = Math.max(0, currentCoins - netLoyaltyChange);
+            transaction.update(customerRef, {
+              loyaltyCoins: newCoinsVal,
+              updatedAt: serverTimestamp()
+            });
+          }
+
+          // Reverse Franchise Loyalty Expense if redeemed
+          if (prevRedeemed > 0 && loyaltyExpenseAccRef && loyaltyExpenseAccDoc?.exists()) {
+            transaction.update(loyaltyExpenseAccRef, {
+              currentBalance: Math.max(0, (loyaltyExpenseAccDoc.data().currentBalance || 0) - prevRedeemed)
+            });
+          }
+
+          // Reverse Service Income (Cr -> Dr) for the full sales total amount including old loyalty redeemed
+          const prevSalesTotal = amount + prevRedeemed;
           if (incomeAccDoc?.exists()) {
-            transaction.update(incomeAccRef!, { currentBalance: (incomeAccDoc.data().currentBalance || 0) - amount });
+            transaction.update(incomeAccRef!, { currentBalance: (incomeAccDoc.data().currentBalance || 0) - prevSalesTotal });
           }
 
           // Reverse Payment
@@ -848,6 +1085,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         transaction.update(billRef, { 
           status,
           isSettled: false,
+          ledgerPosted: false,
+          loyaltyPointsEarned: 0,
           updatedAt: serverTimestamp()
         });
 
@@ -876,8 +1115,21 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const finalPaymentMode = isCredit ? 'Pending' : mode;
 
     try {
-      // 1. Fetch required data outside transaction
-      const [incomeSnap, cashSnap, bankSnap, debtorsGroupSnap, customerSnap, assetsGroupSnap, incomeGroupSnap, tripSnapToSync] = await Promise.all([
+      // 1. Fetch required data outside transaction including fallback franchise & loyalty ledger details
+      const franchiseIdForBill = editingBill.franchiseId || 'legacy-rajhans';
+      const [
+        incomeSnap,
+        cashSnap,
+        bankSnap,
+        debtorsGroupSnap,
+        customerSnap,
+        assetsGroupSnap,
+        incomeGroupSnap,
+        tripSnapToSync,
+        franchiseDoc,
+        loyaltyExpenseAccSnap,
+        expensesGroupSnap
+      ] = await Promise.all([
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
@@ -885,7 +1137,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName))),
         getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
         getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Incomes'))),
-        getDocs(query(collection(db, 'trips'), where('billId', '==', editingBill.id)))
+        getDocs(query(collection(db, 'trips'), where('billId', '==', editingBill.id))),
+        getDoc(doc(db, 'franchises', franchiseIdForBill)),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense'))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', 'in', ['Direct Expenses', 'Indirect Expenses', 'Expenses'])))
       ]);
 
       let incomeAccId = incomeSnap.docs[0]?.id;
@@ -895,44 +1150,85 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       let customerAccId = customerSnap.docs[0]?.id;
       let assetsGroupId = assetsGroupSnap.docs[0]?.id;
       let incomeGroupId = incomeGroupSnap.docs[0]?.id;
+      let loyaltyExpenseAccId = loyaltyExpenseAccSnap.docs.find(d => d.data().franchiseId === franchiseIdForBill || d.data().franchiseId === null)?.id;
+      let expenseGroupId = expensesGroupSnap.docs.find(d => d.data().franchiseId === franchiseIdForBill || d.data().franchiseId === null)?.id || expensesGroupSnap.docs[0]?.id;
+
+      // Extract Franchise Loyalty attributes
+      let loyaltyProgramEnabled = false;
+      let commPct = commissionPercentage || 5;
+      if (franchiseDoc.exists()) {
+        const fData = franchiseDoc.data();
+        loyaltyProgramEnabled = !!fData.loyaltyProgramEnabled;
+        commPct = fData.commissionPercentage || commPct;
+      }
 
       await runTransaction(db, async (transaction) => {
         const billRef = doc(db, 'bills', editingBill.id);
         const customerRef = doc(db, 'customers', editingBill.customerId);
         
-        // --- 1. READS FIRST ---
-        const [billDoc, custDoc] = await Promise.all([
+        const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
+        const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
+        const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
+        const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
+        const loyaltyExpenseAccRef = loyaltyExpenseAccId ? doc(db, 'accounts', loyaltyExpenseAccId) : null;
+
+        // --- 1. COMBINED READS AT THE VERY START ---
+        const [
+          billDoc, 
+          custDoc,
+          incomeAccDoc, 
+          cashAccDoc, 
+          bankAccDoc, 
+          customerAccDoc, 
+          loyaltyExpenseAccDoc
+        ] = await Promise.all([
           transaction.get(billRef),
-          transaction.get(customerRef)
+          transaction.get(customerRef),
+          incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
+          cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
+          bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
+          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null),
+          loyaltyExpenseAccRef ? transaction.get(loyaltyExpenseAccRef) : Promise.resolve(null)
         ]);
 
         if (!billDoc.exists()) throw new Error("Bill not found");
         const oldBill = billDoc.data();
         const wasDelivered = oldBill.status === 'Delivered';
         const oldPaymentMode = oldBill.paymentMode;
-        const amount = oldBill.grandTotal;
+        const amount = oldBill.grandTotal; // Net amount payable after discount/redemption
 
-        // Fetch account balances inside transaction
-        const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
-        const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
-        const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
-        const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
+        // Calculate loyalty coins rewards and commission updates
+        const redeemed = oldBill.loyaltyPointsRedeemed || 0;
+        let calculatedLoyaltyPointsEarned = 0;
+        let originalComm = oldBill.commissionAmount;
+        
+        if (!originalComm) {
+          originalComm = ((oldBill.totalAmount || amount) * commPct) / 100;
+        }
 
-        const [incomeAccDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
-          incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
-          cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
-          bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
-          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null)
-        ]);
+        if (loyaltyProgramEnabled) {
+          calculatedLoyaltyPointsEarned = Math.round(originalComm * 0.70);
+        }
+
+        // Balance Service Income with pre-redemption true sale amount
+        const salesTotalAmount = amount + redeemed;
 
         // --- 2. WRITES SECOND ---
 
-        // A. REVERSE OLD IMPACT (If it was previously delivered)
-        if (wasDelivered) {
-          // Reverse Service Income (Cr -> Dr)
+        // A. REVERSE OLD IMPACT (If it was previously delivered and posted to ledger)
+        if (wasDelivered && oldBill.ledgerPosted) {
+          // Reverse Service Income (Cr -> Dr) for the full sales total amount including old loyalty redeemed
+          const prevRedeemed = oldBill.loyaltyPointsRedeemed || 0;
+          const prevSalesTotal = amount + prevRedeemed;
           if (incomeAccDoc?.exists()) {
             transaction.update(incomeAccRef!, {
-              currentBalance: (incomeAccDoc.data().currentBalance || 0) - amount
+              currentBalance: (incomeAccDoc.data().currentBalance || 0) - prevSalesTotal
+            });
+          }
+          // Reverse Franchise Loyalty Expense if was redeemed
+          if (prevRedeemed > 0 && loyaltyExpenseAccRef && loyaltyExpenseAccDoc?.exists()) {
+            transaction.update(loyaltyExpenseAccRef, {
+              currentBalance: Math.max(0, (loyaltyExpenseAccDoc.data().currentBalance || 0) - prevRedeemed)
             });
           }
           // Reverse Cash/Bank/Customer impacts
@@ -941,7 +1237,6 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           } else if ((oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank') && bankAccDoc?.exists()) {
             transaction.update(bankAccRef!, { currentBalance: (bankAccDoc.data().currentBalance || 0) - amount });
           } else if (oldPaymentMode === 'Pending' && customerAccDoc?.exists()) {
-            // It was a credit sale, reverse Dr impact on customer
             transaction.update(customerAccRef!, { currentBalance: (customerAccDoc.data().currentBalance || 0) - amount });
           }
         }
@@ -950,7 +1245,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         // Handle Missing Groups & Accounts
         if (!incomeGroupId) {
           const newGrp = doc(collection(db, 'accountGroups'));
-          transaction.set(newGrp, { name: 'Direct Incomes', type: 'Income' });
+          transaction.set(newGrp, { name: 'Direct Incomes', type: 'Income', franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
           incomeGroupId = newGrp.id;
         }
         
@@ -962,69 +1257,115 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             groupId: incomeGroupId, 
             openingBalance: 0, 
             balanceType: 'Cr', 
-            currentBalance: amount,
+            currentBalance: salesTotalAmount,
+            franchiseId: franchiseIdForBill,
             createdAt: serverTimestamp() 
           });
           finalIncomeAccId = newAcc.id;
         } else {
-            // Re-read current check: we already decremented if wasDelivered.
-            // But we need the UPDATED balance from our transaction buffer or just use the doc we have and adjust relative.
-            // Firestone transactions handle this.
             const baseBal = incomeAccDoc?.exists() ? incomeAccDoc.data().currentBalance || 0 : 0;
-            const adjustedBase = wasDelivered ? baseBal - amount : baseBal;
-            transaction.update(incomeAccRef!, { currentBalance: adjustedBase + amount });
+            const prevRedeemed = oldBill.loyaltyPointsRedeemed || 0;
+            const prevSalesTotal = amount + prevRedeemed;
+            const adjustedBase = (wasDelivered && oldBill.ledgerPosted) ? baseBal - prevSalesTotal : baseBal;
+            transaction.update(incomeAccRef!, { currentBalance: adjustedBase + salesTotalAmount });
+        }
+
+        // Setup loyalty expense ledger account inside transaction if missing
+        let finalLoyaltyExpenseAccId = loyaltyExpenseAccId;
+        if (redeemed > 0) {
+          if (!finalLoyaltyExpenseAccId) {
+            if (!expenseGroupId) {
+              const newGrp = doc(collection(db, 'accountGroups'));
+              transaction.set(newGrp, { name: 'Direct Expenses', type: 'Expense', franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
+              expenseGroupId = newGrp.id;
+            }
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, {
+              name: 'Franchise Loyalty Expense',
+              groupId: expenseGroupId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: redeemed,
+              franchiseId: franchiseIdForBill,
+              createdAt: serverTimestamp()
+            });
+            finalLoyaltyExpenseAccId = newAcc.id;
+          } else if (loyaltyExpenseAccRef && loyaltyExpenseAccDoc?.exists()) {
+             const prevRedeemed = oldBill.loyaltyPointsRedeemed || 0;
+             const expBase = loyaltyExpenseAccDoc.data().currentBalance || 0;
+             const adjustedExp = (wasDelivered && oldBill.ledgerPosted) ? expBase - prevRedeemed : expBase;
+             transaction.update(loyaltyExpenseAccRef, { currentBalance: adjustedExp + redeemed });
+          }
         }
 
         if (!assetsGroupId) {
           const newGrp = doc(collection(db, 'accountGroups'));
-          transaction.set(newGrp, { name: 'Current Assets', type: 'Asset' });
+          transaction.set(newGrp, { name: 'Current Assets', type: 'Asset', franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
           assetsGroupId = newGrp.id;
         }
         
         let finalCashAccId = cashAccId;
         if (!cashAccId) {
           const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { name: 'Cash', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: mode === 'Cash' ? amount : 0, createdAt: serverTimestamp() });
+          transaction.set(newAcc, { name: 'Cash', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: mode === 'Cash' ? amount : 0, franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
           finalCashAccId = newAcc.id;
         } else if (cashAccDoc?.exists()) {
             const base = cashAccDoc.data().currentBalance || 0;
-            const adjusted = (wasDelivered && oldPaymentMode === 'Cash') ? base - amount : base;
+            const adjusted = (wasDelivered && oldBill.ledgerPosted && oldPaymentMode === 'Cash') ? base - amount : base;
             transaction.update(cashAccRef!, { currentBalance: adjusted + (mode === 'Cash' ? amount : 0) });
         }
 
         let finalBankAccId = bankAccId;
         if (!bankAccId) {
           const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { name: 'Bank Account', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: (mode === 'UPI' || mode === 'Bank') ? amount : 0, createdAt: serverTimestamp() });
+          transaction.set(newAcc, { name: 'Bank Account', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: (mode === 'UPI' || mode === 'Bank') ? amount : 0, franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
           finalBankAccId = newAcc.id;
         } else if (bankAccDoc?.exists()) {
             const base = bankAccDoc.data().currentBalance || 0;
-            const adjusted = (wasDelivered && (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank')) ? base - amount : base;
+            const adjusted = (wasDelivered && oldBill.ledgerPosted && (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank')) ? base - amount : base;
             transaction.update(bankAccRef!, { currentBalance: adjusted + ((mode === 'UPI' || mode === 'Bank') ? amount : 0) });
         }
 
         if (!debtorsGroupId) {
           const newGrp = doc(collection(db, 'accountGroups'));
-          transaction.set(newGrp, { name: 'Sundry Debtors', parentGroupId: assetsGroupId, type: 'Asset' });
+          transaction.set(newGrp, { name: 'Sundry Debtors', parentGroupId: assetsGroupId, type: 'Asset', franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
           debtorsGroupId = newGrp.id;
         }
         
         let finalCustomerAccId = customerAccId;
         if (!customerAccId) {
           const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { name: oldBill.customerName, groupId: debtorsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: isCredit ? amount : 0, createdAt: serverTimestamp() });
+          transaction.set(newAcc, { name: oldBill.customerName, groupId: debtorsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: isCredit ? amount : 0, franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
           finalCustomerAccId = newAcc.id;
         } else if (customerAccDoc?.exists()) {
             const base = customerAccDoc.data().currentBalance || 0;
-            const adjusted = (wasDelivered && oldPaymentMode === 'Pending') ? base - amount : base;
+            const adjusted = (wasDelivered && oldBill.ledgerPosted && oldPaymentMode === 'Pending') ? base - amount : base;
             transaction.update(customerAccRef!, { currentBalance: adjusted + (isCredit ? amount : 0) });
         }
+
+        // Update customer's loyalty balance in the database atomically inside transaction
+        if (!oldBill.ledgerPosted && custDoc.exists()) {
+          const currentCoins = custDoc.data().loyaltyCoins || 0;
+          const netLoyaltyChange = calculatedLoyaltyPointsEarned - redeemed;
+          const newCoinsVal = Math.max(0, currentCoins + netLoyaltyChange);
+          transaction.update(customerRef, {
+            loyaltyCoins: newCoinsVal,
+            updatedAt: serverTimestamp()
+          });
+          console.log(`[Dashboard Settle] Updated customer ${oldBill.customerName} loyalty token balance in transaction: ${newCoinsVal}`);
+        }
+
+        // Deduct redeemed points from the franchise's commission on this bill
+        const finalCommissionValue = Math.max(0, originalComm - (redeemed > 0 ? redeemed : 0));
 
         // Update Bill
         transaction.update(billRef, { 
           status: 'Delivered', 
           paymentMode: finalPaymentMode,
           isSettled: !isCredit,
+          ledgerPosted: true,
+          loyaltyPointsEarned: calculatedLoyaltyPointsEarned,
+          commissionAmount: finalCommissionValue,
           updatedAt: serverTimestamp()
         });
 
@@ -1050,16 +1391,21 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         // --- 3. UPSERT VOUCHERS ---
         // Sales Voucher
         const salesVchId = `VCH-${editingBill.id}-SALE`;
+        const salesItems = [
+          { accountId: finalCustomerAccId, accountName: oldBill.customerName, amount: amount, type: 'Dr' }
+        ];
+        if (redeemed > 0 && finalLoyaltyExpenseAccId) {
+          salesItems.push({ accountId: finalLoyaltyExpenseAccId, accountName: 'Franchise Loyalty Expense', amount: redeemed, type: 'Dr' });
+        }
+        salesItems.push({ accountId: finalIncomeAccId, accountName: 'Service Income', amount: salesTotalAmount, type: 'Cr' });
+
         transaction.set(doc(db, 'vouchers', salesVchId), {
           date: new Date(),
           type: 'Sales',
           voucherNumber: `TRP-${oldBill.billNumber}`,
-          items: [
-            { accountId: finalCustomerAccId, accountName: oldBill.customerName, amount: amount, type: 'Dr' },
-            { accountId: finalIncomeAccId, accountName: 'Service Income', amount: amount, type: 'Cr' }
-          ],
-          narration: `Trip #${oldBill.billNumber} - ${oldBill.customerName} (${oldBill.tankerSize})`,
-          totalAmount: amount,
+          items: salesItems,
+          narration: `Trip #${oldBill.billNumber} - ${oldBill.customerName} (${oldBill.tankerSize || 'Water Can'}) ${redeemed > 0 ? `| Cashback Coins Redeemed: ₹${redeemed}` : ''}`,
+          totalAmount: salesTotalAmount,
           franchiseId: oldBill.franchiseId || franchiseId || null,
           createdAt: oldBill.createdAt || serverTimestamp(),
           updatedAt: serverTimestamp()
@@ -1430,7 +1776,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         paymentMode: 'Pending',
         remarks: request.remarks || originalData.remarks || '',
         createdAt: serverTimestamp(),
-        franchiseId: request.franchiseId || originalData.franchiseId || franchiseId || null
+        franchiseId: request.franchiseId || originalData.franchiseId || franchiseId || null,
+        loyaltyPointsRedeemed: request.loyaltyPointsRedeemed || 0,
+        discount: (originalData.discount || 0) + (request.loyaltyPointsRedeemed || 0),
+        grandTotal: Math.max(0, (originalData.grandTotal || request.totalEstimate || 0) - (request.loyaltyPointsRedeemed || 0))
       };
 
       try {
@@ -1493,14 +1842,14 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         const billRef = doc(db, 'bills', id);
         const customerRef = doc(db, 'customers', billData.customerId);
         
-        // --- READS ---
-        const custDoc = await transaction.get(customerRef);
         const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
         const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
         const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
         const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
 
-        const [incomeAccDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
+        // --- READS ---
+        const [custDoc, incomeAccDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
+          transaction.get(customerRef),
           incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
           cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
           bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
@@ -1741,6 +2090,14 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         )}
       </header>
 
+      {/* Interactive Sandbox Simulator Hub */}
+      {(currentFranchise?.isTesting || currentFranchise?.status === 'Testing') && (
+        <SandboxSimulatorHub 
+          franchiseId={franchiseId || currentFranchise?.id} 
+          currentFranchise={currentFranchise} 
+        />
+      )}
+
       {/* Critical Alerts for Admin */}
       <AnimatePresence>
         {pendingDieselRequests.length > 0 && (
@@ -1777,80 +2134,88 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       </AnimatePresence>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         {/* Monthly Can Monitoring Summary */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="md:col-span-2 lg:col-span-3 bg-white p-8 rounded-[2.5rem] border border-blue-50 shadow-sm"
-        >
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-            <div className="flex items-center gap-4">
-               <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-100">
-                  <Calendar size={32} />
-               </div>
-               <div>
-                  <h2 className="text-2xl font-black text-slate-900 leading-tight">Monthly Can Monitoring</h2>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Subscriber Delivery Tracking</p>
-               </div>
+        {(hasCanService || hasBottleService) && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="md:col-span-2 lg:col-span-3 bg-white p-8 rounded-[2.5rem] border border-blue-50 shadow-sm"
+          >
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+              <div className="flex items-center gap-4">
+                 <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-100">
+                    <Calendar size={32} />
+                 </div>
+                 <div>
+                    <h2 className="text-2xl font-black text-slate-900 leading-tight">Monthly Can Monitoring</h2>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Subscriber Delivery Tracking</p>
+                 </div>
+              </div>
+              <div className="flex gap-2">
+                 <div className="bg-slate-50 p-1.5 rounded-2xl flex border border-slate-100 shadow-inner">
+                    {hasCanService && (
+                      <button 
+                        onClick={() => setActiveCanFilter('Monthly')}
+                        className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'Monthly' ? 'bg-white text-blue-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
+                      >Monthly</button>
+                    )}
+                    {hasBottleService && (
+                      <button 
+                        onClick={() => setActiveCanFilter('Packaged')}
+                        className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'Packaged' ? 'bg-white text-green-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
+                      >Packaged Water</button>
+                    )}
+                    {hasCanService && (
+                      <button 
+                        onClick={() => setActiveCanFilter('On-Call')}
+                        className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'On-Call' ? 'bg-white text-orange-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
+                      >On-Call Cans</button>
+                    )}
+                 </div>
+              </div>
             </div>
-            <div className="flex gap-2">
-               <div className="bg-slate-50 p-1.5 rounded-2xl flex border border-slate-100 shadow-inner">
-                  <button 
-                    onClick={() => setActiveCanFilter('Monthly')}
-                    className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'Monthly' ? 'bg-white text-blue-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
-                  >Monthly</button>
-                  <button 
-                    onClick={() => setActiveCanFilter('Packaged')}
-                    className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'Packaged' ? 'bg-white text-green-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
-                  >Packaged Water</button>
-                  <button 
-                    onClick={() => setActiveCanFilter('On-Call')}
-                    className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'On-Call' ? 'bg-white text-orange-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
-                  >On-Call Cans</button>
-               </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+               {(() => {
+                  const monthlyCusts = customers.filter(c => c.notes?.toLowerCase().includes('monthly') || bills.some(b => b.customerId === c.id && b.category === 'MONTHLY_TANKER'));
+                  
+                  const filteredList = activeCanFilter === 'Monthly' 
+                    ? monthlyCusts 
+                    : activeCanFilter === 'Packaged'
+                      ? customers.filter(c => bills.some(b => b.customerId === c.id && (b.category === 'BOTTLE' || b.bottleSize)))
+                      : customers.filter(c => !monthlyCusts.includes(c) && bills.some(b => b.customerId === c.id && b.category === 'CAN'));
+
+                  if (filteredList.length === 0) {
+                    return <div className="col-span-4 py-12 text-center text-slate-400 font-bold text-[10px] uppercase tracking-widest border-2 border-dashed border-slate-100 rounded-3xl">No {activeCanFilter} customers found</div>
+                  }
+
+                  return filteredList.map(cust => (
+                    <motion.div
+                      key={cust.id}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setSelectedMonthlyCust(cust)}
+                      className="p-5 rounded-[2rem] border border-slate-100 bg-white hover:border-blue-200 transition-all cursor-pointer shadow-sm hover:shadow-xl group"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                         <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
+                            <Droplets size={20} />
+                         </div>
+                         <div className="bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1 rounded-md">Active</div>
+                      </div>
+                      <h4 className="font-bold text-slate-900 group-hover:text-blue-600 truncate">{cust.name}</h4>
+                      <p className="text-[10px] text-slate-400 font-bold mb-3">{cust.mobile}</p>
+                      <div className="flex items-center justify-between pt-3 border-t border-slate-50">
+                         <div className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Deliveries (MTD)</div>
+                         <div className="text-lg font-black text-slate-800">
+                            {bills.filter(b => b.customerId === cust.id && b.status === 'Delivered' && b.date >= startOfMonth(new Date())).length}
+                         </div>
+                      </div>
+                    </motion.div>
+                  ));
+               })()}
             </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-             {(() => {
-                const monthlyCusts = customers.filter(c => c.notes?.toLowerCase().includes('monthly') || bills.some(b => b.customerId === c.id && b.category === 'MONTHLY_TANKER'));
-                
-                const filteredList = activeCanFilter === 'Monthly' 
-                  ? monthlyCusts 
-                  : activeCanFilter === 'Packaged'
-                    ? customers.filter(c => bills.some(b => b.customerId === c.id && (b.category === 'BOTTLE' || b.bottleSize)))
-                    : customers.filter(c => !monthlyCusts.includes(c) && bills.some(b => b.customerId === c.id && b.category === 'CAN'));
-
-                if (filteredList.length === 0) {
-                  return <div className="col-span-4 py-12 text-center text-slate-400 font-bold text-[10px] uppercase tracking-widest border-2 border-dashed border-slate-100 rounded-3xl">No {activeCanFilter} customers found</div>
-                }
-
-                return filteredList.map(cust => (
-                  <motion.div
-                    key={cust.id}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setSelectedMonthlyCust(cust)}
-                    className="p-5 rounded-[2rem] border border-slate-100 bg-white hover:border-blue-200 transition-all cursor-pointer shadow-sm hover:shadow-xl group"
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                       <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
-                          <Droplets size={20} />
-                       </div>
-                       <div className="bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1 rounded-md">Active</div>
-                    </div>
-                    <h4 className="font-bold text-slate-900 group-hover:text-blue-600 truncate">{cust.name}</h4>
-                    <p className="text-[10px] text-slate-400 font-bold mb-3">{cust.mobile}</p>
-                    <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-                       <div className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Deliveries (MTD)</div>
-                       <div className="text-lg font-black text-slate-800">
-                          {bills.filter(b => b.customerId === cust.id && b.status === 'Delivered' && b.date >= startOfMonth(new Date())).length}
-                       </div>
-                    </div>
-                  </motion.div>
-                ));
-             })()}
-          </div>
-        </motion.div>
+          </motion.div>
+        )}
 
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
@@ -2352,6 +2717,193 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           </div>
         </div>
       </div>
+
+      {/* QR Code & Custom Thermal Print Settings Panel */}
+      {!hidePrintPanel && (
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-100 shrink-0">
+                <QrCode size={30} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-slate-900 leading-tight">QR Codes & Receipt Setup</h2>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5">Customer Booking QR & Thermal Print Settings</p>
+              </div>
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem('hideDashboardPrintSettings', 'true');
+                setHidePrintPanel(true);
+                window.dispatchEvent(new Event('storage'));
+              }}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-extrabold uppercase tracking-widest transition-colors border border-slate-200"
+            >
+              Not Now
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            
+            {/* Card 1: Unique Customer Booking QR Banner (Advertisement) */}
+            <div className="bg-slate-50 rounded-[2rem] p-6 border border-slate-100 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200/60">
+                  <span className="font-bold text-slate-800 text-md">Customer Booking QR Poster</span>
+                  <span className="bg-blue-100 text-blue-700 text-[9px] font-extrabold uppercase px-2.5 py-1 rounded-full">For Pamphlets & Banners</span>
+                </div>
+                <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+                  Generate and print promotional water booking banners & flyers. Customers can scan the QR code using their mobile camera to open their dynamic TankerWala booking portal.
+                </p>
+                
+                {/* Dynamic QR Display Mockup Card */}
+                <div className="flex flex-col items-center bg-white border border-slate-200/80 p-6 rounded-2xl shadow-sm max-w-sm mx-auto mb-6">
+                  <Logo size={48} className="mb-1" />
+                  <h3 className="text-lg font-bold uppercase text-blue-600 font-display">TankerWala</h3>
+                  <span className="text-[7.5px] font-bold tracking-widest text-slate-400 uppercase leading-none pb-3 border-b border-slate-100 w-full text-center">Powered by Rajhans</span>
+                  
+                  <h4 className="text-sm font-extrabold text-slate-800 mt-3 mb-1">Book Water Tanker Online Instantly</h4>
+                  <p className="text-[10px] text-slate-400 font-medium mb-4">Book Water Tanker Instantly From Home</p>
+                  
+                  <div className="p-3 bg-white border-2 border-slate-950 rounded-xl shadow-inner mb-3">
+                    <QRCodeSVG 
+                      id="advertisement-qr-svg"
+                      value={`${getPublicAppUrl().toString()}?mode=booking&f=${franchiseDetail?.id || franchiseId || currentFranchise?.id || ''}`}
+                      size={140}
+                      level="H"
+                      includeMargin={false}
+                    />
+                  </div>
+                  
+                  <p className="text-[9.5px] text-slate-500 font-bold leading-none text-center">Scan to order on TankerWala</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const bookingUrl = `${getPublicAppUrl().toString()}?mode=booking&f=${franchiseDetail?.id || franchiseId || currentFranchise?.id || ''}`;
+                    copyToClipboard(bookingUrl);
+                    alert("Booking link copied successfully!");
+                  }}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold text-xs transition-all uppercase tracking-wider flex items-center justify-center gap-1.5"
+                >
+                  Copy Web Link
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintBookingPoster}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-xs transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-blue-100"
+                >
+                  <Printer size={14} /> Print Banner
+                </button>
+              </div>
+
+              {/* In-app dismissal action explicitly described */}
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.setItem('hideDashboardPrintSettings', 'true');
+                  setHidePrintPanel(true);
+                  window.dispatchEvent(new Event('storage'));
+                }}
+                className="mt-4 text-[11px] font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase tracking-widest text-center underline decoration-dotted decoration-slate-300"
+              >
+                🙅‍♂️ Not Now (Hide from dashboard)
+              </button>
+            </div>
+
+            {/* Card 2: Custom Thermal Receipts Customization */}
+            <div className="bg-slate-50 rounded-[2rem] p-6 border border-slate-100 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200/60">
+                  <span className="font-bold text-slate-800 text-md">Receipt Settings & Banking UPI QR</span>
+                  <span className="bg-emerald-100 text-emerald-700 text-[9px] font-extrabold uppercase px-2.5 py-1 rounded-full">Thermal receipt settings</span>
+                </div>
+                <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+                  Set customized contact support numbers, printer header names, and payment VPA address to receive scan-to-pay orders directly in printed papers.
+                </p>
+
+                {/* Form Inputs */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Printed Receipt Headline Name</label>
+                    <input
+                      type="text"
+                      value={editPrintName}
+                      onChange={(e) => setEditPrintName(e.target.value)}
+                      placeholder={franchiseDetail?.name || 'TankerWala Sikar'}
+                      className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Print Mobile Number</label>
+                    <input
+                      type="text"
+                      value={editPrintMobile}
+                      onChange={(e) => setEditPrintMobile(e.target.value)}
+                      placeholder={franchiseDetail?.operatorMobile || '94133 39987'}
+                      className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Print Business Address</label>
+                    <textarea
+                      rows={2}
+                      value={editPrintAddress}
+                      onChange={(e) => setEditPrintAddress(e.target.value)}
+                      placeholder="Behind balaji dharm kanta, near puniya wines..."
+                      className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Payment VPA UPI ID for Scan-to-Pay QR</label>
+                    <input
+                      type="text"
+                      value={editUpiId}
+                      onChange={(e) => setEditUpiId(e.target.value)}
+                      placeholder="rajha94133@barodampay"
+                      className="w-full bg-white border border-slate-200 px-4 py-2.5 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-slate-200/60 flex items-center justify-between gap-4">
+                {/* Mini Payment UPI QR Live Preview */}
+                <div className="flex items-center gap-3">
+                  <div className="p-1 px-1.5 bg-white border border-slate-200 rounded-lg">
+                    <QRCodeSVG 
+                      value={`upi://pay?pa=${editUpiId || 'rajha94133@barodampay'}&pn=${encodeURIComponent(editPrintName || 'TankerWala')}&cu=INR`}
+                      size={40}
+                    />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase">UPI Live Preview</p>
+                    <p className="text-[11px] font-mono text-slate-600 truncate max-w-[120px]">{editUpiId || 'rajha94133@barodampay'}</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveFranchiseSettings}
+                  disabled={isSavingFranchise}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold text-xs uppercase tracking-wider px-6 py-3.5 rounded-xl transition-all shadow-md shadow-emerald-100 flex items-center gap-2"
+                >
+                  {isSavingFranchise ? 'Saving...' : saveFranchiseSuccess ? '✓ Saved!' : 'Save Settings'}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Quick Receipt Modal Check */}
       <AnimatePresence>
@@ -2998,35 +3550,48 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-4 gap-2">
-                    <button 
-                      onClick={() => handleStatusUpdate('Delivered')}
-                      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Delivered' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-100 text-slate-500'}`}
-                    >
-                      <CheckCircle2 size={24} />
-                      <span className="text-[10px] font-bold">Delivered</span>
-                    </button>
-                    <button 
-                      onClick={() => handleStatusUpdate('Filling')}
-                      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Filling' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
-                    >
-                      <Truck size={24} />
-                      <span className="text-[10px] font-bold">Filling</span>
-                    </button>
-                    <button 
-                      onClick={() => handleStatusUpdate('Pending')}
-                      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Pending' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-100 text-slate-500'}`}
-                    >
-                      <Clock size={24} />
-                      <span className="text-[10px] font-bold">Pending</span>
-                    </button>
-                    <button 
-                      onClick={() => handleStatusUpdate('Cancelled')}
-                      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Cancelled' ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-100 text-slate-500'}`}
-                    >
-                      <AlertCircle size={24} />
-                      <span className="text-[10px] font-bold">Cancel</span>
-                    </button>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-4 gap-2">
+                      <button 
+                        onClick={() => handleStatusUpdate('Delivered')}
+                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Delivered' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-100 text-slate-500'}`}
+                      >
+                        <CheckCircle2 size={24} />
+                        <span className="text-[10px] font-bold">Delivered</span>
+                      </button>
+                      <button 
+                        onClick={() => handleStatusUpdate('Filling')}
+                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Filling' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
+                      >
+                        <Truck size={24} />
+                        <span className="text-[10px] font-bold">Filling</span>
+                      </button>
+                      <button 
+                        onClick={() => handleStatusUpdate('Pending')}
+                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Pending' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-100 text-slate-500'}`}
+                      >
+                        <Clock size={24} />
+                        <span className="text-[10px] font-bold">Pending</span>
+                      </button>
+                      <button 
+                        onClick={() => handleStatusUpdate('Cancelled')}
+                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Cancelled' ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-100 text-slate-500'}`}
+                      >
+                        <AlertCircle size={24} />
+                        <span className="text-[10px] font-bold">Cancel</span>
+                      </button>
+                      </div>
+
+                      {(!editingBill.driverId || !editingBill.tractorId) && (
+                        <div className="p-3 bg-red-50 rounded-2xl border border-red-100 text-center animate-pulse">
+                          <p className="text-[11px] font-black uppercase tracking-wider text-red-600">
+                            ⚠️ First select driver and tractor then click Delivered
+                          </p>
+                          <p className="text-[9px] text-red-400 font-extrabold mt-0.5">
+                            (पहले ड्राइवर और ट्रैक्टर चुनें, उसके बाद ही Delivered चुनें)
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -1,28 +1,50 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bill } from '../types';
 import { formatCurrency } from '../constants';
 import { Logo } from './Logo';
 import { QRCodeSVG } from 'qrcode.react';
+import { db } from '../firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 interface ThermalInvoiceProps {
   bill: Bill;
 }
 
 export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
-  // UPI Payment Link
-  const upiId = "rajha94133@barodampay"; // Business UPI ID
-  const upiLink = `upi://pay?pa=${upiId}&pn=TankerWala%20Powered%20by%20Rajhans&am=${bill.grandTotal}&cu=INR&tn=Bill%20${bill.billNumber}`;
+  const [franchise, setFranchise] = useState<any>(null);
+
+  useEffect(() => {
+    if (!bill.franchiseId) return;
+    const unsub = onSnapshot(doc(db, 'franchises', bill.franchiseId), (snap) => {
+      if (snap.exists()) {
+        setFranchise(snap.data());
+      }
+    });
+    return () => unsub();
+  }, [bill.franchiseId]);
+
+  // UPI Payment Link Customization
+  const upiId = franchise?.upiId || "rajha94133@barodampay"; // Custom or Business UPI ID
+  const franchiseName = franchise?.printName || franchise?.name || "TankerWala";
+  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(franchiseName)}&am=${bill.grandTotal}&cu=INR&tn=Bill%20${bill.billNumber}`;
+  const printPhone = franchise?.printMobile || franchise?.operatorMobile || "94133 39987";
+  const printAddress = franchise?.printAddress || "Behind balaji dharm kanta, near puniya wines jaipur road sikar, Rajasthan 332001";
 
   return (
     <div className="bg-white p-6 shadow-sm border border-slate-200" style={{ width: '80mm', margin: '0 auto', fontFamily: 'Inter' }}>
       <div className="flex flex-col items-center border-b border-dashed pb-4 mb-4">
         <Logo size={64} className="mb-2" />
-        <h2 className="text-xl font-bold uppercase pb-3">
+        <h2 className="text-xl font-bold uppercase pb-4 text-center">
           Tanker<span className="relative">Wala<span className="absolute top-[80%] left-0 text-[8px] text-slate-500 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
         </h2>
+        {franchise && (
+          <p className="text-[11px] font-extrabold uppercase text-slate-800 tracking-widest text-center leading-tight mt-1.5 mb-1.5">
+            {franchiseName}
+          </p>
+        )}
         <p className="text-xs text-slate-500">Supplier & Service</p>
-        <p className="text-[10px] mt-1 whitespace-pre-line">Behind balaji dharm kanta, near puniya wines jaipur road sikar, Rajasthan 332001</p>
-        <p className="text-[10px]">Ph: +91 94133 39987</p>
+        <p className="text-[10px] mt-1 text-center whitespace-pre-line leading-snug">{printAddress}</p>
+        <p className="text-[10px] font-bold mt-1">Ph: +91 {printPhone}</p>
       </div>
 
       <div className="space-y-1 text-xs mb-4">
@@ -126,10 +148,10 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
 
       <div className="mt-6 text-center text-[9px] border-t border-dashed pt-4 leading-relaxed">
         <p className="font-bold text-slate-900 border border-slate-900 p-1 mb-2">NOTE</p>
-        <p className="text-slate-600 uppercase">नये बुकिंग आदेश के लिए कृपया ड्राइवर के नंबर पर फोन न करें।</p>
-        <p className="text-slate-900 font-bold mt-0.5">केवल ऑफिस के नंबर (+91 94133 39987) पर ही संपर्क करें।</p>
+        <p className="text-slate-600 uppercase">For new booking orders, please do not call the driver's number.</p>
+        <p className="text-slate-900 font-bold mt-0.5">Please contact only the office number (+91 {printPhone}).</p>
         <p className="mt-2 text-[9px] text-slate-900 font-bold italic pb-4">
-          धन्यवाद Tanker<span className="relative">Wala<span className="absolute top-[90%] left-0 text-[6px] text-slate-500 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">Powered by Rajhans</span></span> ☺
+          Thank you from {franchiseName} - Powered by Rajhans ☺
         </p>
       </div>
     </div>

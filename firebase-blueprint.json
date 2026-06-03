@@ -308,6 +308,20 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "ownerEmail", "status"]
+    },
+    "BankStatementRule": {
+      "title": "Bank Statement Rule",
+      "description": "Pattern matching and ledger suggestions for bank statement items",
+      "type": "object",
+      "properties": {
+        "pattern": { "type": "string" },
+        "accountId": { "type": "string" },
+        "accountName": { "type": "string" },
+        "type": { "type": "string", "enum": ["Cr", "Dr"] },
+        "franchiseId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pattern", "accountId", "accountName", "type"]
     }
   },
   "firestore": {
@@ -327,6 +341,7 @@
     "hydrantFillings": { "schema": "HydrantFilling", "description": "Tanker fillings tracker" },
     "trips": { "schema": "Trip", "description": "Collection of active trips" },
     "dieselRequests": { "schema": "DieselRequest", "description": "Fuel requests from drivers" },
-    "franchises": { "schema": "Franchise", "description": "Collection of franchise partners" }
+    "franchises": { "schema": "Franchise", "description": "Collection of franchise partners" },
+    "bankStatementRules": { "schema": "BankStatementRule", "description": "Machine learning rules for bank statement mapping" }
   }
 }

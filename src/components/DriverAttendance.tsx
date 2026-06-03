@@ -125,15 +125,20 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
         if (existingVchId) {
           await runTransaction(db, async (transaction) => {
             const vchRef = doc(db, 'vouchers', existingVchId);
-            const vchData = (await transaction.get(vchRef)).data() as Voucher;
+            const vchDoc = await transaction.get(vchRef);
+            const vchData = vchDoc.data() as Voucher;
             
             // Revert balances
-            for (const item of (vchData.items || [])) {
-              const accRef = doc(db, 'accounts', item.accountId);
-              const accSnap = await transaction.get(accRef);
-              if (accSnap.exists()) {
+            const items = vchData.items || [];
+            const accRefs = items.map(item => doc(db, 'accounts', item.accountId));
+            const accSnaps = await Promise.all(accRefs.map(ref => transaction.get(ref)));
+            
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              const accSnap = accSnaps[i];
+              if (accSnap && accSnap.exists()) {
                 const currentBal = accSnap.data().currentBalance || 0;
-                transaction.update(accRef, {
+                transaction.update(accSnap.ref, {
                   currentBalance: item.type === 'Dr' ? currentBal - item.amount : currentBal + item.amount
                 });
               }
@@ -216,17 +221,22 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
         await runTransaction(db, async (transaction) => {
           const expRef = doc(db, 'accounts', expId!);
           const drvRef = doc(db, 'accounts', driverAccId!);
-          const [expDoc, drvDoc] = await Promise.all([transaction.get(expRef), transaction.get(drvRef)]);
+          const vchRef = existingVchId ? doc(db, 'vouchers', existingVchId) : null;
+
+          const [expDoc, drvDoc, vchDoc] = await Promise.all([
+            transaction.get(expRef),
+            transaction.get(drvRef),
+            vchRef ? transaction.get(vchRef) : Promise.resolve(null)
+          ]);
 
           let delta = dailyAmt;
-          const vchRef = existingVchId ? doc(db, 'vouchers', existingVchId) : doc(collection(db, 'vouchers'));
+          const targetVchRef = existingVchId ? vchRef! : doc(collection(db, 'vouchers'));
           
-          if (existingVchId) {
-            const oldVchData = (await transaction.get(vchRef)).data();
-            delta = dailyAmt - (oldVchData?.totalAmount || 0);
+          if (vchDoc && vchDoc.exists()) {
+            delta = dailyAmt - (vchDoc.data()?.totalAmount || 0);
           }
 
-          transaction.set(vchRef, {
+          transaction.set(targetVchRef, {
             date: selectedDate,
             franchiseId: franchiseId || null,
             type: 'Journal',

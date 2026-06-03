@@ -9,12 +9,58 @@ export interface Franchise {
   };
   commissionPercentage: number;
   authorizedBy: string;
-  status: 'Active' | 'Inactive' | 'Suspended';
+  status: 'Active' | 'Inactive' | 'Suspended' | 'Testing';
   lockedFeatures?: string[];
   createdAt: any;
   gstNumber?: string;
   proprietorName?: string;
   aadharNumber?: string;
+  isTesting?: boolean;
+  conversionRequested?: boolean;
+  letterheadTemplateId?: string;
+  servicesEnabled?: {
+    tanker: boolean;
+    can: boolean;
+    bottle: boolean;
+  };
+  superAdminServices?: {
+    tanker: boolean;
+    can: boolean;
+    bottle: boolean;
+  };
+  customRates?: FranchiseCustomRates;
+  loyaltyProgramEnabled?: boolean;
+  allowSystemMaintenance?: boolean;
+}
+
+export interface FranchiseCustomRates {
+  tankerBase?: number;         // default 350
+  standbyTankerBase?: number;  // default 900
+  standbyTankerExtraDay?: number; // default 600
+  monthlyTankerBase?: number;  // default 10000
+  can20lBase?: number;         // default 80
+  can20lBookingBase?: number;  // default 30
+  monthlyCanBase?: number;     // default 600
+  bottle500ml?: number;        // default 10
+  bottle1l?: number;           // default 20
+  bottle2l?: number;           // default 35
+  tanker5000L?: number;        // default 400
+  tanker7500L?: number;        // default 600
+  tanker10000L?: number;       // default 800
+  tanker15000L?: number;       // default 1200
+  [key: string]: number | undefined; // Allow index access
+}
+
+export interface ActivityLog {
+  id?: string;
+  franchiseId: string;
+  franchiseName: string;
+  userEmail: string;
+  actionType: 'RATE_CHANGE' | 'PRINT_SETTING_CHANGE' | 'SERVICE_TOGGLE' | 'BILL_GENERATE' | 'BILL_STATUS_CHANGE' | 'DRIVER_CHANGE' | 'COMMISSION_CHANGE' | 'NEW_BILL' | 'FRANCHISE_CREATED' | 'FRANCHISE_UPDATED' | string;
+  description: string;
+  timestamp: any;
+  ipAddress?: string;
+  details?: any;
 }
 
 export interface Customer {
@@ -34,6 +80,7 @@ export interface Customer {
   nextDayCans?: number;
   category?: ProductCategory;
   createdAt: any;
+  loyaltyCoins?: number;
 }
 
 export type ProductCategory = 'TANKER' | 'STANDBY_TANKER' | 'MONTHLY_TANKER' | 'MONTHLY_CAN' | 'BOTTLE' | 'CAN' | 'DONATION';
@@ -57,6 +104,8 @@ export interface Bill {
   discount: number;
   grandTotal: number;
   commissionAmount?: number; // Calculated commission for this bill
+  loyaltyPointsEarned?: number;
+  loyaltyPointsRedeemed?: number;
   paymentMode: 'Cash' | 'UPI' | 'Bank Transfer' | 'Pending' | 'Split';
   splitPayments?: {
     cash: number;

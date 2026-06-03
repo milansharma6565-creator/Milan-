@@ -24,6 +24,9 @@ import {
   LayoutGrid,
   FileText,
   Globe,
+  Briefcase,
+  ShieldAlert,
+  Settings as LucideSettings,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Dashboard } from "./components/Dashboard";
@@ -41,6 +44,7 @@ import { CustomerOrderView } from "./components/CustomerOrderView";
 import { HydrantFilling } from "./components/HydrantFilling";
 import PhoneSync from "./components/PhoneSync";
 import { DocumentVault } from "./components/DocumentVault";
+import { Settings } from "./components/Settings";
 import { LetterheadGenerator } from "./components/LetterheadGenerator";
 import { FranchiseManagement } from "./components/FranchiseManagement";
 import { Logo } from "./components/Logo";
@@ -50,6 +54,7 @@ import { DriverApp } from "./components/DriverApp";
 import { CustomerBookingPortal } from "./components/CustomerBookingPortal";
 import { Ecosystem } from "./components/Ecosystem";
 import { WishesOverlay } from "./components/WishesOverlay";
+import { TendersMarketplace } from "./components/TendersMarketplace";
 import {
   auth,
   googleProvider,
@@ -83,7 +88,9 @@ type Tab =
   | "documents"
   | "letterpad"
   | "ecosystem"
-  | "franchise";
+  | "franchise"
+  | "settings"
+  | "tenders";
 
 import { format } from "date-fns";
 import { formatCurrency, getPublicAppUrl, copyToClipboard } from "./constants";
@@ -128,6 +135,7 @@ export default function App() {
         "filling",
         "sync",
         "documents",
+        "tenders",
       ].includes(tabParam)
     ) {
       return tabParam;
@@ -174,54 +182,10 @@ export default function App() {
               alert(`ACCESS DENIED: No authorized driver found for ${email}. Please contact your franchise to register your Gmail ID.`);
               return;
             }
-            // If found, App stays in driver mode and renders <DriverApp /> later
-          } else if (isCustomerMode) {
-            // Customer mode: No authorization check required for Gmail login
-            // The CustomerBookingPortal will handle registration if needed
-          } else {
-            // Check if Franchisee
-            const q = query(
-              collection(db, "franchises"),
-              where("email", "==", email.toLowerCase()),
-            );
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-              const fData = {
-                id: snap.docs[0].id,
-                ...snap.docs[0].data(),
-              } as Franchise;
-              setCurrentFranchise(fData);
-              setIsSuperAdmin(false);
-            } else {
-            // Fallback for explicitly mentioned fallback
-            if (email === "rajhanssikar@gmail.com") {
-              setCurrentFranchise({
-                id: "legacy-rajhans",
-                name: "Rajhans Steel and Water",
-                email: "rajhanssikar@gmail.com",
-                commissionPercentage: 5,
-                authorizedBy: "System",
-                status: "Active",
-                createdAt: new Date(),
-              });
-            } else if (email === "rajhanspilefoundation@gmail.com") {
-              setCurrentFranchise({
-                id: "legacy-pile",
-                name: "Rajhans Pile Foundation",
-                email: "rajhanspilefoundation@gmail.com",
-                commissionPercentage: 5,
-                authorizedBy: "System",
-                status: "Active",
-                createdAt: new Date(),
-              });
-            } else {
-              setCurrentFranchise(null);
-            }
-            setIsSuperAdmin(false);
           }
+          setIsSuperAdmin(false);
         }
-      }
-    } else {
+      } else {
         setUser(null);
         setCurrentFranchise(null);
         setIsSuperAdmin(false);
@@ -231,22 +195,69 @@ export default function App() {
     });
   }, []);
 
-  // Sync currentFranchise when inspectedFranchiseId changes for Super Admin
+  // Synchronize franchise details in real-time
   useEffect(() => {
-    if (isSuperAdmin && inspectedFranchiseId) {
-      const unsub = onSnapshot(
-        doc(db, "franchises", inspectedFranchiseId),
-        (snap) => {
+    if (!user) {
+      setCurrentFranchise(null);
+      return;
+    }
+
+    let unsub: (() => void) | null = null;
+
+    if (isSuperAdmin) {
+      if (inspectedFranchiseId) {
+        unsub = onSnapshot(doc(db, "franchises", inspectedFranchiseId), (snap) => {
           if (snap.exists()) {
             setCurrentFranchise({ id: snap.id, ...snap.data() } as Franchise);
           }
-        },
-      );
-      return () => unsub();
-    } else if (isSuperAdmin && !inspectedFranchiseId) {
-      setCurrentFranchise(null);
+        });
+      } else {
+        setCurrentFranchise(null);
+      }
+    } else {
+      const email = user.email || "";
+      if (email === "rajhanssikar@gmail.com") {
+        setCurrentFranchise({
+          id: "legacy-rajhans",
+          name: "Rajhans Steel and Water",
+          email: "rajhanssikar@gmail.com",
+          commissionPercentage: 5,
+          authorizedBy: "System",
+          status: "Active",
+          createdAt: new Date(),
+        });
+      } else if (email === "rajhanspilefoundation@gmail.com") {
+        setCurrentFranchise({
+          id: "legacy-pile",
+          name: "Rajhans Pile Foundation",
+          email: "rajhanspilefoundation@gmail.com",
+          commissionPercentage: 5,
+          authorizedBy: "System",
+          status: "Active",
+          createdAt: new Date(),
+        });
+      } else {
+        const q = query(
+          collection(db, "franchises"),
+          where("email", "==", email.toLowerCase())
+        );
+        unsub = onSnapshot(q, (snap) => {
+          if (!snap.empty) {
+            setCurrentFranchise({
+              id: snap.docs[0].id,
+              ...snap.docs[0].data(),
+            } as Franchise);
+          } else {
+            setCurrentFranchise(null);
+          }
+        });
+      }
     }
-  }, [isSuperAdmin, inspectedFranchiseId]);
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [user, isSuperAdmin, inspectedFranchiseId]);
 
   useEffect(() => {
     const q = isSuperAdmin
@@ -310,7 +321,6 @@ export default function App() {
         const qFranchise = query(
           collection(db, "franchises"),
           where("email", "==", email.toLowerCase()),
-          where("status", "==", "Active"),
         );
         const snapFranchise = await getDocs(qFranchise);
 
@@ -318,6 +328,15 @@ export default function App() {
           await auth.signOut();
           alert(
             `ACCESS DENIED: No authorized franchise found for ${email}. Please contact the administrator.`,
+          );
+          return;
+        }
+
+        const fStatus = snapFranchise.docs[0].data().status;
+        if (fStatus !== "Active" && fStatus !== "Testing") {
+          await auth.signOut();
+          alert(
+            `ACCESS DENIED: Your franchise account is currently ${fStatus || "Suspended"}. Please contact Milan Sharma (Admin).`,
           );
           return;
         }
@@ -528,10 +547,14 @@ export default function App() {
         return <HydrantFilling {...props} />;
       case "sync":
         return <PhoneSync />;
+      case "settings":
+        return <Settings {...props} />;
       case "documents":
         return <DocumentVault userEmail={user?.email || ""} />;
       case "letterpad":
         return <LetterheadGenerator currentFranchise={currentFranchise} />;
+      case "tenders":
+        return <TendersMarketplace franchiseId={currentFranchise?.id || ""} currentFranchise={currentFranchise} isSuperAdmin={isSuperAdmin} />;
       case "ecosystem":
         return isSuperAdmin ? <Ecosystem /> : <Dashboard {...props} />;
       case "franchise":
@@ -664,17 +687,6 @@ export default function App() {
                   }}
                 />
               )}
-              {!currentFranchise?.lockedFeatures?.includes("drivers") && (
-                <SidebarButton
-                  icon={<Truck size={20} />}
-                  label="Drivers"
-                  active={activeTab === "drivers"}
-                  onClick={() => {
-                    setActiveTab("drivers");
-                    setIsSidebarOpen(false);
-                  }}
-                />
-              )}
               {!currentFranchise?.lockedFeatures?.includes("ledger") && (
                 <SidebarButton
                   icon={<ClipboardList size={20} />}
@@ -729,18 +741,24 @@ export default function App() {
                     setIsSidebarOpen(false);
                   }}
               />
-              {!currentFranchise?.lockedFeatures?.includes("tractors") && (
-                <SidebarButton
-                  icon={<Fuel size={20} />}
-                  label="Fleet & Fuel"
-                  active={activeTab === "tractors"}
+              <SidebarButton
+                  icon={<Briefcase size={20} />}
+                  label="Active Tenders"
+                  active={activeTab === "tenders"}
                   onClick={() => {
-                    setActiveTab("tractors");
+                    setActiveTab("tenders");
                     setIsSidebarOpen(false);
                   }}
-                  badgeCount={pendingFuelCount}
-                />
-              )}
+              />
+              <SidebarButton
+                icon={<LucideSettings size={20} />}
+                label="Settings"
+                active={activeTab === "settings"}
+                onClick={() => {
+                  setActiveTab("settings");
+                  setIsSidebarOpen(false);
+                }}
+              />
             </>
           )}
           {isSuperAdmin && (
@@ -761,6 +779,16 @@ export default function App() {
                 active={activeTab === "ecosystem"}
                 onClick={() => {
                   setActiveTab("ecosystem");
+                  setInspectedFranchiseId(null);
+                  setIsSidebarOpen(false);
+                }}
+              />
+              <SidebarButton
+                icon={<Briefcase size={20} />}
+                label="Active Tenders"
+                active={activeTab === "tenders"}
+                onClick={() => {
+                  setActiveTab("tenders");
                   setInspectedFranchiseId(null);
                   setIsSidebarOpen(false);
                 }}
@@ -942,15 +970,6 @@ export default function App() {
               />
             )}
             <div className="w-16" />
-            {!currentFranchise?.lockedFeatures?.includes("tractors") && (
-              <NavButton
-                icon={<Fuel size={24} />}
-                label="Fleet"
-                active={activeTab === "tractors"}
-                onClick={() => setActiveTab("tractors")}
-                badgeCount={pendingFuelCount}
-              />
-            )}
             {!currentFranchise?.lockedFeatures?.includes("ledger") && (
               <NavButton
                 icon={<BookOpen size={24} />}
@@ -969,7 +988,18 @@ export default function App() {
               active={activeTab === "franchise"}
               onClick={() => setActiveTab("franchise")}
             />
-            {/* NavButton for ecosystem would normally go here, but bottom bar is crowded so we only add franchise for super admin. Ecosystem is available in sidebar. */}
+            <NavButton
+              icon={<Globe size={24} />}
+              label="Ecosystem"
+              active={activeTab === "ecosystem"}
+              onClick={() => setActiveTab("ecosystem")}
+            />
+            <NavButton
+              icon={<Briefcase size={24} />}
+              label="Tenders"
+              active={activeTab === "tenders"}
+              onClick={() => setActiveTab("tenders")}
+            />
           </>
         )}
       </nav>

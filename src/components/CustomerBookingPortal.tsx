@@ -77,16 +77,19 @@ function TripCountdown({ createdAt }: { createdAt: any }) {
 }
 
 function CanCalendar({ bills }: { bills: Bill[] }) {
-  const canBills = bills.filter(b => b.category === 'CAN' && b.status !== 'Cancelled');
+  const canBills = React.useMemo(() => {
+    return bills.filter(b => b.category === 'CAN' && b.status !== 'Cancelled');
+  }, [bills]);
   
   // Find the date of the very first can delivery
-  const firstCanBill = canBills.length > 0 
-    ? [...canBills].sort((a, b) => {
-        const dA = a.createdAt?.toDate?.() || new Date(a.date);
-        const dB = b.createdAt?.toDate?.() || new Date(b.date);
-        return dA.getTime() - dB.getTime();
-      })[0]
-    : null;
+  const firstCanBill = React.useMemo(() => {
+    if (canBills.length === 0) return null;
+    return [...canBills].sort((a, b) => {
+      const dA = a.createdAt?.toDate?.() || new Date(a.date);
+      const dB = b.createdAt?.toDate?.() || new Date(b.date);
+      return dA.getTime() - dB.getTime();
+    })[0];
+  }, [canBills]);
 
   const firstDate = firstCanBill 
     ? (firstCanBill.createdAt?.toDate?.() || new Date(firstCanBill.date))
@@ -101,10 +104,23 @@ function CanCalendar({ bills }: { bills: Bill[] }) {
   const cycleStartDate = addDays(firstDate, currentCycleIndex * 30);
   const cycleEndDate = addDays(cycleStartDate, 29);
 
-  const days = eachDayOfInterval({
-    start: cycleStartDate,
-    end: cycleEndDate
-  });
+  const days = React.useMemo(() => {
+    return eachDayOfInterval({
+      start: cycleStartDate,
+      end: cycleEndDate
+    });
+  }, [cycleStartDate, cycleEndDate]);
+
+  // Pre-calculate total cans per day to make days mapping completely O(1) per day
+  const cansByDayMap = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    canBills.forEach(b => {
+      const bDate = b.createdAt?.toDate?.() || new Date(b.date);
+      const key = format(bDate, 'yyyy-MM-dd');
+      map[key] = (map[key] || 0) + (b.quantity || 0);
+    });
+    return map;
+  }, [canBills]);
 
   return (
     <div className="space-y-4">
@@ -122,11 +138,8 @@ function CanCalendar({ bills }: { bills: Bill[] }) {
           <div key={d} className="text-[10px] font-black text-slate-400 text-center py-2">{d}</div>
         ))}
         {days.map(day => {
-          const dayBills = canBills.filter(b => {
-            const bDate = b.createdAt?.toDate?.() || new Date(b.date);
-            return isSameDay(bDate, day);
-          });
-          const totalCans = dayBills.reduce((acc, curr) => acc + curr.quantity, 0);
+          const dayKey = format(day, 'yyyy-MM-dd');
+          const totalCans = cansByDayMap[dayKey] || 0;
           const isToday = isSameDay(day, new Date());
 
           return (
@@ -261,25 +274,59 @@ function LiveChatModal({ bill, onClose, customerName }: { bill: Bill, onClose: (
 export function CustomerBookingPortal() {
   const [franchiseId, setFranchiseId] = useState<string | null>(null);
   const [franchises, setFranchises] = useState<any[]>([]);
+
+  const activeFranchise = React.useMemo(() => {
+    return franchises.find(f => f.id === franchiseId);
+  }, [franchises, franchiseId]);
+
+  const allowedServices = React.useMemo(() => {
+    if (!activeFranchise) {
+      return { tanker: true, can: true, bottle: true };
+    }
+    const sa = activeFranchise.superAdminServices || { tanker: true, can: true, bottle: true };
+    const fr = activeFranchise.servicesEnabled || { tanker: true, can: true, bottle: true };
+    return {
+      tanker: sa.tanker !== false && fr.tanker !== false,
+      can: sa.can !== false && fr.can !== false,
+      bottle: sa.bottle !== false && fr.bottle !== false
+    };
+  }, [activeFranchise]);
   
   const [mobileNumber, setMobileNumber] = useState('');
-  const [loginStep, setLoginStep] = useState<'MOBILE_LOGIN' | 'PIN_LOGIN' | 'PIN_SETUP' | 'NEW_REGISTER' | 'GOOGLE_LINK'>('MOBILE_LOGIN');
+  const [loginStep, setLoginStep] = useState<'GOOGLE_LOGIN' | 'GOOGLE_LINK'>('GOOGLE_LOGIN');
   const [pin, setPin] = useState('');
   const [newName, setNewName] = useState('');
   const [tempGoogleUser, setTempGoogleUser] = useState<{ email: string; name: string } | null>(null);
 
   useEffect(() => {
     // Check local storage for persistent login
-    const savedMobile = localStorage.getItem('customerBookingMobile');
+    const savedEmail = localStorage.getItem('customerBookingEmail');
     const isLoggedIn = localStorage.getItem('isCustomerLoggedIn');
-    if (savedMobile && isLoggedIn === 'true') {
-      setMobileNumber(savedMobile);
-      bypassLogin(savedMobile);
+    if (savedEmail && isLoggedIn === 'true') {
+      bypassLoginByEmail(savedEmail);
     }
   }, []);
   
   const [isLogged, setIsLogged] = useState(false);
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const [redeemLoyalty, setRedeemLoyalty] = useState(false);
+
+  useEffect(() => {
+    if (!customer?.id) return;
+    const unsub = onSnapshot(doc(db, 'customers', customer.id), (docSnap) => {
+      if (docSnap.exists()) {
+        setCustomer({ id: docSnap.id, ...docSnap.data() } as Customer);
+      }
+    });
+    return () => unsub();
+  }, [customer?.id]);
+
+  useEffect(() => {
+    if (customer?.franchiseId && !franchiseId) {
+      setFranchiseId(customer.franchiseId);
+    }
+  }, [customer?.franchiseId, franchiseId]);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -291,6 +338,17 @@ export function CustomerBookingPortal() {
   const [floors, setFloors] = useState<number>(0);
   const [pipeLength, setPipeLength] = useState<number>(50);
   const [totalEstimate, setTotalEstimate] = useState(0);
+
+  const maxRedeemablePoints = React.useMemo(() => {
+    if (!customer) return 0;
+    return Math.min(customer.loyaltyCoins || 0, totalEstimate);
+  }, [customer, totalEstimate]);
+
+  const finalPayableEstimate = React.useMemo(() => {
+    const isLoyaltyActive = !!activeFranchise?.loyaltyProgramEnabled;
+    const loyaltyCoinsRedeemed = (redeemLoyalty && isLoyaltyActive) ? maxRedeemablePoints : 0;
+    return Math.max(0, totalEstimate - loyaltyCoinsRedeemed);
+  }, [redeemLoyalty, activeFranchise, totalEstimate, maxRedeemablePoints]);
 
   const [activeSlide, setActiveSlide] = useState<'TANKER' | 'CAN' | 'BOTTLE'>('TANKER');
   const [primaryView, setPrimaryView] = useState<'HOME' | 'TANKER_SECTION' | 'CAN_SECTION' | 'BOTTLE_SECTION'>('HOME');
@@ -309,6 +367,31 @@ export function CustomerBookingPortal() {
   const [showDonationQR, setShowDonationQR] = useState(false);
   
   const [isMonthlyCan, setIsMonthlyCan] = useState(false);
+
+  // Auto-route activeSlide if its corresponding service product is disabled
+  useEffect(() => {
+    if (activeSlide === 'TANKER' && !allowedServices.tanker) {
+      if (allowedServices.can) setActiveSlide('CAN');
+      else if (allowedServices.bottle) setActiveSlide('BOTTLE');
+    } else if (activeSlide === 'CAN' && !allowedServices.can) {
+      if (allowedServices.tanker) setActiveSlide('TANKER');
+      else if (allowedServices.bottle) setActiveSlide('BOTTLE');
+    } else if (activeSlide === 'BOTTLE' && !allowedServices.bottle) {
+      if (allowedServices.tanker) setActiveSlide('TANKER');
+      else if (allowedServices.can) setActiveSlide('CAN');
+    }
+  }, [allowedServices, activeSlide]);
+
+  // Auto-route primaryView if active service product is disabled
+  useEffect(() => {
+    if (primaryView === 'TANKER_SECTION' && !allowedServices.tanker) {
+      setPrimaryView('HOME');
+    } else if (primaryView === 'CAN_SECTION' && !allowedServices.can) {
+      setPrimaryView('HOME');
+    } else if (primaryView === 'BOTTLE_SECTION' && !allowedServices.bottle) {
+      setPrimaryView('HOME');
+    }
+  }, [allowedServices, primaryView]);
 
   useEffect(() => {
     if (selectedCategory === 'CAN' && isMonthlyCan) {
@@ -492,16 +575,16 @@ export function CustomerBookingPortal() {
     return () => unsub();
   }, []);
 
-  const bypassLogin = async (mobile: string) => {
+  const bypassLoginByEmail = async (email: string) => {
     try {
-      const q = query(collection(db, 'customers'), where('mobile', '==', mobile));
+      const q = query(collection(db, 'customers'), where('email', '==', email));
       const snap = await getDocs(q);
       if (!snap.empty) {
         const custData = { id: snap.docs[0].id, ...snap.docs[0].data() } as Customer;
         setCustomer(custData);
         setIsLogged(true);
       } else {
-        localStorage.removeItem('customerBookingMobile');
+        localStorage.removeItem('customerBookingEmail');
         localStorage.removeItem('isCustomerLoggedIn');
       }
     } catch (e: any) {
@@ -509,40 +592,13 @@ export function CustomerBookingPortal() {
     }
   };
 
-  const handleMobileSubmit = async () => {
-    if (mobileNumber.length !== 10) {
-      setError('Enter a valid 10-digit mobile number.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const q = query(collection(db, 'customers'), where('mobile', '==', mobileNumber));
-      const snap = await getDocs(q);
-      
-      if (snap.empty) {
-        setLoginStep('NEW_REGISTER');
-      } else {
-        const data = snap.docs[0].data();
-        setCustomer({ id: snap.docs[0].id, ...data } as Customer);
-        if (data.pin) {
-          setLoginStep('PIN_LOGIN');
-        } else {
-          setLoginStep('PIN_SETUP');
-        }
-      }
-    } catch (err: any) {
-      console.error("Mobile search failed:", err?.message || String(err));
-      setError('Network error. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const completeLogin = (custData: Customer) => {
     setCustomer(custData);
     setIsLogged(true);
     setMobileNumber(custData.mobile);
+    if (custData.email) {
+      localStorage.setItem('customerBookingEmail', custData.email);
+    }
     localStorage.setItem('customerBookingMobile', custData.mobile);
     localStorage.setItem('isCustomerLoggedIn', 'true');
   };
@@ -598,7 +654,7 @@ export function CustomerBookingPortal() {
     }
     if (!tempGoogleUser) {
       setError('Session expired. Please try Google login again.');
-      setLoginStep('MOBILE_LOGIN');
+      setLoginStep('GOOGLE_LOGIN');
       return;
     }
 
@@ -645,61 +701,7 @@ export function CustomerBookingPortal() {
     }
   };
 
-  const handleAuthSubmit = async () => {
-    setError('');
-    if (loginStep === 'NEW_REGISTER') {
-      if (!newName.trim() || pin.length !== 4) {
-        setError('Please enter your name and a 4-digit PIN.');
-        return;
-      }
-      setLoading(true);
-      try {
-        const newCustData = {
-          name: newName.trim(),
-          mobile: mobileNumber,
-          address: '',
-          pin: pin,
-          pendingAmount: 0,
-          totalAdvance: 0,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          franchiseId: franchiseId || 'legacy-rajhans' // Link to detected franchise
-        };
-        const docRef = await addDoc(collection(db, 'customers'), newCustData);
-        
-        // Auto-create ledger account for customer
-        await ledgerAutomation.ensureCustomerAccount(docRef.id, newCustData.name, newCustData.franchiseId || null);
 
-        completeLogin({ id: docRef.id, ...newCustData } as Customer);
-      } catch (err: any) {
-        handleFirestoreError(err, OperationType.CREATE, 'customers');
-        setError('Failed to register.');
-      } finally {
-        setLoading(false);
-      }
-    } else if (loginStep === 'PIN_SETUP') {
-      if (pin.length !== 4) {
-        setError('Please enter a 4-digit PIN.');
-        return;
-      }
-      setLoading(true);
-      try {
-        await updateDoc(doc(db, 'customers', customer!.id!), { pin: pin });
-        completeLogin({ ...customer!, pin } as Customer);
-      } catch (err: any) {
-        handleFirestoreError(err, OperationType.UPDATE, 'customers');
-        setError('Failed to setup PIN.');
-      } finally {
-        setLoading(false);
-      }
-    } else if (loginStep === 'PIN_LOGIN') {
-      if (pin !== customer?.pin) {
-        setError('Incorrect PIN. Try again.');
-        return;
-      }
-      completeLogin(customer!);
-    }
-  };
 
   useEffect(() => {
     if (!isLogged || !customer?.id) return;
@@ -827,6 +829,16 @@ export function CustomerBookingPortal() {
         finalRemarks = `WATER DONATION: ₹${donationAmount} contributed for roadside kiosks. ❤️`;
       }
 
+      // Calculate loyalty point redemption
+      const isLoyaltyActive = !!activeFranchise?.loyaltyProgramEnabled;
+      const pointsToRedeem = customer ? Math.min(customer.loyaltyCoins || 0, totalEstimate) : 0;
+      const loyaltyCoinsRedeemed = (redeemLoyalty && isLoyaltyActive) ? pointsToRedeem : 0;
+      const bookingFinalPayable = Math.max(0, totalEstimate - loyaltyCoinsRedeemed);
+
+      if (loyaltyCoinsRedeemed > 0) {
+        finalRemarks += ` | Paid with ${loyaltyCoinsRedeemed} Loyalty Coins`;
+      }
+
       await addDoc(collection(db, 'bookingRequests'), {
         billId: null, 
         customerId: customer.id!,
@@ -839,13 +851,15 @@ export function CustomerBookingPortal() {
         remarks: finalRemarks,
         location: location || null,
         distanceKm: Number(distanceKm.toFixed(2)),
-        totalEstimate: totalEstimate,
+        totalEstimate: bookingFinalPayable,
+        loyaltyPointsRedeemed: loyaltyCoinsRedeemed,
         status: 'Pending',
         requestedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         franchiseId: franchiseId || customer?.franchiseId || 'legacy-rajhans'
       });
       
+      setRedeemLoyalty(false);
       setBookingSuccess(true);
     } catch (err: any) {
       console.error("Create booking failed:", err?.message || String(err));
@@ -861,8 +875,9 @@ export function CustomerBookingPortal() {
     setIsLogged(false);
     setCustomer(null);
     setMobileNumber('');
-    setLoginStep('MOBILE_LOGIN');
+    setLoginStep('GOOGLE_LOGIN');
     setPin('');
+    localStorage.removeItem('customerBookingEmail');
     localStorage.removeItem('customerBookingMobile');
     localStorage.removeItem('isCustomerLoggedIn');
   };
@@ -888,109 +903,104 @@ export function CustomerBookingPortal() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-[2.5rem] shadow-xl max-w-md w-full text-center border border-slate-100"
+          initial={{ opacity: 0, y: 30, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          className="bg-white p-8 sm:p-10 rounded-[3rem] shadow-xl max-w-md w-full text-center border border-slate-100 relative overflow-hidden"
         >
-          <div className="bg-slate-900 w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-blue-200">
+          {/* Accent decoration */}
+          <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-blue-500 to-indigo-600" />
+          
+          <div className="bg-slate-900 w-24 h-24 rounded-[2.2rem] flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-blue-100 relative z-10 transition-transform hover:scale-105">
              <Logo size={48} color="white" />
           </div>
-          <h2 className="text-3xl font-black text-slate-900 mb-1 tracking-tight">
+          
+          <h2 className="text-3xl font-black text-slate-900 mb-1 tracking-tight font-sans">
             Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
           </h2>
           
-          <h1 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-8 mt-2">
-            {loginStep === 'NEW_REGISTER' ? 'Register' :
-             loginStep === 'PIN_SETUP' ? 'Setup Profile' :
-             loginStep === 'PIN_LOGIN' ? 'Enter PIN' : 
-             loginStep === 'GOOGLE_LINK' ? 'Secure Link / Register' : 'Booking Portal'}
-          </h1>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-6 mb-8 font-sans">
+            {loginStep === 'GOOGLE_LINK' ? 'Secure Link / Register' : 'Customer Booking Portal'}
+          </p>
           
-          <div className="space-y-4 mb-6 text-left">
+          <div className="space-y-4 mb-8 text-left">
             {loginStep === 'GOOGLE_LINK' && tempGoogleUser && (
-              <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl mb-4 text-xs font-medium text-blue-800 leading-relaxed">
-                <span className="font-bold text-blue-900 block mb-1">Google account connected:</span>
-                <span className="font-bold underline">{tempGoogleUser.email}</span>
-                <span className="text-slate-500 mt-2 block">Please confirm your Name and Mobile Number to link or register your account securely.</span>
-              </div>
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-5 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-3xl mb-5 text-xs text-blue-800 leading-relaxed font-sans"
+              >
+                <span className="font-extrabold text-blue-900 block mb-1.5 text-sm">🤝 Google Account Connected:</span>
+                <span className="font-extrabold underline block truncate text-slate-700 bg-white px-3 py-1.5 rounded-xl border border-slate-100 my-2">{tempGoogleUser.email}</span>
+                <span className="text-slate-500 font-bold block mt-3">Please confirm your Full Name and 10-digit Mobile Number below to link your account securely.</span>
+              </motion.div>
             )}
 
-            {(loginStep === 'MOBILE_LOGIN' || loginStep === 'NEW_REGISTER' || loginStep === 'GOOGLE_LINK') && (
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <span className="text-slate-400 font-bold">+91</span>
+            {loginStep === 'GOOGLE_LINK' && (
+              <div className="space-y-4">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <UserIcon size={18} className="text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-bold text-slate-800 focus:border-blue-500 focus:bg-white transition-all outline-none font-sans"
+                    placeholder="Full Name"
+                    required
+                  />
                 </div>
-                <input
-                  type="tel"
-                  value={mobileNumber}
-                  onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  className="w-full pl-14 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-lg font-bold text-slate-800 focus:border-blue-500 focus:bg-white transition-all outline-none"
-                  placeholder="Mobile Number"
-                />
+
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <span className="text-slate-400 font-bold text-sm">+91</span>
+                  </div>
+                  <input
+                    type="tel"
+                    value={mobileNumber}
+                    onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    className="w-full pl-14 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-lg font-bold text-slate-800 focus:border-blue-500 focus:bg-white transition-all outline-none font-sans"
+                    placeholder="Mobile Number"
+                    required
+                  />
+                </div>
               </div>
             )}
-
-            {(loginStep === 'NEW_REGISTER' || loginStep === 'GOOGLE_LINK') && (
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <UserIcon size={18} className="text-slate-400" />
-                </div>
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-bold text-slate-800 focus:border-blue-500 focus:bg-white transition-all outline-none"
-                  placeholder="Full Name"
-                />
-              </div>
-            )}
-
-            {['PIN_SETUP', 'PIN_LOGIN'].includes(loginStep) && (
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Lock size={18} className="text-slate-400" />
-                </div>
-                <input
-                  type="password"
-                  maxLength={4}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-center text-2xl tracking-[1em] font-bold text-slate-800 focus:border-blue-500 focus:bg-white transition-all outline-none"
-                  placeholder="••••"
-                  autoFocus
-                />
-                {loginStep === 'PIN_LOGIN' && (
-                  <button 
-                    onClick={() => alert("Please call Admin Rahul Hans at +91 96102 96102 to retrieve your PIN. They can see it in their Customer panel.")}
-                    className="w-full text-xs font-bold text-blue-600 mt-2 text-right hover:underline"
-                  >
-                    Forgot PIN? Ask Admin
-                  </button>
-                )}
+            
+            {loginStep === 'GOOGLE_LOGIN' && (
+              <div className="text-center py-2 px-3 text-slate-500 text-xs font-semibold leading-relaxed font-sans">
+                Welcome to <span className="font-black text-slate-800">Rajhans TankerWala</span> booking application. Book premium tankers, cans, and bottles in 1-Click with live-tracking.
               </div>
             )}
             
             {error && (
-              <div className="text-red-500 text-sm font-bold bg-red-50 p-3 rounded-xl flex items-center gap-2">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="text-red-500 text-xs font-bold bg-red-50 p-4 rounded-2xl flex items-center gap-2.5 border border-red-100 font-sans"
+              >
                 <AlertCircle size={16} className="shrink-0" />
                 {error}
-              </div>
+              </motion.div>
             )}
           </div>
           
-          {(loginStep === 'MOBILE_LOGIN' || loginStep === 'NEW_REGISTER' || loginStep === 'PIN_SETUP' || loginStep === 'PIN_LOGIN' || loginStep === 'GOOGLE_LINK') && (
+          {loginStep === 'GOOGLE_LINK' && (
             <button 
-              onClick={loginStep === 'MOBILE_LOGIN' ? handleMobileSubmit : (loginStep === 'GOOGLE_LINK' ? handleGoogleLinkSubmit : handleAuthSubmit)}
-              disabled={loading || (loginStep === 'MOBILE_LOGIN' && mobileNumber.length < 10) || (loginStep === 'GOOGLE_LINK' && (mobileNumber.length < 10 || !newName.trim())) || (['PIN_SETUP', 'PIN_LOGIN'].includes(loginStep) && pin.length < 4)}
-              className={`w-full h-14 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${
-                loading ? 'bg-blue-100 text-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'
+              onClick={handleGoogleLinkSubmit}
+              disabled={loading || mobileNumber.length < 10 || !newName.trim()}
+              className={`w-full h-14 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all font-sans text-sm ${
+                loading || mobileNumber.length < 10 || !newName.trim()
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                  : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xl shadow-blue-100 active:scale-95 cursor-pointer'
               }`}
             >
               {loading ? (
                 <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
               ) : (
                 <>
-                  Continue securely <CheckCircle2 size={18} />
+                  Link Account & Enter <CheckCircle2 size={18} />
                 </>
               )}
             </button>
@@ -1000,48 +1010,46 @@ export function CustomerBookingPortal() {
             <button 
               type="button"
               onClick={() => {
-                setLoginStep('MOBILE_LOGIN');
+                setLoginStep('GOOGLE_LOGIN');
                 setTempGoogleUser(null);
                 setError('');
               }}
-              className="mt-3 w-full text-xs font-bold text-slate-500 hover:text-slate-700 transition"
+              className="mt-4 w-full text-xs font-black text-slate-400 hover:text-slate-600 transition tracking-wide uppercase font-sans py-2"
             >
-              Cancel Setup
+              Cancel Registration
             </button>
           )}
 
-          {loginStep === 'MOBILE_LOGIN' && (
-            <>
-              <div className="relative my-6 flex items-center justify-center">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-100"></div>
-                </div>
-                <span className="relative bg-white px-4 text-xs font-black text-slate-400 uppercase tracking-widest">OR</span>
-              </div>
-              
-              <button 
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={loading}
-                className="w-full border-2 border-slate-100 hover:border-slate-200 active:scale-98 text-slate-700 h-14 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all"
-              >
-                {loading ? (
-                  <div className="animate-spin rounded-full h-5 w-5 border-2 border-slate-400 border-t-transparent" />
-                ) : (
+          {loginStep === 'GOOGLE_LOGIN' && (
+            <motion.button 
+              type="button"
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleGoogleLogin}
+              disabled={loading}
+              className="w-full bg-slate-900 text-white hover:bg-slate-800 text-slate-700 h-15 rounded-2xl font-bold flex items-center justify-center gap-3.5 transition-all shadow-xl shadow-slate-200 cursor-pointer text-sm font-sans"
+            >
+              {loading ? (
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+              ) : (
+                <>
                   <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.92h6.6a5.66 5.66 0 0 1-2.45 3.71v3.08h4c2.32-2.14 3.59-5.3 3.59-8.64Z"/>
                     <path fill="#34A853" d="M12 24c3.24 0 5.97-1.08 7.96-2.91l-4-3.08c-1.12.75-2.54 1.19-3.96 1.19-3.05 0-5.63-2.06-6.55-4.83H1.31v3.18A12 12 0 0 0 12 24Z"/>
                     <path fill="#FBBC05" d="M5.45 14.37a7.22 7.22 0 0 1 0-4.56v-3.1h-4.14a12 12 0 0 0 0 10.84l4.14-3.18Z"/>
                     <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.4C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.31 6.71l4.14 3.18C6.37 7.08 8.95 4.75 12 4.75Z"/>
                   </svg>
-                )}
-                Login with Google
-              </button>
-            </>
+                  Login instantly with Google
+                </>
+              )}
+            </motion.button>
           )}
           
-          <div className="mt-6 flex items-center justify-center gap-2 text-xs font-bold text-green-600 bg-green-50 py-2 rounded-lg border border-green-100">
-             <Lock size={14} /> Secured via Mobile PIN / Google Auth
+          <div className="mt-8 flex flex-col gap-1.5 items-center justify-center p-3.5 bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl border border-green-100/60 font-sans">
+             <div className="flex items-center gap-1.5 text-xs font-black text-green-700 uppercase tracking-wider">
+               <Lock size={13} /> Secured via Google OAuth
+             </div>
+             <p className="text-[10px] text-slate-500 font-bold block">100% secure sign-in. Your keys & credentials are fully protected.</p>
           </div>
         </motion.div>
       </div>
@@ -1164,6 +1172,12 @@ export function CustomerBookingPortal() {
           </div>
           <div className="flex items-center gap-2">
             <InstallPWA />
+            {activeFranchise?.loyaltyProgramEnabled && customer && (
+              <div className="flex items-center gap-1.5 bg-yellow-50/80 text-amber-800 px-3 py-1.5 rounded-xl border border-amber-200/60 shadow-sm">
+                <span className="text-xs">🪙</span>
+                <span className="text-xs font-black tracking-tight">{customer.loyaltyCoins || 0} Coins</span>
+              </div>
+            )}
             <button 
               onClick={handleLogout}
               className="text-xs font-bold text-slate-500 hover:text-red-500 bg-slate-50 px-3 py-1.5 rounded-lg transition-colors border border-slate-200"
@@ -1186,19 +1200,26 @@ export function CustomerBookingPortal() {
 
         {/* Horizontal Slide Selector - Requested Feature */}
         <div className="bg-white rounded-[2rem] p-3 shadow-sm border border-slate-100 flex items-center gap-2 sticky top-[4.5rem] z-40">
-          {(['TANKER', 'CAN', 'BOTTLE'] as const).map((slide) => (
-            <button
-              key={slide}
-              onClick={() => setActiveSlide(slide)}
-              className={`flex-1 h-12 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${
-                activeSlide === slide 
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
-                  : 'text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              {slide === 'TANKER' ? 'Tanker Trips' : slide === 'CAN' ? '20L Cans' : 'Packaged Water'}
-            </button>
-          ))}
+          {([
+            { key: 'TANKER', label: 'Tanker Trips', enabled: allowedServices.tanker },
+            { key: 'CAN', label: '20L Cans', enabled: allowedServices.can },
+            { key: 'BOTTLE', label: 'Packaged Water', enabled: allowedServices.bottle }
+          ] as const)
+            .filter(item => item.enabled !== false)
+            .map((slide) => (
+              <button
+                key={slide.key}
+                onClick={() => setActiveSlide(slide.key)}
+                className={`flex-1 h-12 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                  activeSlide === slide.key 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                {slide.label}
+              </button>
+            ))
+          }
         </div>
 
         <AnimatePresence mode="wait">
@@ -1337,44 +1358,50 @@ export function CustomerBookingPortal() {
             </div>
 
             <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide snap-x">
-              <button 
-                onClick={() => setPrimaryView('TANKER_SECTION')}
-                className="flex-shrink-0 w-32 aspect-square bg-slate-50 rounded-[2.5rem] border-2 border-slate-100 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:bg-blue-50 transition-all snap-center"
-              >
-                <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-blue-600">
-                  <Truck size={24} />
-                </div>
-                <div className="text-center">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">Tanker</span>
-                  <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Large Volume Tankers</span>
-                </div>
-              </button>
+              {allowedServices.tanker && (
+                <button 
+                  onClick={() => setPrimaryView('TANKER_SECTION')}
+                  className="flex-shrink-0 w-32 aspect-square bg-slate-50 rounded-[2.5rem] border-2 border-slate-100 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:bg-blue-50 transition-all snap-center"
+                >
+                  <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-blue-600">
+                    <Truck size={24} />
+                  </div>
+                  <div className="text-center">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">Tanker</span>
+                    <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Large Volume Tankers</span>
+                  </div>
+                </button>
+              )}
 
-              <button 
-                onClick={() => setPrimaryView('CAN_SECTION')}
-                className="flex-shrink-0 w-32 aspect-square bg-slate-50 rounded-[2.5rem] border-2 border-slate-100 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:bg-blue-50 transition-all snap-center"
-              >
-                <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-orange-600">
-                  <Flask size={24} />
-                </div>
-                <div className="text-center">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">20L Can</span>
-                  <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Home/Office Cans</span>
-                </div>
-              </button>
+              {allowedServices.can && (
+                <button 
+                  onClick={() => setPrimaryView('CAN_SECTION')}
+                  className="flex-shrink-0 w-32 aspect-square bg-slate-50 rounded-[2.5rem] border-2 border-slate-100 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:bg-blue-50 transition-all snap-center"
+                >
+                  <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-orange-600">
+                    <Flask size={24} />
+                  </div>
+                  <div className="text-center">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">20L Can</span>
+                    <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Home/Office Cans</span>
+                  </div>
+                </button>
+              )}
 
-              <button 
-                onClick={() => setPrimaryView('BOTTLE_SECTION')}
-                className="flex-shrink-0 w-32 aspect-square bg-slate-50 rounded-[2.5rem] border-2 border-slate-100 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:bg-blue-50 transition-all snap-center"
-              >
-                <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-green-600">
-                  <Package size={24} />
-                </div>
-                <div className="text-center">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">Packaged</span>
-                  <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Bottles & Bundles</span>
-                </div>
-              </button>
+              {allowedServices.bottle && (
+                <button 
+                  onClick={() => setPrimaryView('BOTTLE_SECTION')}
+                  className="flex-shrink-0 w-32 aspect-square bg-slate-50 rounded-[2.5rem] border-2 border-slate-100 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:bg-blue-50 transition-all snap-center"
+                >
+                  <div className="w-12 h-12 bg-white rounded-2xl shadow-sm flex items-center justify-center text-green-600">
+                    <Package size={24} />
+                  </div>
+                  <div className="text-center">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 block">Packaged</span>
+                    <span className="text-[8px] font-bold text-slate-400 block mt-0.5 whitespace-nowrap">Bottles & Bundles</span>
+                  </div>
+                </button>
+              )}
             </div>
 
             {/* Quick Stats/Info */}
@@ -1892,7 +1919,7 @@ export function CustomerBookingPortal() {
                   </div>
                 )}
 
-                {/* Remarks & Total Estimate */}
+                 {/* Remarks & Total Estimate */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Special Remarks (Optional)</label>
                   <textarea
@@ -1902,6 +1929,27 @@ export function CustomerBookingPortal() {
                     className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl p-3 text-sm font-medium focus:border-blue-500 focus:bg-white outline-none transition-all resize-none h-20"
                   />
                 </div>
+
+                {activeFranchise?.loyaltyProgramEnabled && customer && (customer.loyaltyCoins || 0) > 0 && (
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-amber-500 text-white rounded-xl shadow-md shadow-amber-500/20 text-lg">
+                        🎁
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black text-amber-900 leading-none">Redeem Loyalty Coins</h4>
+                        <p className="text-[10px] font-bold text-amber-700/80 uppercase tracking-wider mt-1">₹1 = 1 Coin (Balance: {customer.loyaltyCoins || 0})</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRedeemLoyalty(!redeemLoyalty)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${redeemLoyalty ? 'bg-amber-500' : 'bg-slate-200'}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${redeemLoyalty ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                )}
 
                 <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between shadow-lg">
                   <div>
@@ -1931,9 +1979,15 @@ export function CustomerBookingPortal() {
                         </>
                       )}
                     </div>
+                    {redeemLoyalty && activeFranchise?.loyaltyProgramEnabled && maxRedeemablePoints > 0 && (
+                      <div className="text-amber-400 text-xs font-bold mt-1.5 flex items-center gap-1">
+                        <span>🎁 Loyalty Applied:</span>
+                        <span>-₹{maxRedeemablePoints}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="text-2xl font-display font-black text-green-400">
-                    {formatCurrency(totalEstimate)}
+                    {formatCurrency(finalPayableEstimate)}
                   </div>
                 </div>
               </motion.div>
@@ -2026,11 +2080,37 @@ export function CustomerBookingPortal() {
                 )}
             </div>
 
+            {activeFranchise?.loyaltyProgramEnabled && customer && (customer.loyaltyCoins || 0) > 0 && (
+              <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-500 text-white rounded-xl shadow-md shadow-amber-500/20 text-lg">
+                    🎁
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-amber-900 leading-none">Redeem Loyalty Coins</h4>
+                    <p className="text-[10px] font-bold text-amber-700/80 uppercase tracking-wider mt-1 font-mono">You have: {customer.loyaltyCoins || 0} Coins</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRedeemLoyalty(!redeemLoyalty)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${redeemLoyalty ? 'bg-amber-500' : 'bg-slate-200'}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${redeemLoyalty ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+            )}
+
             <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between shadow-lg">
               <div>
                 <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Estimated Total</div>
-                <div className="text-2xl font-display font-black text-green-400">
-                  {formatCurrency(totalEstimate)}
+                {redeemLoyalty && activeFranchise?.loyaltyProgramEnabled && maxRedeemablePoints > 0 && (
+                  <div className="text-[10px] text-amber-400 font-bold mt-1 leading-none">
+                    Applied: -₹{maxRedeemablePoints}
+                  </div>
+                )}
+                <div className="text-2xl font-display font-black text-green-400 mt-1">
+                  {formatCurrency(finalPayableEstimate)}
                 </div>
               </div>
               <button
@@ -2130,11 +2210,37 @@ export function CustomerBookingPortal() {
                )}
             </div>
 
+            {activeFranchise?.loyaltyProgramEnabled && customer && (customer.loyaltyCoins || 0) > 0 && (
+              <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-500 text-white rounded-xl shadow-md shadow-amber-500/20 text-lg">
+                    🎁
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-amber-900 leading-none">Redeem Loyalty Coins</h4>
+                    <p className="text-[10px] font-bold text-amber-700/80 uppercase tracking-wider mt-1 font-mono">You have: {customer.loyaltyCoins || 0} Coins</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRedeemLoyalty(!redeemLoyalty)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${redeemLoyalty ? 'bg-amber-500' : 'bg-slate-200'}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${redeemLoyalty ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+            )}
+
             <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between shadow-lg">
               <div>
                 <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Estimated Total</div>
-                <div className="text-2xl font-display font-black text-green-400">
-                  {formatCurrency(totalEstimate)}
+                {redeemLoyalty && activeFranchise?.loyaltyProgramEnabled && maxRedeemablePoints > 0 && (
+                  <div className="text-[10px] text-amber-400 font-bold mt-1 leading-none">
+                    Applied: -₹{maxRedeemablePoints}
+                  </div>
+                )}
+                <div className="text-2xl font-display font-black text-green-400 mt-1">
+                  {formatCurrency(finalPayableEstimate)}
                 </div>
               </div>
               <button
@@ -2184,6 +2290,69 @@ export function CustomerBookingPortal() {
                   {/* Active Delivery Information */}
                   {(bill.status === 'Pending' || bill.status === 'Filling' || bill.status === 'Assigned' || bill.status === 'On the way' || bill.status === 'Reached') && (
                     <div className="mt-3 pt-3 border-t border-slate-100">
+                      {/* Interactive Delivery Timeline Step Tracker */}
+                      <div className="my-6 px-1 relative">
+                        <div className="flex items-center justify-between relative">
+                          {/* Line behind */}
+                          <div className="absolute left-4 right-4 top-[14px] h-1 bg-slate-100 rounded-full -z-10" />
+                          <div 
+                            className="absolute left-4 top-[14px] h-1 bg-blue-600 rounded-full -z-10 transition-all duration-500 ease-out" 
+                            style={{ 
+                              width: `${
+                                (() => {
+                                  // calculate status percentage
+                                  const steps: Record<string, number> = {
+                                    'Pending': 0,
+                                    'Assigned': 1, 'Filling': 1,
+                                    'On the way': 2, 'OnTheWay': 2,
+                                    'Reached': 3,
+                                    'Delivered': 4, 'Printed': 4
+                                  };
+                                  const currentStep = steps[bill.status || 'Pending'] || 0;
+                                  return (currentStep / 4) * 100;
+                                })()
+                              }%` 
+                            }}
+                          />
+                          
+                          {[
+                            { label: 'Placed', icon: CheckCircle2, value: 'Pending' },
+                            { label: 'Preparing', icon: Droplets, value: 'Filling' },
+                            { label: 'On Way', icon: Truck, value: 'On the way' },
+                            { label: 'Reached', icon: MapPin, value: 'Reached' },
+                            { label: 'Delivered', icon: Package, value: 'Delivered' }
+                          ].map((item, idx) => {
+                            const steps: Record<string, number> = {
+                              'Pending': 0,
+                              'Assigned': 1, 'Filling': 1,
+                              'On the way': 2, 'OnTheWay': 2,
+                              'Reached': 3,
+                              'Delivered': 4, 'Printed': 4
+                            };
+                            const current = steps[bill.status || 'Pending'] || 0;
+                            const active = current >= idx;
+                            const Icon = item.icon;
+                            return (
+                              <div key={item.label} className="flex flex-col items-center relative z-10">
+                                <motion.div 
+                                  animate={active ? { scale: [0.9, 1.1, 1] } : {}}
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+                                    active 
+                                      ? 'bg-blue-600 text-white shadow-xl shadow-blue-200' 
+                                      : 'bg-white text-slate-300 border-2 border-slate-100'
+                                  }`}
+                                >
+                                  <Icon size={14} className={current === idx ? "animate-pulse" : ""} />
+                                </motion.div>
+                                <span className={`text-[8px] font-black mt-2 uppercase tracking-widest ${active ? 'text-slate-800' : 'text-slate-400'}`}>
+                                  {item.label}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
                       {bill.driverName && (
                         <div className="flex items-center justify-between bg-blue-50 text-blue-900 p-3 rounded-xl mb-2 border border-blue-100">
                           <div className="flex items-center gap-2">

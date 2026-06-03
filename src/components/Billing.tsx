@@ -10,12 +10,14 @@ import { format } from 'date-fns';
 import { toJpeg } from 'html-to-image';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 import { LocationPicker } from './LocationPicker';
+import { activityLogger } from '../services/activityLogger';
 
-export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPercentage }: { 
+export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPercentage, currentFranchise }: { 
   onBillCreated?: () => void, 
   franchiseId?: string, 
   isSuperAdmin?: boolean,
-  commissionPercentage?: number
+  commissionPercentage?: number,
+  currentFranchise?: any
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -165,31 +167,48 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   const grandTotal = subtotal + form.extraCharges - form.discount;
 
   useEffect(() => {
+    const cr = currentFranchise?.customRates || {};
+    
+    const getRateForTankerSize = (sizeValue: string) => {
+      const key = `tanker${sizeValue}L`;
+      if (cr[key] !== undefined) return cr[key];
+      const size = TANKER_SIZES.find(s => s.value === sizeValue);
+      return size ? size.defaultRate : 400;
+    };
+
+    const getRateForBottleSize = (sizeValue: string) => {
+      const key = `bottle${sizeValue.toLowerCase()}`;
+      if (cr[key] !== undefined) return cr[key];
+      const size = BOTTLE_SIZES.find(s => s.value === sizeValue);
+      return size ? size.defaultRate : 10;
+    };
+
     if (form.category === 'TANKER') {
-      const size = TANKER_SIZES.find(s => s.value === form.tankerSize);
-      if (size) setForm(prev => ({ ...prev, rate: size.defaultRate }));
+      const customRate = getRateForTankerSize(form.tankerSize);
+      setForm(prev => ({ ...prev, rate: customRate }));
     } else if (form.category === 'STANDBY_TANKER') {
-      // Day 1: 900, Day 2+: 600
-      let calcRate = 900;
+      const base = cr.standbyTankerBase !== undefined ? cr.standbyTankerBase : 900;
+      const extra = cr.standbyTankerExtraDay !== undefined ? cr.standbyTankerExtraDay : 600;
       if (form.quantity > 1) {
-        // We'll store the logic in the rate for simplicity or handle in total
-        // For billing, it's easier to set total manually or calculate here
-        const total = 900 + (form.quantity - 1) * 600;
+        const total = base + (form.quantity - 1) * extra;
         setForm(prev => ({ ...prev, rate: total / form.quantity })); 
       } else {
-        setForm(prev => ({ ...prev, rate: 900 }));
+        setForm(prev => ({ ...prev, rate: base }));
       }
     } else if (form.category === 'MONTHLY_TANKER') {
-      setForm(prev => ({ ...prev, rate: 10000 }));
+      const base = cr.monthlyTankerBase !== undefined ? cr.monthlyCanBase : 10000;
+      setForm(prev => ({ ...prev, rate: base }));
     } else if (form.category === 'BOTTLE') {
-      const size = BOTTLE_SIZES.find(s => s.value === form.bottleSize);
-      if (size) setForm(prev => ({ ...prev, rate: size.defaultRate }));
+      const customRate = getRateForBottleSize(form.bottleSize);
+      setForm(prev => ({ ...prev, rate: customRate }));
     } else if (form.category === 'CAN') {
-      setForm(prev => ({ ...prev, rate: 80 })); // Assuming ₹80 for CAN
+      const base = cr.can20lBase !== undefined ? cr.can20lBase : 80;
+      setForm(prev => ({ ...prev, rate: base }));
     } else if (form.category === 'MONTHLY_CAN') {
-      setForm(prev => ({ ...prev, rate: 600 })); // ₹600 for Monthly Can Plan
+      const base = cr.monthlyCanBase !== undefined ? cr.monthlyCanBase : 600;
+      setForm(prev => ({ ...prev, rate: base }));
     }
-  }, [form.category, form.tankerSize, form.bottleSize, form.quantity]);
+  }, [form.category, form.tankerSize, form.bottleSize, form.quantity, currentFranchise]);
 
   const [showStatusSelection, setShowStatusSelection] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -373,6 +392,20 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       const docRef = await addDoc(collection(db, 'bills'), billData);
       const bookedBillWithId = { ...billData, id: docRef.id };
       setBookedBill(bookedBillWithId);
+
+      // Log invoice generation activity
+      try {
+        await activityLogger.log({
+          franchiseId: franchiseId || currentFranchise?.id || '',
+          franchiseName: currentFranchise?.name || 'Franchise',
+          userEmail: '',
+          actionType: 'NEW_BILL',
+          description: `Generated invoice #${form.billNumber} for Customer "${selectedCustomer.name}" with total ₹${grandTotal}`,
+          details: { billId: docRef.id, billNumber: form.billNumber, total: grandTotal }
+        });
+      } catch (logErr) {
+        console.error("Failed to log activity:", logErr);
+      }
 
       // Automatically post to Ledger (Automation) - ONLY if already delivered
       if (bookedBillWithId.status === 'Delivered') {

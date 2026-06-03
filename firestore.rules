@@ -59,7 +59,8 @@ service cloud.firestore {
     match /franchises/{fId} {
       allow get: if true; 
       allow list: if isSuperAdmin() || (isSignedIn() && (resource.data.status == 'Active' || resource.data.email.lower() == request.auth.token.email.lower()));
-      allow create, update, delete: if isSuperAdmin();
+      allow create, delete: if isSuperAdmin();
+      allow update: if isSuperAdmin() || (isSignedIn() && existing().email.lower() == request.auth.token.email.lower() && existing().status == 'Active');
     }
 
     // ---------------------------------------------------------
@@ -77,7 +78,7 @@ service cloud.firestore {
     function isValidBill(data) {
       return data.billNumber is string &&
              data.customerId is string &&
-             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN'] &&
+             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN', 'MONTHLY_CAN', 'DONATION'] &&
              data.grandTotal is number &&
              data.status in ['Pending', 'Accepted', 'Assigned', 'Filling', 'On the way', 'Reached', 'Delivered', 'Cancelled', 'Printed'] &&
              (data.get('remarks', '').size() <= 2000) &&
@@ -87,7 +88,7 @@ service cloud.firestore {
     function isValidTrip(data) {
       return data.billId is string &&
              data.driverId is string &&
-             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN'] &&
+             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN', 'MONTHLY_CAN', 'DONATION'] &&
              data.status in ['Active', 'Filling', 'On the way', 'Reached', 'Delivered'] &&
              (data.get('createdAt', request.time) == request.time);
     }
@@ -140,7 +141,7 @@ service cloud.firestore {
       return data.keys().hasAll(['billId', 'customerId', 'status', 'customerName', 'category', 'requestedAt']) &&
              data.billId is string &&
              data.customerId is string && isValidId(data.customerId) &&
-             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN'] &&
+             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN', 'MONTHLY_CAN', 'DONATION'] &&
              data.status in ['Pending', 'Accepted', 'Rejected'] &&
              (data.get('remarks', '').size() <= 500) &&
              (data.get('requestedAt', request.time) == request.time);
@@ -187,6 +188,15 @@ service cloud.firestore {
              data.amount is number &&
              data.liters is number &&
              data.status in ['Pending', 'Approved', 'Rejected'] &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
+    function isValidBankStatementRule(data) {
+      return data.keys().hasAll(['pattern', 'accountId', 'accountName', 'type']) &&
+             data.pattern is string && data.pattern.size() > 0 && data.pattern.size() <= 200 &&
+             data.accountId is string && isValidId(data.accountId) &&
+             data.accountName is string && data.accountName.size() > 0 && data.accountName.size() <= 100 &&
+             data.type in ['Cr', 'Dr'] &&
              (data.get('createdAt', request.time) == request.time);
     }
 
@@ -324,14 +334,32 @@ service cloud.firestore {
     }
 
     match /documents/{docId} {
-      allow create: if true;
-      allow read, update: if isAdmin();
-      allow delete: if isSuperAdmin();
+      allow read, create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
 
     match /settings/{docId} {
       allow read: if true;
       allow write: if isSuperAdmin();
+    }
+
+    match /tenderBids/{bidId} {
+      allow read, write: if true;
+    }
+
+    match /compiledTenders/{tenderId} {
+      allow read, write: if true;
+    }
+
+    match /activities/{activityId} {
+      allow read, create: if true;
+      allow update, delete: if isSuperAdmin();
+    }
+
+    match /bankStatementRules/{ruleId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidBankStatementRule(incoming()) && (incoming().get('franchiseId', null) == null || isFranchiseAuthorized(incoming().get('franchiseId', null)));
+      allow delete: if isSignedIn() && (existing().get('franchiseId', null) == null || isFranchiseAuthorized(existing().get('franchiseId', null)));
     }
   }
 }

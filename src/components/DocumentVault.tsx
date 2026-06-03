@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FileBox, Lock, Unlock, Upload, FileText, Trash2, ShieldAlert, Folder, X, Search, FileImage, File, Link, Plus } from 'lucide-react';
+import { FileBox, Lock, Unlock, Upload, FileText, Trash2, ShieldAlert, Folder, X, Search, FileImage, File as FileIcon, Link, Plus } from 'lucide-react';
 import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage, handleFirestoreError, OperationType } from '../firebase';
@@ -37,7 +37,7 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isAdmin = userEmail === 'milan.sharma6565@gmail.com';
+  const isAdmin = userEmail.toLowerCase() === 'milan.sharma6565@gmail.com' || userEmail.toLowerCase() === 'rajhanssikar@gmail.com';
 
   const defaultFolders: {id: string, name: string, parentId?: string}[] = [
     { id: 'phed', name: 'PHED Documents' },
@@ -161,10 +161,103 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
     fileInputRef.current?.click();
   };
 
-  const uploadFile = async (file: File) => {
+  const compressImage = (file: File): Promise<Blob | File> => {
+    return new Promise((resolve) => {
+      try {
+        if (!file.type.startsWith('image/')) {
+          resolve(file);
+          return;
+        }
+        if (file.size < 120000) { // No need to compress if under 120KB
+          resolve(file);
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const img = new Image();
+            img.onload = () => {
+              try {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+
+                // Target long side to max 1200px
+                const MAX_DIM = 1200;
+                if (width > MAX_DIM || height > MAX_DIM) {
+                  if (width > height) {
+                    height = Math.round((height * MAX_DIM) / width);
+                    width = MAX_DIM;
+                  } else {
+                    width = Math.round((width * MAX_DIM) / height);
+                    height = MAX_DIM;
+                  }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                  resolve(file);
+                  return;
+                }
+
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                canvas.toBlob((blob) => {
+                  try {
+                    if (blob) {
+                      const lastDot = file.name.lastIndexOf('.');
+                      const nameWithoutExt = lastDot === -1 ? file.name : file.name.substring(0, lastDot);
+                      const compressedFile = new File([blob], `${nameWithoutExt}.jpg`, {
+                        type: 'image/jpeg',
+                        lastModified: Date.now()
+                      });
+                      console.log(`[DocumentVault] Compressed image from ${(file.size / 1024).toFixed(0)} KB to ${(compressedFile.size / 1024).toFixed(0)} KB`);
+                      resolve(compressedFile);
+                    } else {
+                      resolve(file);
+                    }
+                  } catch (blobErr) {
+                    console.warn("[DocumentVault] toBlob conversion error:", blobErr);
+                    resolve(file);
+                  }
+                }, 'image/jpeg', 0.7); // 0.7 quality gives excellent balance of quality and compress-ratio (usually 80-150KB)
+              } catch (canvasErr) {
+                console.warn("[DocumentVault] Canvas resize error:", canvasErr);
+                resolve(file);
+              }
+            };
+            img.onerror = () => {
+              console.warn("[DocumentVault] Image loader error, bypassing compression.");
+              resolve(file);
+            };
+            img.src = event.target?.result as string;
+          } catch (onloadErr) {
+            console.warn("[DocumentVault] Reader onload error, bypassing compression:", onloadErr);
+            resolve(file);
+          }
+        };
+        reader.onerror = () => {
+          console.warn("[DocumentVault] FileReader error, bypassing compression.");
+          resolve(file);
+        };
+        reader.readAsDataURL(file);
+      } catch (err) {
+        console.warn("[DocumentVault] Error in compressImage initialization:", err);
+        resolve(file);
+      }
+    });
+  };
+
+  const uploadFile = async (rawFile: File) => {
     if (!currentFolder) return;
     setUploading(true);
+    
     try {
+      const file = await compressImage(rawFile) as File;
       const pathSuffix = `${Date.now()}_${file.name}`;
       const storageRef = ref(storage, `documents/${currentFolder}/${pathSuffix}`);
       
@@ -183,22 +276,36 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
         });
         setUploading(false);
       } catch (storageErr: any) {
-        console.warn("Firebase Storage failed, attempting Database Fallback...", storageErr instanceof Error ? storageErr.message : String(storageErr));
-        // Fallback to database for small files
-        if (file.size > 1000000) {
+        console.warn("[DocumentVault] Firebase Storage upload failed, attempting Database Fallback...", storageErr instanceof Error ? storageErr.message : String(storageErr));
+        
+        // Fallback to database for small files.
+        // Firestore max document size is 1MB. A base64 string is 33% larger than raw binary.
+        // Therefore, we must lock fallback files to approx 700KB Max.
+        if (file.size > 720000) {
           setUploading(false);
-          alert(`File is too large for fallback upload (1MB limit). Storage Error: ${storageErr.message}`);
+          alert(
+            `Unable to upload "${file.name}" because Cloud Storage is not fully configured or enabled in your active Firebase project. ` +
+            `We tried to fallback to saving inside the Firestore database, but the file size (${(file.size / 1024 / 1024).toFixed(2)} MB) ` +
+            `exceeds the 1MB database document size limit (due to base64 encoding expansion).\n\n` +
+            `TO FIX THIS DEFINITIVELY:\n` +
+            `1. Login to your Firebase Console.\n` +
+            `2. Go to "Build" -> "Storage" and click "Get Started" to enable Cloud Storage for this project.\n\n` +
+            `WORKAROUND:\n` +
+            `Please compress your document/PDF to under 700 KB, or upload a photo (photos are now automatically compressed under 150 KB and will succeed!).`
+          );
           return;
         }
 
-        let reader: any;
+        let reader: FileReader;
         try {
           reader = new FileReader();
-        } catch (e) {
-          console.error('FileReader constructor failed:', e?.message || String(e));
+        } catch (e: any) {
+          console.error('[DocumentVault] FileReader constructor failed:', e?.message || String(e));
           setUploading(false);
+          alert('FileReader error: ' + (e?.message || String(e)));
           return;
         }
+
         reader.onload = async () => {
           try {
             const base64String = reader.result as string;
@@ -213,21 +320,27 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
             });
             setUploading(false);
           } catch (dbErr: any) {
-            console.error("Firestore fallback error:", dbErr?.message || String(dbErr));
+            console.error("[DocumentVault] Firestore fallback write failed:", dbErr?.message || String(dbErr));
             setUploading(false);
-            alert('Upload failed: ' + dbErr.message);
+            alert(
+              `Upload failed! Both Firebase Storage and Database Fallback failed.\n` +
+              `Database Error: ${dbErr.message || String(dbErr)}\n\n` +
+              `Please ensure your internet connection is stable and you've enabled Storage in your Firebase console.`
+            );
           }
         };
+
         reader.onerror = () => {
           setUploading(false);
           alert('Failed to read file for fallback upload.');
         };
+        
         reader.readAsDataURL(file);
       }
     } catch (err: any) {
-      console.error("Document upload failed:", err?.message || String(err));
+      console.error("[DocumentVault] Document upload main process failed:", err?.message || String(err));
       setUploading(false);
-      alert('Upload failed: ' + err.message);
+      alert('Upload failed: ' + (err.message || String(err)));
     }
   };
 
@@ -391,7 +504,7 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
   const renderIcon = (type: string) => {
     if (type.includes('image')) return <FileImage className="w-8 h-8 text-blue-500" />;
     if (type.includes('pdf')) return <FileText className="w-8 h-8 text-red-500" />;
-    return <File className="w-8 h-8 text-slate-500" />;
+    return <FileIcon className="w-8 h-8 text-slate-500" />;
   };
 
   return (
