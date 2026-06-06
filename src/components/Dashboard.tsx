@@ -787,8 +787,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       const now = new Date();
       entryDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
 
+      const fid = franchiseId || currentFranchise?.id;
+      let paymentAccQuery = query(collection(db, 'accounts'), where('name', '==', paymentAccName));
+      if (fid) {
+        paymentAccQuery = query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', fid));
+      }
       const [paymentAccSnap, otherAccSnap] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName))),
+        getDocs(paymentAccQuery),
         getDoc(doc(db, 'accounts', quickVchForm.accountId))
       ]);
 
@@ -883,10 +888,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
   const [isWiping, setIsWiping] = useState(false);
   const isAdmin = isSuperAdmin || !!franchiseId;
-  const isMilan = isSuperAdmin || (customers.length > 0 && bills.length > 0 && franchiseId === 'legacy-rajhans');
+  const isMilan = isSuperAdmin || (franchiseId === 'legacy-rajhans');
   // Allow Rajhans main account also for system maintenance unless disabled by Super Admin
   const isSystemAdmin = isSuperAdmin || (
-    (isMilan || (customers.length > 0 && currentFranchise?.email === 'rajhanssikar@gmail.com')) &&
+    (isMilan || currentFranchise?.email === 'rajhanssikar@gmail.com') &&
     (franchiseDetail?.allowSystemMaintenance !== false && currentFranchise?.allowSystemMaintenance !== false)
   );
 
@@ -896,8 +901,15 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       return;
     }
 
-    if (!confirm("⚠️ CRITICAL WARNING: This will delete ALL data (Customers, Tokens, Drivers, Ledger, Documents, etc.). This action is IRREVERSIBLE. Are you absolutely sure?")) return;
-    if (!confirm("🚨 LAST CHANCE: You are about to wipe the entire database. Are you really sure?")) return;
+    const fid = franchiseId || currentFranchise?.id;
+    if (!fid) {
+      alert("Error: Active franchise context is missing.");
+      return;
+    }
+    const fName = currentFranchise?.name || fid;
+
+    if (!confirm(`⚠️ CRITICAL WARNING: This will delete ALL data (Customers, Tokens, Drivers, Ledger, Documents, etc.) for the current franchise: ${fName}. This action is IRREVERSIBLE. Are you absolutely sure?`)) return;
+    if (!confirm("🚨 LAST CHANCE: You are about to wipe this franchise's database. Are you really sure?")) return;
 
     const promptText = prompt("Please type 'DELETE' to confirm the master reset:");
     if (promptText !== 'DELETE') {
@@ -910,27 +922,34 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       'customers', 'bills', 'drivers', 'tractors', 'dieselLogs', 
       'maintenanceLogs', 'ledger', 'driverLocations', 'bookingRequests', 
       'vouchers', 'attendance', 'hydrantFillings', 'trips', 
-      'dieselRequests', 'documents', 'chats', 'accounts', 'ledgerEntries',
-      'tractorDiesel', 'vouchers_backup', 'expenses', 'trackingPoints', 'feedbacks'
+      'dieselRequests', 'documents', 'chats', 'accounts', 'feedbacks',
+      'accountGroups'
     ];
 
     try {
-      for (const collName of collectionsToWipe) {
-        const snap = await getDocs(collection(db, collName));
-        const chunks = [];
-        const chunkSize = 50; 
-        for (let i = 0; i < snap.docs.length; i += chunkSize) {
-          chunks.push(snap.docs.slice(i, i + chunkSize));
-        }
+      let overallSuccessCount = 0;
+      let overallFailCount = 0;
 
-        for (const chunk of chunks) {
-          await Promise.all(chunk.map(d => deleteDoc(doc(db, collName, d.id))));
+      for (const collName of collectionsToWipe) {
+        try {
+          const snap = await getDocs(query(collection(db, collName), where('franchiseId', '==', fid)));
+          const chunks = [];
+          const chunkSize = 50; 
+          for (let i = 0; i < snap.docs.length; i += chunkSize) {
+            chunks.push(snap.docs.slice(i, i + chunkSize));
+          }
+
+          for (const chunk of chunks) {
+            await Promise.all(chunk.map(d => deleteDoc(doc(db, collName, d.id))));
+          }
+          overallSuccessCount++;
+        } catch (collErr: any) {
+          console.warn(`[Master Reset] Failed to clean collection "${collName}":`, collErr?.message || String(collErr));
+          overallFailCount++;
         }
       }
       
-      await setDoc(doc(db, 'settings', 'documents'), { folders: [] }, { merge: true });
-      
-      alert("✅ Fresh Start! Database wiped successfully. System is now clean.");
+      alert(`✅ Fresh Start! Database wiped successfully for this franchise. Wiped successfully: ${overallSuccessCount}/${collectionsToWipe.length} categories. System is now clean.`);
       window.location.reload();
     } catch (err: any) {
       console.error("Master Reset Failed:", err?.message || String(err));
@@ -943,12 +962,18 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [isDeletingDrivers, setIsDeletingDrivers] = useState(false);
   const handleDeleteDriversData = async () => {
     if (!isAdmin) return;
-    if (!confirm("⚠️ WARNING: This will delete ALL Drivers and ALL driver-related Ledger entries. Are you sure?")) return;
+    const fid = franchiseId || currentFranchise?.id;
+    if (!fid) {
+      alert("Error: Active franchise context is missing.");
+      return;
+    }
+    const fName = currentFranchise?.name || fid;
+    if (!confirm(`⚠️ WARNING: This will delete ALL Drivers and ALL driver-related Ledger entries for franchise: ${fName}. Are you sure?`)) return;
     
     setIsDeletingDrivers(true);
     try {
       const { bulkDeleteDrivers } = await import('../services/cleanup');
-      const result = await bulkDeleteDrivers();
+      const result = await bulkDeleteDrivers(fid);
       alert(`✅ Cleanup successful! Deleted ${result.count} driver-related records.`);
       window.location.reload();
     } catch (err: any) {
@@ -976,12 +1001,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       // Fetch required data outside transaction
       const franchiseIdForBill = editingBill.franchiseId || 'legacy-rajhans';
       const [incomeSnap, cashSnap, bankSnap, customerSnap, franchiseDoc, loyaltyExpenseAccSnap] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
         getDoc(doc(db, 'franchises', franchiseIdForBill)),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense')))
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense'), where('franchiseId', 'in', [franchiseIdForBill, null])))
       ]);
 
       let incomeAccId = incomeSnap.docs[0]?.id;
@@ -1130,17 +1155,17 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         loyaltyExpenseAccSnap,
         expensesGroupSnap
       ] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Sundry Debtors'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Incomes'))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Sundry Debtors'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Incomes'), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'trips'), where('billId', '==', editingBill.id))),
         getDoc(doc(db, 'franchises', franchiseIdForBill)),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense'))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', 'in', ['Direct Expenses', 'Indirect Expenses', 'Expenses'])))
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense'), where('franchiseId', 'in', [franchiseIdForBill, null]))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', 'in', ['Direct Expenses', 'Indirect Expenses', 'Expenses']), where('franchiseId', 'in', [franchiseIdForBill, null])))
       ]);
 
       let incomeAccId = incomeSnap.docs[0]?.id;
@@ -1461,11 +1486,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     
     try {
       // 1. Fetch required data outside transaction
+      const franchiseIdForBill = editingBill.franchiseId || 'legacy-rajhans';
       const [cashSnap, bankSnap, customerSnap, assetsGroupSnap] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName))),
-        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets')))
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'), where('franchiseId', 'in', [franchiseIdForBill, null])))
       ]);
 
       let cashAccId = cashSnap.docs[0]?.id;
@@ -1818,16 +1844,17 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const handleDeleteToken = async (id: string) => {
     try {
       // 1. Fetch data outside transition
-      const [billSnap, incomeSnap, cashSnap, bankSnap] = await Promise.all([
-        getDoc(doc(db, 'bills', id)),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account')))
-      ]);
-
+      const billSnap = await getDoc(doc(db, 'bills', id));
       if (!billSnap.exists()) return;
       const billData = billSnap.data();
-      const customerAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', billData.customerName)));
+      const fid = billData.franchiseId || 'legacy-rajhans';
+
+      const [incomeSnap, cashSnap, bankSnap, customerAccSnap] = await Promise.all([
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', fid))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', fid))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', fid))),
+        getDocs(query(collection(db, 'accounts'), where('name', '==', billData.customerName), where('franchiseId', '==', fid)))
+      ]);
 
       let incomeAccId = incomeSnap.docs[0]?.id;
       let cashAccId = cashSnap.docs[0]?.id;
@@ -2433,165 +2460,99 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           </motion.div>
         )}
 
-        {/* Bank Bubbles Row */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          whileHover={{ y: -6, scale: 1.02 }}
-          transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 }}
-          className="bg-white p-6 rounded-[2.5rem] border-t border-x border-indigo-50 border-b-[8px] border-b-indigo-200/50 shadow-[0_20px_40px_rgba(99,102,241,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative"
-          style={{
-            background: "linear-gradient(135deg, #ffffff 0%, #fbfbfe 100%)"
-          }}
-        >
-          {/* Dynamic Hourly Bank Animation Layer */}
-          <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
-             {(() => {
-               const hour = new Date().getHours();
-               const theme = hour % 3;
-               if (theme === 0) {
-                 return [...Array(15)].map((_, i) => (
-                   <motion.div
-                     key={`bank1-dots-${i}`}
-                     initial={{ scale: 0, opacity: 0 }}
-                     animate={{ scale: [0, 1.5, 0], opacity: [0, 1, 0] }}
-                     transition={{ duration: 2, repeat: Infinity, delay: Math.random() * 5 }}
-                     className="absolute w-2 h-2 bg-blue-600 rounded-full"
-                     style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
-                   />
-                 ));
-               } else if (theme === 1) {
-                 return [...Array(10)].map((_, i) => (
-                   <motion.div
-                     key={`bank1-rings-${i}`}
-                     initial={{ scale: 0.5, opacity: 0.8 }}
-                     animate={{ scale: 3, opacity: 0 }}
-                     transition={{ duration: 3, repeat: Infinity, delay: i * 0.5 }}
-                     className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-blue-400 rounded-full"
-                   />
-                 ));
-               } else {
-                 return [...Array(12)].map((_, i) => (
-                   <motion.div
-                     key={`bank1-bars-${i}`}
-                     initial={{ height: 0 }}
-                     animate={{ height: [10, 40, 10] }}
-                     transition={{ duration: 1, repeat: Infinity, delay: Math.random() }}
-                     className="absolute bottom-0 w-2 bg-blue-400/40 rounded-t"
-                     style={{ left: `${i * 8 + 5}%` }}
-                   />
-                 ));
-               }
-             })()}
-          </div>
+        {/* Consolidated Bank Card */}
+        {(() => {
+          const firstAvailableBankAcc = accounts.find(a => a.name === 'BARODA129') 
+            || accounts.find(a => a.name === 'Bank Account') 
+            || accounts.find(a => a.name === 'BARODA934')
+            || accounts.find(a => a.name.toLowerCase().includes('bank'));
+          const defaultBankAccName = firstAvailableBankAcc ? firstAvailableBankAcc.name : 'Bank Account';
+          
+          const baroda129Bal = accounts.find(a => a.name === 'BARODA129')?.currentBalance || 0;
+          const baroda934Bal = accounts.find(a => a.name === 'BARODA934')?.currentBalance || 0;
+          const generalBankBal = accounts.find(a => a.name === 'Bank Account')?.currentBalance || 0;
+          const totalBankBalance = baroda129Bal + baroda934Bal + generalBankBal;
 
-          <div className="relative z-10">
-            <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-blue-100">
-              <Smartphone size={20} />
-            </div>
-            <div className="flex items-center justify-between mb-1">
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Baroda 129</div>
-              <div className="flex gap-1">
-                <button 
-                  onClick={() => setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: 'BARODA129' })}
-                  className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
-                >
-                  <Plus size={16} />
-                </button>
-                <button 
-                  onClick={() => setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: 'BARODA129' })}
-                  className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
-                >
-                  <Minus size={16} />
-                </button>
+          return (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              whileHover={{ y: -6, scale: 1.02 }}
+              transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 }}
+              className="bg-white p-6 rounded-[2.5rem] border-t border-x border-indigo-50 border-b-[8px] border-b-indigo-200/50 shadow-[0_20px_40px_rgba(99,102,241,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative"
+              style={{
+                background: "linear-gradient(135deg, #ffffff 0%, #fbfbfe 100%)"
+              }}
+            >
+              <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
+                 {(() => {
+                   const hour = new Date().getHours();
+                   const theme = hour % 3;
+                   if (theme === 0) {
+                     return [...Array(15)].map((_, i) => (
+                       <motion.div
+                         key={`bank1-dots-${i}`}
+                         initial={{ scale: 0, opacity: 0 }}
+                         animate={{ scale: [0, 1.5, 0], opacity: [0, 1, 0] }}
+                         transition={{ duration: 2, repeat: Infinity, delay: Math.random() * 5 }}
+                         className="absolute w-2 h-2 bg-blue-600 rounded-full"
+                         style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
+                       />
+                     ));
+                   } else if (theme === 1) {
+                     return [...Array(10)].map((_, i) => (
+                       <motion.div
+                         key={`bank1-rings-${i}`}
+                         initial={{ scale: 0.5, opacity: 0.8 }}
+                         animate={{ scale: 3, opacity: 0 }}
+                         transition={{ duration: 3, repeat: Infinity, delay: i * 0.5 }}
+                         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-blue-400 rounded-full"
+                       />
+                     ));
+                   } else {
+                     return [...Array(12)].map((_, i) => (
+                       <motion.div
+                         key={`bank1-bars-${i}`}
+                         initial={{ height: 0 }}
+                         animate={{ height: [10, 40, 10] }}
+                         transition={{ duration: 1, repeat: Infinity, delay: Math.random() }}
+                         className="absolute bottom-0 w-2 bg-blue-400/40 rounded-t"
+                         style={{ left: `${i * 8 + 5}%` }}
+                       />
+                     ));
+                   }
+                 })()}
               </div>
-            </div>
-            <div className="text-3xl font-display font-black text-slate-900 flex items-baseline">
-              <span className="text-xl mr-1 text-blue-600">₹</span>
-              {formatCurrency(accounts.find(a => a.name === 'BARODA129')?.currentBalance || 0).replace('₹', '')}
-            </div>
-          </div>
-        </motion.div>
 
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          whileHover={{ y: -6, scale: 1.02 }}
-          transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.3 }}
-          className="bg-white p-6 rounded-[2.5rem] border-t border-x border-sky-50 border-b-[8px] border-b-sky-200/50 shadow-[0_20px_40px_rgba(14,165,233,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative"
-          style={{
-            background: "linear-gradient(135deg, #ffffff 0%, #f6fcff 100%)"
-          }}
-        >
-          {/* Dynamic Hourly Bank 2 Animation Layer */}
-          <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
-             {(() => {
-               const hour = new Date().getHours();
-               const theme = (hour + 1) % 3;
-               if (theme === 0) {
-                 return [...Array(20)].map((_, i) => (
-                   <motion.div
-                     key={`bank2-matrix-${i}`}
-                     initial={{ y: -20, opacity: 0 }}
-                     animate={{ y: 200, opacity: [0, 1, 0] }}
-                     transition={{ duration: 1 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
-                     className="absolute text-[8px] font-mono text-blue-600"
-                     style={{ left: `${i * 5}%` }}
-                   >
-                     {Math.random() > 0.5 ? '1' : '0'}
-                   </motion.div>
-                 ));
-               } else if (theme === 1) {
-                 return [...Array(10)].map((_, i) => (
-                   <motion.div
-                     key={`bank2-pulses-${i}`}
-                     initial={{ scale: 0, opacity: 0.8 }}
-                     animate={{ scale: 4, opacity: 0 }}
-                     transition={{ duration: 3, repeat: Infinity, delay: i * 0.5 }}
-                     className="absolute bottom-4 right-4 w-10 h-10 border-2 border-blue-400 rounded-full"
-                   />
-                 ));
-               } else {
-                 return [...Array(15)].map((_, i) => (
-                   <motion.div
-                     key={`bank2-waves-${i}`}
-                     animate={{ x: [0, 10, 0], y: [0, -10, 0] }}
-                     transition={{ duration: 2, repeat: Infinity, delay: i * 0.1 }}
-                     className="absolute w-3 h-3 bg-blue-300/30 rounded-full"
-                     style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
-                   />
-                 ));
-               }
-             })()}
-          </div>
-
-          <div className="relative z-10">
-            <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-blue-100">
-              <Smartphone size={20} />
-            </div>
-            <div className="flex items-center justify-between mb-1">
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Baroda 934</div>
-              <div className="flex gap-1">
-                <button 
-                  onClick={() => setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: 'BARODA934' })}
-                  className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
-                >
-                  <Plus size={16} />
-                </button>
-                <button 
-                  onClick={() => setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: 'BARODA934' })}
-                  className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
-                >
-                  <Minus size={16} />
-                </button>
+              <div className="relative z-10">
+                <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-blue-100">
+                  <Smartphone size={20} />
+                </div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Consolidated Bank Account</div>
+                  <div className="flex gap-1">
+                    <button 
+                      onClick={() => setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: defaultBankAccName })}
+                      className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                    >
+                      <Plus size={16} />
+                    </button>
+                    <button 
+                      onClick={() => setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: defaultBankAccName })}
+                      className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                    >
+                      <Minus size={16} />
+                    </button>
+                  </div>
+                </div>
+                <div className="text-3xl font-display font-black text-slate-900 flex items-baseline">
+                  <span className="text-xl mr-1 text-blue-600">₹</span>
+                  {formatCurrency(totalBankBalance).replace('₹', '')}
+                </div>
               </div>
-            </div>
-            <div className="text-3xl font-display font-black text-slate-900 flex items-baseline">
-              <span className="text-xl mr-1 text-blue-600">₹</span>
-              {formatCurrency(accounts.find(a => a.name === 'BARODA934')?.currentBalance || 0).replace('₹', '')}
-            </div>
-          </div>
-        </motion.div>
+            </motion.div>
+          );
+        })()}
       </div>
 
       {/* Automation Desk */}

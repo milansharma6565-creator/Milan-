@@ -1,7 +1,7 @@
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, getDocs, writeBatch, doc, where } from 'firebase/firestore';
 
-export async function bulkDeleteDrivers() {
+export async function bulkDeleteDrivers(franchiseId: string | null = null) {
   const batch = writeBatch(db);
   let operationCount = 0;
 
@@ -16,7 +16,10 @@ export async function bulkDeleteDrivers() {
   try {
     // 1. Clear simple collections
     for (const colName of collectionsToClear) {
-      const q = query(collection(db, colName));
+      let q = query(collection(db, colName));
+      if (franchiseId) {
+        q = query(collection(db, colName), where('franchiseId', '==', franchiseId));
+      }
       const snap = await getDocs(q);
       snap.docs.forEach(d => {
         batch.delete(doc(db, colName, d.id));
@@ -26,7 +29,11 @@ export async function bulkDeleteDrivers() {
 
     // 2. Clear related accounts and vouchers
     // We look for accounts that might be drivers or salary accounts
-    const accountsSnap = await getDocs(collection(db, 'accounts'));
+    let qAcc = query(collection(db, 'accounts'));
+    if (franchiseId) {
+      qAcc = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    }
+    const accountsSnap = await getDocs(qAcc);
     const driverAccountIds: string[] = [];
     
     // Often driver names are in account names or we have a Driver Salary group
@@ -35,7 +42,11 @@ export async function bulkDeleteDrivers() {
     
     // In this app, many driver specific accounts are created in 'Indirect Expenses' or similar.
     // Let's also look at vouchers
-    const vouchersSnap = await getDocs(collection(db, 'vouchers'));
+    let qVch = query(collection(db, 'vouchers'));
+    if (franchiseId) {
+      qVch = query(collection(db, 'vouchers'), where('franchiseId', '==', franchiseId));
+    }
+    const vouchersSnap = await getDocs(qVch);
     
     // We'll delete vouchers that have "Salary" or "Driver" in narration or items
     // This is a bit aggressive but user asked for "drivers related ledgers"

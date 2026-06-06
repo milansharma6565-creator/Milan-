@@ -209,7 +209,7 @@ service cloud.firestore {
       allow get: if true;
       allow create: if true; 
       allow update: if isSignedIn();
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /chats/{billId} {
@@ -222,7 +222,7 @@ service cloud.firestore {
       allow list: if true;
       allow create, update: if isValidId(driverId) && isValidDriverLocation(incoming()) &&
                             exists(/databases/$(database)/documents/drivers/$(driverId));
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /customers/{customerId} {
@@ -230,7 +230,7 @@ service cloud.firestore {
       allow list: if true; // Allowed for customer portal
       allow create: if true; // Allowed for self-registration
       allow update: if true; // Allowed for PIN setup
-      allow delete: if isSuperAdmin() && isValidId(customerId);
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /bills/{billId} {
@@ -252,7 +252,7 @@ service cloud.firestore {
       allow list, get: if true;
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow update: if true; // Allow drivers to set/update PIN
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /tractors/{tractorId} {
@@ -260,40 +260,40 @@ service cloud.firestore {
       allow list: if true;
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(tractorId) && isValidTractor(incoming());
       allow update: if isFranchiseAuthorized(existing().get('franchiseId', null)) && isValidId(tractorId) && isValidTractor(incoming());
-      allow delete: if isSuperAdmin() && isValidId(tractorId);
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /dieselLogs/{logId} {
       allow get: if isSignedIn() && isValidId(logId);
       allow list: if isSignedIn();
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(logId) && isValidLog(incoming());
-      allow delete: if isSuperAdmin() && isValidId(logId);
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /maintenanceLogs/{logId} {
       allow get: if isSignedIn() && isValidId(logId);
       allow list: if isSignedIn();
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(logId) && isValidLog(incoming());
-      allow delete: if isSuperAdmin() && isValidId(logId);
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /ledger/{entryId} {
       allow get, list: if true;
       allow create: if isSignedIn() || isFranchiseAuthorized(incoming().get('franchiseId', null));
       allow update: if false; 
-      allow delete: if isSuperAdmin() && isValidId(entryId);
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /accountGroups/{groupId} {
       allow read: if isSignedIn();
       allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null));
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /accounts/{accountId} {
       allow read: if isSignedIn();
       allow create, update: if isFranchiseAuthorized(incoming().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /vouchers/{voucherId} {
@@ -310,7 +310,7 @@ service cloud.firestore {
 
     match /feedbacks/{id} {
       allow create: if true;
-      allow read, update, delete: if isSuperAdmin();
+      allow read, update, delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null)) || isFranchiseAuthorized(incoming().get('franchiseId', null));
     }
 
     match /hydrantFillings/{fillingId} {
@@ -318,7 +318,7 @@ service cloud.firestore {
       allow list: if isSignedIn();
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(fillingId) && isValidHydrantFilling(incoming());
       allow update: if isFranchiseAuthorized(existing().get('franchiseId', null)) && isValidId(fillingId) && isValidHydrantFilling(incoming());
-      allow delete: if isSuperAdmin() && isValidId(fillingId);
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /dieselRequests/{requestId} {
@@ -326,7 +326,7 @@ service cloud.firestore {
       allow get: if true;
       allow create: if true; 
       allow update: if isSignedIn();
-      allow delete: if isSuperAdmin();
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
     }
 
     match /phone_sync_logs/{logId} {
