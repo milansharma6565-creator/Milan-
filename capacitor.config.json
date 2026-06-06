@@ -1,0 +1,9 @@
+{
+  "appId": "com.tankerwala.app",
+  "appName": "TankerWala Powered by Rajhans",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": ["*"]
+  }
+}

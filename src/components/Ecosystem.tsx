@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Download, Smartphone, Globe, Copy, CheckCircle2, 
   Settings, Info, ShieldCheck, FileDown, 
-  Sparkles, RefreshCw, Layers, ChevronRight, CheckCircle, Wifi
+  Sparkles, RefreshCw, Layers, ChevronRight, CheckCircle, Wifi,
+  X, AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { copyToClipboard, getPublicAppUrl } from '../constants';
@@ -25,6 +26,7 @@ export function Ecosystem() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallable, setIsInstallable] = useState(false);
+  const [selectedApkHelp, setSelectedApkHelp] = useState<any>(null);
 
   // App Configurations with robust default fallbacks.
   const [config, setConfig] = useState<AppConfig>({
@@ -334,13 +336,16 @@ export function Ecosystem() {
                           <h4 className="text-xs font-black text-slate-800">Direct APK Download</h4>
                           <p className="text-[10px] text-slate-400 font-medium mt-1 mb-3">Install raw application package directly onto Android mobile devices.</p>
                         </div>
-                        <a 
-                          href={app.apkLink}
-                          className="w-full h-11 bg-slate-950 hover:bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all shadow-sm"
+                        <button 
+                          onClick={(e) => { 
+                            e.preventDefault(); 
+                            setSelectedApkHelp(app); 
+                          }}
+                          className="w-full h-11 bg-slate-950 hover:bg-slate-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer"
                         >
                           <Download size={14} />
                           Download APK ({app.size})
-                        </a>
+                        </button>
                       </div>
 
                       {/* Progressive Web App (PWA) Option */}
@@ -570,6 +575,135 @@ export function Ecosystem() {
               </form>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedApkHelp && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto border border-slate-100"
+            >
+              <div className="p-6 sm:p-8 space-y-6">
+                {/* Header */}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100 shrink-0">
+                      <AlertTriangle size={24} className="animate-bounce" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900">{selectedApkHelp.name} Install Guide</h3>
+                      <p className="text-[10px] font-bold text-amber-650 uppercase tracking-wide">How to Fix "Parsing the Package" Error</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setSelectedApkHelp(null)}
+                    type="button"
+                    className="w-8 h-8 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-700 flex items-center justify-center transition-all cursor-pointer"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Hindi & English Clear Explanation */}
+                <div className="bg-amber-50/40 rounded-2xl p-5 border border-amber-100/60 space-y-3">
+                  <div className="text-xs font-bold text-slate-700 leading-relaxed space-y-2">
+                    <p className="text-slate-900 text-sm font-extrabold border-b border-amber-200/50 pb-1.5 flex items-center gap-1">
+                      <span>⚠️ ये एरर (Error) क्यों आ रहा है?</span>
+                    </p>
+                    <p>
+                      एंड्रॉयड फोन में डायरेक्ट दी गई .apk फाइल डाउनलोड करके इंस्टॉल करने पर मोबाइल का सुरक्षा सिस्टम <span className="text-red-500 font-extrabold">"There was a problem parsing the package"</span> एरर दिखाता है। 
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-1 font-medium leading-relaxed">
+                      ऐसा इसलिए होता है क्योंकि सीधे सर्वर से डाउनलोड होने वाली फाइल एक <strong>सिम्युलेटेड फ़ाइल</strong> है, जिसे आपका फोन का एंड्रॉयड सुरक्षा प्रोसेसर खोल नहीं पा रहा है।
+                    </p>
+                  </div>
+                </div>
+
+                {/* 2 Easy Solutions */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Solutions (समाधान):</h4>
+
+                  {/* Solution 1: Chrome PWA Install */}
+                  <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-4 flex gap-3.5 items-start">
+                    <span className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-xs shrink-0">1</span>
+                    <div className="space-y-2.5 flex-1">
+                      <div>
+                        <h5 className="text-xs font-black text-slate-900 leading-none">Instant App Install (100% Recommended & Safe)</h5>
+                        <p className="text-[11px] text-slate-500 font-bold mt-1">इसमें आपको कोई अतिरिक्त फ़ाइल डाउनलोड नहीं करनी पड़ेगी। 0 MB का साइज़ है!</p>
+                      </div>
+                      <ol className="text-[11px] text-slate-600 font-bold space-y-1 ml-4 list-decimal leading-relaxed">
+                        <li>नीचे दिए गए <strong>"Copy App Link"</strong> बटन को दबाएं।</li>
+                        <li>इस लिंक को अपने फोन में <strong>Google Chrome</strong> ब्राउज़र में खोलें।</li>
+                        <li>ऊपर दाएं कोने में <strong>3 डॉट्स</strong> दबाकर <strong>"Install app"</strong> या <strong>"Add to Home Screen"</strong> पर क्लिक करें।</li>
+                      </ol>
+                      <button
+                        onClick={() => {
+                          copyToClipboard(selectedApkHelp.webLink);
+                          alert("App Link Copied! Now open in Chrome on your phone and select 'Install app'");
+                        }}
+                        type="button"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-wider px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        <Copy size={12} /> Copy App URL To Install
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Solution 2: Convert to real APK using WebIntoApp */}
+                  <div className="border border-blue-100 bg-blue-50/40 rounded-2xl p-4 flex gap-3.5 items-start">
+                    <span className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0">2</span>
+                    <div className="space-y-2.5 flex-1">
+                      <div>
+                        <h5 className="text-xs font-black text-slate-950 leading-none">अथवा, बिल्कुल असली कस्टम .APK फ़ाइल बनाएं (2 मिनट में)</h5>
+                        <p className="text-[11px] text-slate-500 font-bold mt-1">अगर आप कस्टमर या ड्राइवर को असली डाउनलोड लिंक देना चाहते हैं:</p>
+                      </div>
+                      <ol className="text-[11px] text-slate-600 font-bold space-y-1 ml-4 list-decimal leading-relaxed">
+                        <li>नीचे दिए गए बटन से अपने <strong>लगातार चलने वाले लाइव लिंक</strong> को कॉपी करें।</li>
+                        <li>मुफ्त वेबसाइट <a href="https://www.webintoapp.com/" target="_blank" rel="noreferrer" className="text-blue-600 underline font-black">webintoapp.com</a> पर जाएं।</li>
+                        <li>वहां मपपसंद लोगो, नाम दर्ज करें और लिंक पेस्ट करके तुरंत असली काम करने वाली <strong>.APK डाउनलोड फ़ाइल</strong> निकालें!</li>
+                      </ol>
+                      
+                      <div className="flex gap-2 flex-wrap pt-1">
+                        <button
+                          onClick={() => {
+                            copyToClipboard(selectedApkHelp.webLink);
+                            alert("Developer Web Link Copied!");
+                          }}
+                          type="button"
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] uppercase tracking-wider px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <Copy size={12} /> Copy Web Link Url
+                        </button>
+                        <a 
+                          href="https://www.webintoapp.com" 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="bg-white border border-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-wider px-3.5 py-1.5 rounded-xl transition-all hover:bg-slate-50 flex items-center gap-1 shadow-xs"
+                        >
+                          <Globe size={11} /> Open Builder Website
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer actions */}
+                <div className="flex justify-end pt-3 border-t border-slate-100">
+                  <button
+                    onClick={() => setSelectedApkHelp(null)}
+                    type="button"
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider px-5 py-2.5 rounded-xl transition-all cursor-pointer"
+                  >
+                    Close (ठीक है)
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

@@ -47,7 +47,7 @@ interface BannerTemplate {
 }
 
 export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: SettingsProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'print' | 'drivers' | 'fleet' | 'pricing'>('print');
+  const [activeSubTab, setActiveSubTab] = useState<'print' | 'drivers' | 'fleet' | 'pricing' | 'apps'>('print');
   const [franchiseDetail, setFranchiseDetail] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -597,6 +597,16 @@ export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: Settin
             }`}
           >
             <Sparkles size={14} className="text-amber-400 animate-pulse" /> Custom Rates
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('apps')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+              activeSubTab === 'apps' ? 'bg-blue-600 text-white shadow-md shadow-blue-100' : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Smartphone size={14} className="text-blue-500 animate-pulse" /> Mobile Apps & APK
           </button>
         </div>
       </div>
@@ -1276,6 +1286,199 @@ export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: Settin
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+
+          {activeSubTab === 'apps' && (
+            <div className="bg-white rounded-[2.5rem] border border-slate-50 shadow-sm p-6 sm:p-8 space-y-8 animate-in fade-in slide-in-from-bottom duration-300">
+              <div className="border-b border-slate-100 pb-4 mb-4">
+                <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                  <Smartphone className="text-blue-500 animate-pulse" size={22} />
+                  Mobile App & Android APK Setup Center
+                </h2>
+                <p className="text-xs font-bold text-slate-400 mt-1 uppercase">
+                  Launch or package your Driver app and Customer booking networks as native Android apps
+                </p>
+              </div>
+
+              {/* Grid with 2 primary columns */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                
+                {/* COLUMN 1: INSTALLABLE PWA SYSTEM (NO CODE APK FEEL) */}
+                <div className="space-y-6">
+                  <div className="bg-blue-50/50 p-5 rounded-3xl border border-blue-100">
+                    <h3 className="text-sm font-extrabold text-blue-900 flex items-center gap-2 mb-2">
+                       <span className="flex h-2 w-2 relative">
+                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                         <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                       </span>
+                       Recommended: Instant PWA Installer
+                    </h3>
+                    <p className="text-xs text-blue-700 leading-relaxed font-medium">
+                      Both our applications are built with highly advanced Progressive Web App (PWA) technology. They install instantly onto any standard Android, bypassing Google Play Store requirements.
+                    </p>
+                  </div>
+
+                  {/* 1. CUSTOMER PORTAL */}
+                  <div className="bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100 flex flex-col md:flex-row items-center gap-6">
+                    <div className="bg-white p-3 rounded-2xl border border-slate-200/60 shadow-sm shrink-0">
+                      <QRCodeSVG 
+                        value={`${getPublicAppUrl().toString()}?mode=booking&f=${franchiseDetail?.id || franchiseId || currentFranchise?.id || ''}`}
+                        size={120}
+                        includeMargin={true}
+                      />
+                    </div>
+                    <div className="flex-1 space-y-4">
+                      <div>
+                        <span className="bg-blue-100 text-blue-700 text-[9px] font-black uppercase px-2 py-0.5 rounded-md">Customer App</span>
+                        <h4 className="text-sm font-black text-slate-800 mt-1.5">Online Tanker & Can Booking</h4>
+                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">Let customers book tankers, buy water cans, pay online & track live status from their native app dashboard.</p>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${getPublicAppUrl().toString()}?mode=booking&f=${franchiseDetail?.id || franchiseId || currentFranchise?.id || ''}`;
+                            copyToClipboard(url);
+                            alert("Customer Booking App URL copied successfully!");
+                          }}
+                          className="bg-white border border-slate-200 hover:border-slate-300 px-3 py-1.5 rounded-xl text-slate-700 font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                        >
+                          <Copy size={12} /> Copy App URL
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${getPublicAppUrl().toString()}?mode=booking&f=${franchiseDetail?.id || franchiseId || currentFranchise?.id || ''}`;
+                            window.open(url, '_blank');
+                          }}
+                          className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-xl flex items-center gap-1 leading-none shadow-sm transition-all cursor-pointer"
+                        >
+                          <Eye size={12} /> Launch Live app
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. DRIVER APP */}
+                  <div className="bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100 flex flex-col md:flex-row items-center gap-6">
+                    <div className="bg-white p-3 rounded-2xl border border-slate-200/60 shadow-sm shrink-0">
+                      <QRCodeSVG 
+                        value={`${getPublicAppUrl().toString()}?mode=driver`}
+                        size={120}
+                        includeMargin={true}
+                      />
+                    </div>
+                    <div className="flex-1 space-y-4">
+                      <div>
+                        <span className="bg-violet-100 text-violet-700 text-[9px] font-black uppercase px-2 py-0.5 rounded-md">Driver Logistics App</span>
+                        <h4 className="text-sm font-black text-slate-800 mt-1.5">Driver Navigation & Deliveries</h4>
+                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">Required for tractor drivers to mark attendance, receive pending diesel requests, update delivery jobs & transmit background live GPS map locations.</p>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${getPublicAppUrl().toString()}?mode=driver`;
+                            copyToClipboard(url);
+                            alert("Driver App URL copied successfully!");
+                          }}
+                          className="bg-white border border-slate-200 hover:border-slate-300 px-3 py-1.5 rounded-xl text-slate-700 font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                        >
+                          <Copy size={12} /> Copy App URL
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${getPublicAppUrl().toString()}?mode=driver`;
+                            window.open(url, '_blank');
+                          }}
+                          className="bg-violet-50 hover:bg-violet-100 text-violet-700 font-bold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-xl flex items-center gap-1 leading-none shadow-sm transition-all cursor-pointer"
+                        >
+                          <Eye size={12} /> Launch Live app
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 p-5 rounded-3xl">
+                    <h4 className="text-xs font-extrabold text-amber-900 flex items-center gap-1.5 mb-2">
+                      💡 How to Install PWA App on any Android Smartphone:
+                    </h4>
+                    <ol className="text-[11px] text-amber-800 space-y-2 list-decimal pl-4 font-medium">
+                      <li>Scan the **QR Code** using your phone's camera, or send the **Copied URL** via WhatsApp.</li>
+                      <li>Open the link inside **Google Chrome** on the Android smartphone.</li>
+                      <li>Tap the **3-Dots Menu icon** in the top-right corner of Chrome.</li>
+                      <li>Select **"Add to Home Screen"** or **"Install App"** from the drop-down.</li>
+                      <li>An elegant app shortcut icon will appear on your device's home screen. When clicked, it loads directly in immersive full-screen standalone format with optimal security and performance.</li>
+                    </ol>
+                  </div>
+                </div>
+
+                {/* COLUMN 2: HARD-APKCATION BUILD (CAPACITOR CLI STEP-BY-STEP) */}
+                <div className="bg-slate-900 text-slate-100 p-6 sm:p-8 rounded-[2.5rem] border border-slate-800 shadow-xl flex flex-col justify-between">
+                  <div className="space-y-6">
+                    <div>
+                      <span className="bg-blue-600/20 text-blue-400 text-[9px] font-black uppercase px-2 py-0.5 rounded-md border border-blue-500/30">Official Build Hub</span>
+                      <h3 className="text-lg font-black text-white mt-2 flex items-center gap-2">
+                        Native Android APK Builder (.apk)
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                        If you want a physical binary `.apk` package to submit to the **Google Play Store** or distribute as a manual download link, you can utilize the industry-standard framework called **Capacitor**. We have pre-configured everything for you!
+                      </p>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1.5">Preloaded Configuration File Detected</p>
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto select-all max-h-40">
+                          {`// capacitor.config.json\n{\n  "appId": "com.tankerwala.app",\n  "appName": "TankerWala Powered by Rajhans",\n  "webDir": "dist",\n  "server": {\n    "androidScheme": "https",\n    "allowNavigation": ["*"]\n  }\n}`}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Run These Commands Locally To Generate Custom APKs:</p>
+                        
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-4 font-mono text-[11px]">
+                          <div>
+                            <p className="text-[9px] text-slate-500 font-bold uppercase">Step 1: Install Mobile Framework (Only First Time)</p>
+                            <p className="text-slate-300 mt-1">npm install @capacitor/core @capacitor/cli @capacitor/android</p>
+                            <p className="text-slate-300 mt-1">npx cap add android</p>
+                          </div>
+                          
+                          <div className="border-t border-slate-900/50 pt-3">
+                            <p className="text-[9px] text-emerald-405 font-bold uppercase text-emerald-400">Step 2: Run 1-Click Automated Setup for Desired App</p>
+                            <div className="space-y-2 mt-1.5">
+                              <div>
+                                <p className="text-[9px] text-slate-500 uppercase font-bold">A) For Customer App APK:</p>
+                                <p className="text-emerald-400">npm run build:customer</p>
+                              </div>
+                              <div>
+                                <p className="text-[9px] text-slate-500 uppercase font-bold">B) For Driver App APK:</p>
+                                <p className="text-emerald-400">npm run build:driver</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-900/50 pt-3">
+                            <p className="text-[9px] text-blue-400 font-bold uppercase">Step 3: Export Android .apk</p>
+                            <p className="text-slate-300 mt-1">npx cap sync android</p>
+                            <p className="text-slate-300 mt-1">npx cap open android</p>
+                            <p className="text-[10px] text-slate-400 mt-1.5 font-sans leading-relaxed">This opens Android Studio instantly. From the menu bar, just click: <strong className="text-white">Build &gt; Build Bundle(s)/APK(s) &gt; Build APK(s)</strong>. Your APK is compiled representing the selected mode immediately!</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 pt-6 border-t border-slate-800 text-[11px] text-slate-400">
+                    <p className="font-bold text-slate-300 mb-1">💡 Pro-tip on Google API Keys:</p>
+                    Ensure your Google Maps API keys are added in your environment variables. Android WebView allows tracking automatically as long as the user authorizes the platform's standard location popup request!
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </motion.div>

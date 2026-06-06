@@ -19,7 +19,8 @@ const databaseId = (firebaseConfig as any).firestoreDatabaseId || '(default)';
 
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
-}, databaseId);
+  useFetchStreams: false, // Disables fetch streams of fetch-polling to prevent blocks in proxy/iframe setups
+} as any, databaseId);
 export const storage = getStorage(app);
 
 // Use initializeAuth for more robust configuration

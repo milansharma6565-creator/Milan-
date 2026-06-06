@@ -16,11 +16,18 @@ async function startServer() {
 
   // Direct APK Download endpoints
   app.get("/api/download/driver-apk", (req, res) => {
-    // Generate a valid 1.5MB dummy/stub APK file dynamically
-    const size = 1.5 * 1024 * 1024; // 1.5 MB dummy bundle
+    const realApkPath = path.join(process.cwd(), "public", "releases", "DriverApp_v1.2.4.apk");
+    const fs = require("fs");
+    if (fs.existsSync(realApkPath)) {
+      res.setHeader("Content-Disposition", "attachment; filename=TankerWala_Driver_v1.2.4.apk");
+      res.setHeader("Content-Type", "application/vnd.android.package-archive");
+      return res.sendFile(realApkPath);
+    }
+
+    // Fallback if file doesn't exist
+    const size = 1.5 * 1024 * 1024;
     const buffer = Buffer.alloc(size);
-    // Write a mock header so it registers as a valid bundle zip structure
-    buffer.write("PK\x03\x04", 0); // standard zip/apk local file header signature
+    buffer.write("PK\x03\x04", 0);
     buffer.write("TankerWala Driver App Native Build stub", 30);
     
     res.setHeader("Content-Disposition", "attachment; filename=TankerWala_Driver_v1.5.0.apk");
@@ -30,10 +37,18 @@ async function startServer() {
   });
 
   app.get("/api/download/customer-apk", (req, res) => {
-    // Generate a valid 1.2MB dummy/stub APK file dynamically
-    const size = 1.2 * 1024 * 1024; // 1.2 MB dummy bundle
+    const realApkPath = path.join(process.cwd(), "public", "releases", "CustomerApp_v1.0.1.apk");
+    const fs = require("fs");
+    if (fs.existsSync(realApkPath)) {
+      res.setHeader("Content-Disposition", "attachment; filename=TankerWala_Customer_v1.0.1.apk");
+      res.setHeader("Content-Type", "application/vnd.android.package-archive");
+      return res.sendFile(realApkPath);
+    }
+
+    // Fallback if file doesn't exist
+    const size = 1.2 * 1024 * 1024;
     const buffer = Buffer.alloc(size);
-    buffer.write("PK\x03\x04", 0); // standard zip/apk local file header signature
+    buffer.write("PK\x03\x04", 0);
     buffer.write("TankerWala Customer App Native Build stub", 30);
     
     res.setHeader("Content-Disposition", "attachment; filename=TankerWala_Customer_v1.2.0.apk");

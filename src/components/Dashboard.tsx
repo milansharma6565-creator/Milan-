@@ -923,7 +923,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       'maintenanceLogs', 'ledger', 'driverLocations', 'bookingRequests', 
       'vouchers', 'attendance', 'hydrantFillings', 'trips', 
       'dieselRequests', 'documents', 'chats', 'accounts', 'feedbacks',
-      'accountGroups'
+      'accountGroups', 'bankStatementRules'
     ];
 
     try {
@@ -932,11 +932,51 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
       for (const collName of collectionsToWipe) {
         try {
-          const snap = await getDocs(query(collection(db, collName), where('franchiseId', '==', fid)));
+          let docsToDelete: any[] = [];
+          
+          if (collName === 'feedbacks') {
+            // feedbacks has restricted listing rules in firestore.rules
+            const targetIds = [fid];
+            if (fid === 'legacy-rajhans') {
+              targetIds.push(null, "", "rajhans", "legacy-pile");
+            }
+            for (const targetId of targetIds) {
+              try {
+                const snap = await getDocs(query(collection(db, collName), where('franchiseId', '==', targetId)));
+                docsToDelete.push(...snap.docs);
+              } catch (qErr) {
+                console.warn(`[Master Reset] Failed filtered query for feedbacks:`, qErr);
+              }
+            }
+          } else {
+            // Most other collections are publicly listable by signed-in users.
+            // Reading all documents and performing in-memory check is 100% robust
+            // because it catches missing/null/empty/variant franchise IDs.
+            const snap = await getDocs(collection(db, collName));
+            docsToDelete = snap.docs.filter(docSnap => {
+              const data = docSnap.data();
+              const docFid = data.franchiseId;
+              
+              if (fid === 'legacy-rajhans') {
+                return docFid === 'legacy-rajhans' || 
+                       docFid === 'rajhans' || 
+                       docFid === 'legacy-pile' || 
+                       docFid === null || 
+                       docFid === undefined || 
+                       docFid === "";
+              } else {
+                return docFid === fid;
+              }
+            });
+          }
+
+          // De-duplicate docs by ID
+          const uniqueDocs = Array.from(new Map(docsToDelete.map(d => [d.id, d])).values());
+
           const chunks = [];
           const chunkSize = 50; 
-          for (let i = 0; i < snap.docs.length; i += chunkSize) {
-            chunks.push(snap.docs.slice(i, i + chunkSize));
+          for (let i = 0; i < uniqueDocs.length; i += chunkSize) {
+            chunks.push(uniqueDocs.slice(i, i + chunkSize));
           }
 
           for (const chunk of chunks) {

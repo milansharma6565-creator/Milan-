@@ -105,8 +105,11 @@ export default function App() {
     const queryParams = new URLSearchParams(window.location.search);
     driverId = queryParams.get("driverId");
     orderId = queryParams.get("o");
-    isDriverMode = queryParams.get("mode") === "driver";
-    isCustomerMode = queryParams.get("mode") === "booking";
+    
+    // Support Capacitor native APK mode selection via global window property, localStorage or url params
+    const modeObj = (window as any).CAPACITOR_APP_MODE || localStorage.getItem("CAPACITOR_APP_MODE") || queryParams.get("mode");
+    isDriverMode = modeObj === "driver";
+    isCustomerMode = modeObj === "booking";
   } catch (e) {
     console.warn("URLSearchParams failed in body:", e instanceof Error ? e.message : String(e));
   }
