@@ -646,13 +646,31 @@ export default function App() {
                   setIsSidebarOpen(false);
                 }}
               />
-              {!currentFranchise?.lockedFeatures?.includes("live-map") && (
+              <SidebarButton
+                icon={<Navigation size={20} />}
+                label="Live Map"
+                active={activeTab === "live-map"}
+                onClick={() => {
+                  setActiveTab("live-map");
+                  setIsSidebarOpen(false);
+                }}
+              />
+              <SidebarButton
+                icon={<Truck size={20} />}
+                label="Drivers"
+                active={activeTab === "drivers"}
+                onClick={() => {
+                  setActiveTab("drivers");
+                  setIsSidebarOpen(false);
+                }}
+              />
+              {!currentFranchise?.lockedFeatures?.includes("tractors") && (
                 <SidebarButton
-                  icon={<Navigation size={20} />}
-                  label="Live Map"
-                  active={activeTab === "live-map"}
+                  icon={<Fuel size={20} />}
+                  label="Tractors & Fleet"
+                  active={activeTab === "tractors"}
                   onClick={() => {
-                    setActiveTab("live-map");
+                    setActiveTab("tractors");
                     setIsSidebarOpen(false);
                   }}
                 />

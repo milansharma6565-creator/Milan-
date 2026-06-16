@@ -17,6 +17,8 @@ import {
   Plus,
   Phone,
   ClipboardList,
+  Mail,
+  Lock,
   FlaskConical as Flask
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -206,38 +208,61 @@ export function DriverApp() {
     reader.readAsDataURL(file);
   };
 
-  useEffect(() => {
-    return onAuthStateChanged(auth, async (user) => {
-      if (user && user.email) {
-        setLoading(true);
-        try {
-          const q = query(collection(db, 'drivers'), where('email', '==', user.email.toLowerCase()));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            const dData = { id: snap.docs[0].id, ...snap.docs[0].data() } as any;
-            if (dData.status === 'Active') {
-              setDriver(dData);
-              setIsLogged(true);
-            } else if (dData.status === 'pending') {
-              setError('Your registration is pending approval.');
-            } else {
-              setError('Account deactivated. Contact Admin.');
-            }
-          } else {
-            setError('Unauthorized: Your Gmail ID is not registered.');
-            await auth.signOut();
+  const [emailInput, setEmailInput] = useState('');
+  const [pinInput, setPinInput] = useState('');
+
+  const handleDriverEmailBypass = async (email: string, pinToCheck?: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      const q = query(collection(db, 'drivers'), where('email', '==', email.toLowerCase().trim()));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const dData = { id: snap.docs[0].id, ...snap.docs[0].data() } as any;
+        
+        // Match PIN if provided (during fresh login)
+        if (pinToCheck !== undefined) {
+          const storedPin = dData.pin ? String(dData.pin).trim() : '';
+          const enteredPin = String(pinToCheck).trim();
+          if (storedPin && storedPin !== enteredPin) {
+            setError('Unauthorized: Incorrect 4-digit Login PIN.');
+            setIsLogged(false);
+            return;
           }
-        } catch (e) {
-          setError('Failed to fetch driver profile.');
-        } finally {
-          setLoading(false);
+        }
+
+        if (dData.status === 'Active') {
+          setDriver(dData);
+          setIsLogged(true);
+          localStorage.setItem('driverSavedEmail', dData.email.toLowerCase().trim());
+          localStorage.setItem('isDriverLoggedIn', 'true');
+        } else if (dData.status === 'pending') {
+          setError('Your registration is pending approval.');
+          setIsLogged(false);
+        } else {
+          setError('Account deactivated. Contact Admin.');
+          setIsLogged(false);
         }
       } else {
+        setError('Unauthorized: Entered email is not registered.');
         setIsLogged(false);
-        setDriver(null);
-        setLoading(false);
+        localStorage.removeItem('driverSavedEmail');
+        localStorage.removeItem('isDriverLoggedIn');
       }
-    });
+    } catch (e) {
+      setError('Failed to fetch driver profile.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('driverSavedEmail');
+    if (savedEmail) {
+      handleDriverEmailBypass(savedEmail);
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -580,28 +605,70 @@ export function DriverApp() {
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-8 rounded-[2.5rem] shadow-xl max-w-sm w-full border border-slate-100 text-center"
+          className="bg-white p-8 sm:p-10 rounded-[3rem] shadow-xl max-w-sm w-full border border-slate-100 text-center relative overflow-hidden"
         >
-          <div className="bg-slate-900 w-24 h-24 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-2xl">
-            <Logo size={56} color="white" />
+          <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-indigo-500 to-purple-600" />
+
+          <div className="bg-slate-900 w-24 h-24 rounded-[2.2rem] flex items-center justify-center mx-auto mb-6 shadow-2xl relative transition-transform hover:scale-105">
+            <Logo size={48} color="white" />
           </div>
-          <h1 className="text-3xl font-black text-slate-900 mb-2">Driver App</h1>
-          <p className="text-slate-500 font-medium mb-10 text-sm">Welcome to TankerWala Fleet Management. Please sign in to continue.</p>
+          <h1 className="text-3xl font-black text-slate-900 mb-2 font-sans">Driver App</h1>
+          <p className="text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-8 font-sans">TankerWala Driver Terminal</p>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-bold border border-red-100">
-              {error}
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (emailInput.trim() && pinInput.trim()) {
+              handleDriverEmailBypass(emailInput.trim(), pinInput.trim());
+            }
+          }} className="space-y-4 text-left">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Mail size={18} className="text-slate-400" />
+              </div>
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="Enter Registered Email"
+                required
+                className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-bold text-slate-800 focus:border-indigo-500 focus:bg-white transition-all outline-none font-sans"
+              />
             </div>
-          )}
 
-          <button 
-            onClick={() => signInWithPopup(auth, googleProvider)}
-            disabled={loading}
-            className="w-full bg-slate-900 text-white h-16 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-xl disabled:opacity-50"
-          >
-            {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <div className="w-6 h-6 bg-white rounded-full p-1"><Logo size={14} /></div>}
-            {loading ? 'Verifying...' : 'Login with Gmail'}
-          </button>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Lock size={18} className="text-slate-400" />
+              </div>
+              <input
+                type="password"
+                maxLength={4}
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
+                placeholder="Enter 4-Digit Login PIN"
+                required
+                className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-base font-bold text-slate-800 focus:border-indigo-500 focus:bg-white transition-all outline-none font-sans"
+              />
+            </div>
+
+            {error && (
+              <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-bold border border-red-100 flex items-center gap-2 font-sans">
+                <AlertCircle size={15} className="shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button 
+              type="submit"
+              disabled={loading || !emailInput.trim() || pinInput.length < 4}
+              className="w-full bg-slate-100 text-slate-400 h-15 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-xl shadow-slate-200/50 enabled:bg-slate-900 enabled:text-white enabled:hover:bg-slate-800 cursor-pointer text-sm font-sans"
+            >
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-850 rounded-full animate-spin" />
+              ) : (
+                'Login with PIN'
+              )}
+            </button>
+          </form>
         </motion.div>
       </div>
     );
@@ -651,6 +718,7 @@ export function DriverApp() {
           <InstallPWA />
           <button onClick={() => {
             localStorage.removeItem('isDriverLoggedIn');
+            localStorage.removeItem('driverSavedEmail');
             window.location.reload();
           }} className="p-3 bg-slate-100 rounded-2xl text-slate-500 active:scale-95 transition-all">
             <LogOut size={20} />
