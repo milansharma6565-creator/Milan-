@@ -2163,13 +2163,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         )}
       </header>
 
-      {/* Interactive Sandbox Simulator Hub */}
-      {(currentFranchise?.isTesting || currentFranchise?.status === 'Testing') && (
-        <SandboxSimulatorHub 
-          franchiseId={franchiseId || currentFranchise?.id} 
-          currentFranchise={currentFranchise} 
-        />
-      )}
+
+      {/* Interactive Sandbox Simulator Hub removed as requested */}
+
 
       {/* Critical Alerts for Admin */}
       <AnimatePresence>
@@ -2206,90 +2202,6 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         )}
       </AnimatePresence>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {/* Monthly Can Monitoring Summary */}
-        {(hasCanService || hasBottleService) && (
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="md:col-span-2 lg:col-span-3 bg-white p-8 rounded-[2.5rem] border border-blue-50 shadow-sm"
-          >
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-              <div className="flex items-center gap-4">
-                 <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-100">
-                    <Calendar size={32} />
-                 </div>
-                 <div>
-                    <h2 className="text-2xl font-black text-slate-900 leading-tight">Monthly Can Monitoring</h2>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Subscriber Delivery Tracking</p>
-                 </div>
-              </div>
-              <div className="flex gap-2">
-                 <div className="bg-slate-50 p-1.5 rounded-2xl flex border border-slate-100 shadow-inner">
-                    {hasCanService && (
-                      <button 
-                        onClick={() => setActiveCanFilter('Monthly')}
-                        className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'Monthly' ? 'bg-white text-blue-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
-                      >Monthly</button>
-                    )}
-                    {hasBottleService && (
-                      <button 
-                        onClick={() => setActiveCanFilter('Packaged')}
-                        className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'Packaged' ? 'bg-white text-green-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
-                      >Packaged Water</button>
-                    )}
-                    {hasCanService && (
-                      <button 
-                        onClick={() => setActiveCanFilter('On-Call')}
-                        className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${activeCanFilter === 'On-Call' ? 'bg-white text-orange-600 shadow-md ring-1 ring-slate-200' : 'text-slate-400 hover:text-slate-600'}`}
-                      >On-Call Cans</button>
-                    )}
-                 </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-               {(() => {
-                  const monthlyCusts = customers.filter(c => c.notes?.toLowerCase().includes('monthly') || bills.some(b => b.customerId === c.id && b.category === 'MONTHLY_TANKER'));
-                  
-                  const filteredList = activeCanFilter === 'Monthly' 
-                    ? monthlyCusts 
-                    : activeCanFilter === 'Packaged'
-                      ? customers.filter(c => bills.some(b => b.customerId === c.id && (b.category === 'BOTTLE' || b.bottleSize)))
-                      : customers.filter(c => !monthlyCusts.includes(c) && bills.some(b => b.customerId === c.id && b.category === 'CAN'));
-
-                  if (filteredList.length === 0) {
-                    return <div className="col-span-4 py-12 text-center text-slate-400 font-bold text-[10px] uppercase tracking-widest border-2 border-dashed border-slate-100 rounded-3xl">No {activeCanFilter} customers found</div>
-                  }
-
-                  return filteredList.map(cust => (
-                    <motion.div
-                      key={cust.id}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setSelectedMonthlyCust(cust)}
-                      className="p-5 rounded-[2rem] border border-slate-100 bg-white hover:border-blue-200 transition-all cursor-pointer shadow-sm hover:shadow-xl group"
-                    >
-                      <div className="flex justify-between items-start mb-3">
-                         <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
-                            <Droplets size={20} />
-                         </div>
-                         <div className="bg-blue-50 text-blue-600 text-[8px] font-black uppercase px-2 py-1 rounded-md">Active</div>
-                      </div>
-                      <h4 className="font-bold text-slate-900 group-hover:text-blue-600 truncate">{cust.name}</h4>
-                      <p className="text-[10px] text-slate-400 font-bold mb-3">{cust.mobile}</p>
-                      <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-                         <div className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Deliveries (MTD)</div>
-                         <div className="text-lg font-black text-slate-800">
-                            {bills.filter(b => b.customerId === cust.id && b.status === 'Delivered' && b.date >= startOfMonth(new Date())).length}
-                         </div>
-                      </div>
-                    </motion.div>
-                  ));
-               })()}
-            </div>
-          </motion.div>
-        )}
-
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
