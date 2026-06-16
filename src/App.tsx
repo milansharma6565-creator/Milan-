@@ -29,32 +29,33 @@ import {
   Settings as LucideSettings,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { Dashboard } from "./components/Dashboard";
-import { CustomerManagement } from "./components/CustomerManagement";
-import { Billing } from "./components/Billing";
-import { Ledger } from "./components/Ledger";
-import { TractorDiesel } from "./components/TractorDiesel";
-import { ReportView } from "./components/ReportView";
-import { DriverManagement } from "./components/DriverManagement";
 import FranchiseAIAssistant from "./components/FranchiseAIAssistant";
-import { DriverAttendance } from "./components/DriverAttendance";
-import { DriverTrackingAdmin } from "./components/DriverTrackingAdmin";
 import { DriverLiveTracking } from "./components/DriverLiveTracking";
 import { CustomerOrderView } from "./components/CustomerOrderView";
-import { HydrantFilling } from "./components/HydrantFilling";
 import PhoneSync from "./components/PhoneSync";
-import { DocumentVault } from "./components/DocumentVault";
-import { Settings } from "./components/Settings";
-import { LetterheadGenerator } from "./components/LetterheadGenerator";
-import { FranchiseManagement } from "./components/FranchiseManagement";
 import { Logo } from "./components/Logo";
 import { PremiumTractor } from "./components/PremiumTractor";
 import { GoodMorningGreeting } from "./components/GoodMorningGreeting";
-import { DriverApp } from "./components/DriverApp";
-import { CustomerBookingPortal } from "./components/CustomerBookingPortal";
-import { Ecosystem } from "./components/Ecosystem";
 import { WishesOverlay } from "./components/WishesOverlay";
-import { TendersMarketplace } from "./components/TendersMarketplace";
+
+const Dashboard = React.lazy(() => import("./components/Dashboard").then(m => ({ default: m.Dashboard })));
+const CustomerManagement = React.lazy(() => import("./components/CustomerManagement").then(m => ({ default: m.CustomerManagement })));
+const Billing = React.lazy(() => import("./components/Billing").then(m => ({ default: m.Billing })));
+const Ledger = React.lazy(() => import("./components/Ledger").then(m => ({ default: m.Ledger })));
+const TractorDiesel = React.lazy(() => import("./components/TractorDiesel").then(m => ({ default: m.TractorDiesel })));
+const ReportView = React.lazy(() => import("./components/ReportView").then(m => ({ default: m.ReportView })));
+const DriverManagement = React.lazy(() => import("./components/DriverManagement").then(m => ({ default: m.DriverManagement })));
+const DriverAttendance = React.lazy(() => import("./components/DriverAttendance").then(m => ({ default: m.DriverAttendance })));
+const DriverTrackingAdmin = React.lazy(() => import("./components/DriverTrackingAdmin").then(m => ({ default: m.DriverTrackingAdmin })));
+const HydrantFilling = React.lazy(() => import("./components/HydrantFilling").then(m => ({ default: m.HydrantFilling })));
+const DocumentVault = React.lazy(() => import("./components/DocumentVault").then(m => ({ default: m.DocumentVault })));
+const Settings = React.lazy(() => import("./components/Settings").then(m => ({ default: m.Settings })));
+const LetterheadGenerator = React.lazy(() => import("./components/LetterheadGenerator").then(m => ({ default: m.LetterheadGenerator })));
+const FranchiseManagement = React.lazy(() => import("./components/FranchiseManagement").then(m => ({ default: m.FranchiseManagement })));
+const DriverApp = React.lazy(() => import("./components/DriverApp").then(m => ({ default: m.DriverApp })));
+const CustomerBookingPortal = React.lazy(() => import("./components/CustomerBookingPortal").then(m => ({ default: m.CustomerBookingPortal })));
+const Ecosystem = React.lazy(() => import("./components/Ecosystem").then(m => ({ default: m.Ecosystem })));
+const TendersMarketplace = React.lazy(() => import("./components/TendersMarketplace").then(m => ({ default: m.TendersMarketplace })));
 import {
   auth,
   googleProvider,
@@ -94,6 +95,18 @@ type Tab =
 
 import { format } from "date-fns";
 import { formatCurrency, getPublicAppUrl, copyToClipboard } from "./constants";
+
+function LazyLoader() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[400px] p-8 text-center bg-white/40 backdrop-blur-md rounded-[2.5rem] border border-slate-100/50 shadow-sm">
+      <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-600 rounded-full animate-spin mx-auto" />
+      <h3 className="mt-6 text-sm font-black text-slate-800 tracking-wide uppercase">Shuffling assets</h3>
+      <p className="mt-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] animate-pulse">
+        Optimizing module load speed...
+      </p>
+    </div>
+  );
+}
 
 export default function App() {
   let driverId: string | null = null;
@@ -386,7 +399,11 @@ export default function App() {
 
   // Driver App View
   if (isDriverMode) {
-    return <DriverApp />;
+    return (
+      <React.Suspense fallback={<LazyLoader />}>
+        <DriverApp />
+      </React.Suspense>
+    );
   }
 
   // If driverId is present, show tracking page regardless of auth
@@ -401,7 +418,11 @@ export default function App() {
 
   // Customer Booking view
   if (isCustomerMode) {
-    return <CustomerBookingPortal />;
+    return (
+      <React.Suspense fallback={<LazyLoader />}>
+        <CustomerBookingPortal />
+      </React.Suspense>
+    );
   }
 
   if (loading) {
@@ -945,7 +966,9 @@ export default function App() {
                 </button>
               </div>
             )}
-            {renderContent()}
+            <React.Suspense fallback={<LazyLoader />}>
+              {renderContent()}
+            </React.Suspense>
           </motion.div>
         </AnimatePresence>
       </main>
