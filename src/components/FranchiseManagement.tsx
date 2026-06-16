@@ -36,6 +36,7 @@ import { formatCurrency } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 import { activityLogger } from '../services/activityLogger';
+import { ConfirmationModal } from './ConfirmationModal';
 
 export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?: (f: Franchise | null) => void }) {
   const [franchises, setFranchises] = useState<Franchise[]>([]);
@@ -45,6 +46,7 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
   const [selectedFranchiseBills, setSelectedFranchiseBills] = useState<Bill[]>([]);
   const [viewStatsId, setViewStatsId] = useState<string | null>(null);
   const [editingFranchiseId, setEditingFranchiseId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -92,15 +94,13 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
     const seedLegacyFranchises = async () => {
       try {
         const snap = await getDocs(collection(db, 'franchises'));
-        const existingEmails = snap.docs.map(d => d.data().email);
-        
-        const legacy = [
-          { id: "legacy-rajhans", name: "Rajhans Steel and Water", email: "rajhanssikar@gmail.com", location: "Sikar" },
-          { id: "legacy-pile", name: "Rajhans Pile Foundation", email: "rajhanspilefoundation@gmail.com", location: "Sikar" }
-        ];
+        if (snap.empty) {
+          const legacy = [
+            { id: "legacy-rajhans", name: "Rajhans Steel and Water", email: "rajhanssikar@gmail.com", location: "Sikar" },
+            { id: "legacy-pile", name: "Rajhans Pile Foundation", email: "rajhanspilefoundation@gmail.com", location: "Sikar" }
+          ];
 
-        for (const leg of legacy) {
-          if (!existingEmails.includes(leg.email)) {
+          for (const leg of legacy) {
             await setDoc(doc(db, 'franchises', leg.id), {
               name: leg.name,
               email: leg.email,
@@ -249,9 +249,17 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
   };
 
   const handleDeleteFranchise = async (id: string) => {
-    if (!confirm('Are you sure you want to remove this franchisee? All related access will be revoked immediately.')) return;
     try {
+      const fToDelete = franchises.find(f => f.id === id);
+      const name = fToDelete?.name || 'Unknown';
       await deleteDoc(doc(db, 'franchises', id));
+      await activityLogger.log({
+        franchiseId: id,
+        franchiseName: name,
+        userEmail: auth.currentUser?.email || 'Super Admin',
+        actionType: 'FRANCHISE_DELETED',
+        description: `Super Admin deleted franchise "${name}"`
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'franchises');
     }
@@ -381,7 +389,7 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
                     <Edit size={20} />
                   </button>
                   <button 
-                    onClick={() => handleDeleteFranchise(f.id!)}
+                    onClick={() => setDeleteConfirm({ id: f.id!, name: f.name })}
                     className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-colors"
                   >
                     <Trash2 size={20} />
@@ -888,6 +896,19 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
         </div>
       )}
       </AnimatePresence>
+
+      <ConfirmationModal 
+        isOpen={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        onConfirm={() => {
+          if (deleteConfirm) {
+            handleDeleteFranchise(deleteConfirm.id);
+            setDeleteConfirm(null);
+          }
+        }}
+        title="Delete Franchisee?"
+        message={`Are you sure you want to delete franchisee "${deleteConfirm?.name}"? All related access will be revoked immediately and irreversibly.`}
+      />
     </div>
   );
 }

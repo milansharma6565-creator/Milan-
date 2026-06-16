@@ -120,96 +120,97 @@ export function WishesOverlay() {
     }
   };
 
-  if (!currentOccasion || !isVisible) return null;
-
   return (
     <AnimatePresence>
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md"
-      >
+      {currentOccasion && isVisible && (
         <motion.div 
-          initial={{ scale: 0.8, y: 50 }}
-          animate={{ scale: 1, y: 0 }}
-          className={`relative w-full max-w-lg bg-gradient-to-br ${currentOccasion.bgColor} rounded-[3rem] overflow-hidden shadow-2xl border-4 border-white/20`}
+          key="wishes-overlay-root"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md"
         >
-          {/* Close button */}
-          <button 
-            onClick={handleClose}
-            className="absolute top-6 right-6 z-20 w-12 h-12 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-full flex items-center justify-center text-white transition-all active:scale-90"
+          <motion.div 
+            initial={{ scale: 0.8, y: 50 }}
+            animate={{ scale: 1, y: 0 }}
+            className={`relative w-full max-w-lg bg-gradient-to-br ${currentOccasion.bgColor} rounded-[3rem] overflow-hidden shadow-2xl border-4 border-white/20`}
           >
-            <X size={24} />
-          </button>
-
-          {/* Mute button */}
-          {currentOccasion.audio && (
+            {/* Close button */}
             <button 
-              onClick={toggleMute}
-              className="absolute top-6 left-6 z-20 w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white"
+              onClick={handleClose}
+              className="absolute top-6 right-6 z-20 w-12 h-12 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-full flex items-center justify-center text-white transition-all active:scale-90"
             >
-              {isMuted ? <VolumeX size={24} /> : <Volume2 size={24} />}
+              <X size={24} />
             </button>
-          )}
 
-          {/* Main Content */}
-          <div className="relative aspect-[4/5] md:aspect-video w-full overflow-hidden">
-            <img 
-              src={currentOccasion.image} 
-              alt={currentOccasion.title}
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-            
-            <div className="absolute bottom-0 left-0 right-0 p-8 text-center">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
+            {/* Mute button */}
+            {currentOccasion.audio && (
+              <button 
+                onClick={toggleMute}
+                className="absolute top-6 left-6 z-20 w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white"
               >
-                <div className="flex justify-center gap-2 mb-4">
-                  <Sparkles className="text-yellow-400" size={24} />
-                  <Heart className="text-red-400 fill-current" size={24} />
-                  <Sparkles className="text-yellow-400" size={24} />
-                </div>
-                <h2 className={`text-4xl font-black mb-4 ${currentOccasion.textColor} tracking-tight`}>
-                  {currentOccasion.title}
-                </h2>
-                <div className={`p-4 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/10 ${currentOccasion.textColor} font-medium leading-relaxed`}>
-                   {currentOccasion.message}
-                </div>
-              </motion.div>
-            </div>
-          </div>
+                {isMuted ? <VolumeX size={24} /> : <Volume2 size={24} />}
+              </button>
+            )}
 
-          {/* Bottom Branding */}
-          <div className="p-6 bg-black/20 flex flex-col items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-white/60 text-[10px] font-black uppercase tracking-[0.3em]">Special Greetings From</span>
-              <div className="h-[1px] w-8 bg-white/20" />
+            {/* Main Content */}
+            <div className="relative aspect-[4/5] md:aspect-video w-full overflow-hidden">
+              <img 
+                src={currentOccasion.image} 
+                alt={currentOccasion.title}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+              
+              <div className="absolute bottom-0 left-0 right-0 p-8 text-center">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                >
+                  <div className="flex justify-center gap-2 mb-4">
+                    <Sparkles className="text-yellow-400" size={24} />
+                    <Heart className="text-red-400 fill-current" size={24} />
+                    <Sparkles className="text-yellow-400" size={24} />
+                  </div>
+                  <h2 className={`text-4xl font-black mb-4 ${currentOccasion.textColor} tracking-tight`}>
+                    {currentOccasion.title}
+                  </h2>
+                  <div className={`p-4 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/10 ${currentOccasion.textColor} font-medium leading-relaxed`}>
+                     {currentOccasion.message}
+                  </div>
+                </motion.div>
+              </div>
             </div>
-            <div className="text-2xl font-black text-white italic tracking-tighter">TankerWala</div>
-            
-            <button 
-               onClick={handleClose}
-               className="mt-2 text-white/50 hover:text-white flex items-center gap-2 text-xs font-bold transition-colors uppercase tracking-widest"
-            >
-              Skip <SkipForward size={14} />
-            </button>
-          </div>
 
-          {currentOccasion.audio && (
-            <audio 
-              ref={audioRef}
-              src={currentOccasion.audio} 
-              autoPlay 
-              loop 
-              playsInline
-            />
-          )}
+            {/* Bottom Branding */}
+            <div className="p-6 bg-black/20 flex flex-col items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-white/60 text-[10px] font-black uppercase tracking-[0.3em]">Special Greetings From</span>
+                <div className="h-[1px] w-8 bg-white/20" />
+              </div>
+              <div className="text-2xl font-black text-white italic tracking-tighter">TankerWala</div>
+              
+              <button 
+                 onClick={handleClose}
+                 className="mt-2 text-white/50 hover:text-white flex items-center gap-2 text-xs font-bold transition-colors uppercase tracking-widest"
+              >
+                Skip <SkipForward size={14} />
+              </button>
+            </div>
+
+            {currentOccasion.audio && (
+              <audio 
+                ref={audioRef}
+                src={currentOccasion.audio} 
+                autoPlay 
+                loop 
+                playsInline
+              />
+            )}
+          </motion.div>
         </motion.div>
-      </motion.div>
+      )}
     </AnimatePresence>
   );
 }

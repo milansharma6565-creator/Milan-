@@ -7,6 +7,7 @@ import { format, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns
 import { formatCurrency } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
 import { generatePDF } from '../lib/pdfUtils';
+import { printThermalReceipt } from '../lib/printUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { useRef } from 'react';
 
@@ -135,12 +136,18 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
   const handlePrint = async () => {
     if (printRef.current) {
       try {
-        const fileName = `Token_${selectedBillForPrint?.billNumber || 'Order'}`;
-        await generatePDF(printRef.current, fileName);
+        await printThermalReceipt(printRef.current);
         setSelectedBillForPrint(null);
-      } catch (err) {
-        console.error("PDF Export Error:", err instanceof Error ? err.message : String(err));
-        alert("Failed to generate PDF. Please try again.");
+      } catch (err: any) {
+        console.warn("Direct Printing failed, falling back to PDF:", err?.message || String(err));
+        try {
+          const fileName = `Token_${selectedBillForPrint?.billNumber || 'Order'}`;
+          await generatePDF(printRef.current, fileName);
+          setSelectedBillForPrint(null);
+        } catch (pdfErr: any) {
+          console.error("PDF Export Error:", pdfErr?.message || String(pdfErr));
+          alert("Failed to print. Try opening the application in a new tab.");
+        }
       }
     }
   };

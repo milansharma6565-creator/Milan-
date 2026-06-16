@@ -6,6 +6,7 @@ import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus,
 import { motion, AnimatePresence } from 'motion/react';
 import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES, getPublicAppUrl } from '../constants';
 import { ThermalInvoice } from './ThermalInvoice';
+import { printThermalReceipt } from '../lib/printUtils';
 import { format } from 'date-fns';
 import { toJpeg } from 'html-to-image';
 import { ledgerAutomation } from '../services/ledgerAutomation';
@@ -929,7 +930,23 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 </div>
               </div>
 
-              <div className="grid gap-3">
+               <div className="grid gap-3">
+                <button 
+                  onClick={async () => {
+                    if (thermalRef.current) {
+                      try {
+                        await printThermalReceipt(thermalRef.current);
+                      } catch (err) {
+                        alert("Direct print failed. Opening default fallback print dialog...");
+                        window.print();
+                      }
+                    }
+                  }}
+                  className="h-16 font-bold text-white bg-blue-600 rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center justify-center gap-3 active:scale-95"
+                >
+                  <Printer size={24} />
+                  Print Bill (Thermal)
+                </button>
                 <button 
                   onClick={() => sendWhatsApp(bookedBill)}
                   className="h-16 font-bold text-white bg-green-600 rounded-2xl hover:bg-green-700 transition-all shadow-lg shadow-green-100 flex items-center justify-center gap-3 active:scale-95"

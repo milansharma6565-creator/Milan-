@@ -44,6 +44,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { formatCurrency, PAYMENT_MODES, generateBillNumber, getPublicAppUrl, copyToClipboard } from '../constants';
 import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isToday, subMonths, addMonths } from 'date-fns';
 import { generatePDF } from '../lib/pdfUtils';
+import { printThermalReceipt } from '../lib/printUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
 import { QRCodeSVG } from 'qrcode.react';
@@ -2106,11 +2107,16 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const handlePrint = async () => {
     if (printRef.current) {
       try {
-        const fileName = `Token_${editingBill?.billNumber || 'Order'}`;
-        await generatePDF(printRef.current, fileName);
+        await printThermalReceipt(printRef.current);
       } catch (err: any) {
-        console.error("PDF Export Error:", err?.message || String(err));
-        alert("Failed to generate PDF. Please try again.");
+        console.warn("Direct Printing failed, falling back to PDF:", err?.message || String(err));
+        try {
+          const fileName = `Token_${editingBill?.billNumber || 'Order'}`;
+          await generatePDF(printRef.current, fileName);
+        } catch (pdfErr: any) {
+          console.error("PDF Export Error:", pdfErr?.message || String(pdfErr));
+          alert("Failed to print. Try opening the application in a new tab.");
+        }
       }
     }
   };

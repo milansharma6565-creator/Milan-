@@ -191,7 +191,7 @@ Instructions/Prompt: ${prompt || "Draft a clean professional corporate correspon
       });
 
       const response = await client.models.generateContent({
-        model: "gemini-3.5-flash", 
+        model: "gemini-2.5-flash", 
         contents: [{ role: "user", parts: parts }],
         config: {
           temperature: 0.2, // low temperature for precise copying of numbers
@@ -271,7 +271,7 @@ Your tone should be highly professional, polite, warm, and helpful. Respond in s
 Keep answers concise, clear, and action-oriented!`;
 
       const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: messages.map(m => ({
           role: m.role,
           parts: [{ text: m.content }]
@@ -319,7 +319,7 @@ If applicable, provide a short, clean TypeScript/Firebase code snippet that the 
 Always respond in elegant, clear technical English, emphasizing code hygiene, locks, and verification loops.`;
 
       const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: prompt,
         config: {
           systemInstruction,
@@ -361,7 +361,7 @@ Always respond in elegant, clear technical English, emphasizing code hygiene, lo
         return res.status(500).json({ error: "GEMINI_API_KEY not configured" });
       }
 
-      const { GoogleGenAI, Type } = await import("@google/genai");
+      const { GoogleGenAI } = await import("@google/genai");
       const client = new GoogleGenAI({ 
         apiKey: process.env.GEMINI_API_KEY,
         httpOptions: {
@@ -372,41 +372,63 @@ Always respond in elegant, clear technical English, emphasizing code hygiene, lo
       });
 
       const contents = `Find 5 active or very recent water tanker supply, drinking water delivery, or water distribution related government or commercial tenders in ${queryCity}, ${queryState} (including nearby sub-districts/divisions) on tenderdetails.com or other Indian tender/procurement portals.
-Format the output EXACTLY in JSON conforming to the requested schema. Provide real, informative, and detailed fields. Ensure source URLs are real Google search/tender result links if found, or logical details page paths on tenderdetail.com or search terms.`;
+Format the output EXACTLY as a JSON object inside a \`\`\`json codeblock. 
+
+Your JSON response must follow this EXACT structure:
+{
+  "tenders": [
+    {
+      "id": "Unique sequential ID, e.g. TND-2026-001",
+      "title": "Title of the water tender",
+      "authority": "Issuing organization or department, e.g. PHED, Nagar Parishad",
+      "value": "Estimated financial value or budget, e.g. ₹15 Lakhs, ₹8.5 Lakhs",
+      "dueDate": "Due date/last date to apply",
+      "referenceId": "Tender Ref No / ID / Code",
+      "location": "Specific town, block, division, or ward name",
+      "description": "2-3 sentences detailed summary of services needed",
+      "sourceUrl": "URL link referencing this search result if any, or general search URL on tenderdetail.com"
+    }
+  ]
+}
+
+Provide real, informative, and detailed fields. Ensure source URLs are real Google search/tender result links if found, or logical details page paths on tenderdetail.com or search terms. Return ONLY the JSON object inside the code block.`;
 
       const response = await client.models.generateContent({
         model: "gemini-3.5-flash",
         contents,
         config: {
           tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              tenders: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING, description: "Unique sequential ID" },
-                    title: { type: Type.STRING, description: "Title of the water tender" },
-                    authority: { type: Type.STRING, description: "Issuing organization or department, e.g. PHED, Nagar Parishad" },
-                    value: { type: Type.STRING, description: "Estimated financial value or budget, e.g. ₹15 Lakhs, ₹8.5 Lakhs" },
-                    dueDate: { type: Type.STRING, description: "Due date/last date to apply" },
-                    referenceId: { type: Type.STRING, description: "Tender Ref No / ID / Code" },
-                    location: { type: Type.STRING, description: "Specific town, block, division, or ward name" },
-                    description: { type: Type.STRING, description: "2-3 sentences detailed summary of services needed" },
-                    sourceUrl: { type: Type.STRING, description: "URL link referencing this search result if any, or general search URL on tenderdetail.com" }
-                  },
-                  required: ["id", "title", "authority", "value", "dueDate", "description"]
-                }
-              }
-            }
-          }
+          responseMimeType: "text/plain"
         }
       });
 
-      const parsedData = JSON.parse(response.text || '{"tenders": []}');
+      let responseText = response.text || '';
+      let parsedData = { tenders: [] };
+      try {
+        let jsonText = responseText.trim();
+        // Extract from markdown code blocks if present
+        if (jsonText.includes("```")) {
+          const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+          if (match && match[1]) {
+            jsonText = match[1].trim();
+          }
+        } else {
+          // If no code block, try to extract from the first { to the last }
+          const firstBrace = jsonText.indexOf('{');
+          const lastBrace = jsonText.lastIndexOf('}');
+          if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+            jsonText = jsonText.substring(firstBrace, lastBrace + 1);
+          }
+        }
+        parsedData = JSON.parse(jsonText);
+      } catch (parseErr) {
+        console.warn("Could not parse Gemini JSON response, trying direct parse:", parseErr);
+        try {
+          parsedData = JSON.parse(responseText);
+        } catch (e) {
+          parsedData = { tenders: [] };
+        }
+      }
       
       // Store successful responses in-memory for 30 minutes
       tendersCache.set(cacheKey, {
@@ -578,7 +600,7 @@ Format the output EXACTLY in JSON conforming to the requested schema. Provide re
       });
 
       const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [
           {
             inlineData: {
@@ -690,7 +712,7 @@ Format the output EXACTLY in JSON conforming to the requested schema. Provide re
       });
 
       const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [
           {
             inlineData: {

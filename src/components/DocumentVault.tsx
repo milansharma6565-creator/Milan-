@@ -541,6 +541,10 @@ export const DocumentVault: React.FC<DocumentVaultProps> = ({ userEmail }) => {
 
       {!currentFolder ? (
         <div className="space-y-6">
+          <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl flex items-center gap-3 text-blue-800 text-sm font-medium">
+            <Folder className="w-5 h-5 text-blue-500 shrink-0" />
+            <span>Select any folder below to upload, view, or manage documents in that category.</span>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {folders.filter(f => !f.parentId).map(folder => (
               <button
