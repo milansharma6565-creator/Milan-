@@ -170,6 +170,21 @@ export default function App() {
   const [inspectedFranchiseId, setInspectedFranchiseId] = useState<
     string | null
   >(null);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (authUser) => {
@@ -623,12 +638,24 @@ export default function App() {
             </span>
           </h1>
         </div>
-        <button
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-600"
-        >
-          <Menu size={24} />
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Real-time connection status pill */}
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider border transition-all ${
+            isOnline 
+              ? 'bg-emerald-50 border-emerald-100 text-emerald-700' 
+              : 'bg-amber-50 border-amber-200 text-amber-700 animate-pulse'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            {isOnline ? 'Online' : 'Offline'}
+          </div>
+
+          <button
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-600"
+          >
+            <Menu size={24} />
+          </button>
+        </div>
       </header>
 
       {/* Desktop Sidebar */}
@@ -898,6 +925,33 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* Real-time Sync Status Indicator */}
+          <div className={`mx-2 mb-4 p-3.5 rounded-2xl border transition-all ${
+            isOnline 
+              ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' 
+              : 'bg-amber-50/70 border-amber-200 text-amber-800 animate-pulse'
+          }`}>
+            <div className="flex items-center gap-2.5">
+              <span className={`relative flex h-2 w-2`}>
+                {isOnline && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+              </span>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider leading-none">
+                  {isOnline ? 'Live Cloud Sync' : 'Offline Mode'}
+                </p>
+                <p className="text-[9px] font-medium text-slate-400 mt-1 leading-tight">
+                  {isOnline 
+                    ? 'All actions synced live' 
+                    : 'Writes cached; auto-syncing'}
+                </p>
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center gap-3 px-2 mb-4">
             <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center overflow-hidden border border-slate-100">
               {user.photoURL ? (

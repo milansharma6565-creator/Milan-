@@ -10,7 +10,7 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber
 } from 'firebase/auth';
-import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, doc, getDocFromServer, enableMultiTabIndexedDbPersistence, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -21,6 +21,26 @@ export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   useFetchStreams: false, // Disables fetch streams of fetch-polling to prevent blocks in proxy/iframe setups
 } as any, databaseId);
+
+// Enable offline persistent caching for offline use and sync
+if (typeof window !== 'undefined') {
+  enableMultiTabIndexedDbPersistence(db).then(() => {
+    console.log("Firestore multi-tab offline cache enabled successfully.");
+  }).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      console.warn("Firestore multi-tab offline cache failed (multiple tabs open). Trying single tab.");
+      enableIndexedDbPersistence(db).then(() => {
+        console.log("Firestore single-tab offline cache enabled successfully.");
+      }).catch((singleErr) => {
+        console.warn("Firestore single-tab offline cache failed:", singleErr);
+      });
+    } else if (err.code === 'unimplemented') {
+      console.warn("Firestore offline caching is not supported by this browser.");
+    } else {
+      console.warn("Firestore offline caching configuration:", err);
+    }
+  });
+}
 export const storage = getStorage(app);
 
 // Use initializeAuth for more robust configuration

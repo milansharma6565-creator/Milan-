@@ -2145,10 +2145,15 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             <Droplets size={28} />
           </div>
           <div>
-            <h1 className="text-2xl font-display font-bold pb-4">
-              Tanker<span className="relative">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">Powered by Rajhans</span></span>
+            <h1 className="text-2xl font-display font-bold flex items-center gap-2 flex-wrap">
+              Tanker<span className="text-blue-600">Wala</span>
+              {currentFranchise?.name && (
+                <span className="text-xs font-black bg-blue-50 text-blue-700 border border-blue-100 px-2.5 py-1 rounded-xl uppercase tracking-wider">
+                  {currentFranchise.name}
+                </span>
+              )}
             </h1>
-            <p className="text-slate-500 text-sm">Dashboard Overview</p>
+            <p className="text-slate-500 text-xs mt-1">Dashboard Overview • Powered by Rajhans</p>
           </div>
         </div>
         {stats.unsettledCount > 0 && (
