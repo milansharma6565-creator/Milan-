@@ -502,6 +502,13 @@ export function CustomerBookingPortal() {
     const unsub = onSnapshot(doc(db, "customers", customer.id), (docSnap) => {
       if (docSnap.exists()) {
         setCustomer({ id: docSnap.id, ...docSnap.data() } as Customer);
+      } else {
+        // Document deleted or wiped out! Perform clean logout instantly.
+        setCustomer(null);
+        setIsLogged(false);
+        localStorage.removeItem("customerBookingEmail");
+        localStorage.removeItem("customerBookingMobile");
+        localStorage.removeItem("isCustomerLoggedIn");
       }
     });
     return () => unsub();

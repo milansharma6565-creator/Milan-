@@ -317,6 +317,37 @@ export function DriverApp() {
   }, [isLogged, driver?.id]);
 
   useEffect(() => {
+    if (!isLogged || !driver?.id) return;
+
+    const unsubDriverDoc = onSnapshot(doc(db, 'drivers', driver.id), (snap) => {
+      if (!snap.exists()) {
+        // Driver wiped or deleted! Terminate session and kick out instantly.
+        setDriver(null);
+        setIsLogged(false);
+        localStorage.removeItem('driverSavedEmail');
+        localStorage.removeItem('isDriverLoggedIn');
+        auth.signOut();
+        alert("Your driver account was deleted or reset. Please contact admin.");
+      } else {
+        const dData = snap.data();
+        if (dData.status !== 'Active') {
+          // Status updated! Log out.
+          setDriver(null);
+          setIsLogged(false);
+          localStorage.removeItem('driverSavedEmail');
+          localStorage.removeItem('isDriverLoggedIn');
+          auth.signOut();
+          alert("Your account is no longer Active. Contact admin.");
+        }
+      }
+    }, (error) => {
+      console.warn("Driver status check failed:", error);
+    });
+
+    return () => unsubDriverDoc();
+  }, [isLogged, driver?.id]);
+
+  useEffect(() => {
     if (driver?.id) {
       const q = query(
         collection(db, 'dieselRequests'),

@@ -43,10 +43,12 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
+
     // Fetch drivers
     let qDrivers = query(collection(db, 'drivers'));
-    if (!isSuperAdmin && franchiseId) {
-      qDrivers = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      qDrivers = query(collection(db, 'drivers'), where('franchiseId', '==', fid));
     }
     const driversUnsub = onSnapshot(qDrivers, (snapshot) => {
       setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver)));
@@ -62,10 +64,10 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
       where('date', '>=', Timestamp.fromDate(start)),
       where('date', '<=', Timestamp.fromDate(end))
     );
-    if (!isSuperAdmin && franchiseId) {
+    if (fid) {
       attendanceQuery = query(
         collection(db, 'attendance'),
-        where('franchiseId', '==', franchiseId),
+        where('franchiseId', '==', fid),
         where('date', '>=', Timestamp.fromDate(start)),
         where('date', '<=', Timestamp.fromDate(end))
       );

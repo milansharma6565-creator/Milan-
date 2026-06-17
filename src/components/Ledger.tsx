@@ -90,10 +90,14 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
   const [selectedLedgerId, setSelectedLedgerId] = useState<string | null>(null);
 
   useEffect(() => {
+    const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
+
     // 1. Fetch Groups
     let groupsQuery = query(collection(db, 'accountGroups'));
-    if (franchiseId) {
-      groupsQuery = query(collection(db, 'accountGroups'), where('franchiseId', 'in', [franchiseId, null]));
+    if (fid) {
+      groupsQuery = query(collection(db, 'accountGroups'), where('franchiseId', 'in', [fid, null]));
+    } else if (!isSuperAdmin) {
+      groupsQuery = query(collection(db, 'accountGroups'), where('franchiseId', '==', 'PLACEHOLDER_NONE'));
     }
     const groupsUnsub = onSnapshot(groupsQuery, 
       (snapshot) => {
@@ -108,8 +112,10 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
     // 2. Fetch Accounts
     let accountsQuery = query(collection(db, 'accounts'));
-    if (franchiseId) {
-      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
+    } else if (!isSuperAdmin) {
+      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', 'PLACEHOLDER_NONE'));
     }
     const accountsUnsub = onSnapshot(accountsQuery, 
       (snapshot) => {
@@ -120,8 +126,10 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
     // 3. Fetch Vouchers
     let vouchersBaseQuery = query(collection(db, 'vouchers'));
-    if (franchiseId) {
-      vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', fid));
+    } else if (!isSuperAdmin) {
+      vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', 'PLACEHOLDER_NONE'));
     }
     const vouchersUnsub = onSnapshot(query(vouchersBaseQuery, orderBy('date', 'desc'), limit(500)), 
       (snapshot) => {
@@ -247,7 +255,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
   }, [accounts, vouchers]);
 
   // Retro Tally ERP 9 Software State Variables
-  const [tallyMode, setTallyMode] = useState(true);
+  const [tallyMode, setTallyMode] = useState(false);
   const [tallyScreen, setTallyScreen] = useState<'gateway' | 'accounts-info' | 'ledger-list' | 'ledger-create' | 'voucher-entry' | 'daybook' | 'balance-sheet' | 'profit-loss' | 'trial-balance' | 'bank-feed' | 'tally-sync'>('gateway');
   const [tallySelectedIdx, setTallySelectedIdx] = useState(0);
   const [tallyVchType, setTallyVchType] = useState<VoucherType>('Payment');
@@ -1311,7 +1319,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                     <p className="text-yellow-400 font-bold">📂 INTEGRATED BANK AI STATEMENT PARSER</p>
                     <p className="text-[10px] text-slate-300 mt-1">Directly processing transactions within Tally ERP double-entry rules:</p>
                   </div>
-                  <BankFeedWorkspace accounts={accounts} franchiseId={franchiseId} />
+                  <BankFeedWorkspace accounts={accounts} franchiseId={franchiseId} isSuperAdmin={isSuperAdmin} />
                 </div>
               </div>
             )}
@@ -1390,12 +1398,6 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-3xl font-display font-black text-slate-900 tracking-tight">Accounting Ledger</h1>
-            <button 
-              onClick={() => { setTallyMode(true); setTallyScreen('gateway'); }}
-              className="bg-[#072F32] hover:bg-[#0e4d52] text-yellow-300 text-[10px] font-black tracking-widest uppercase px-3 py-1 rounded-md transition-all shadow border border-[#115b62]"
-            >
-              📟 OPEN RETRO TALLY.ERP 9 SYSTEM
-            </button>
           </div>
           <p className="text-slate-500 font-medium font-sans">Double-entry bookkeeping system</p>
         </div>
@@ -1403,11 +1405,9 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl overflow-x-auto">
           <AccountingTabButton active={activeTab === 'daybook'} onClick={() => setActiveTab('daybook')} icon={<BookOpen size={18} />} label="Daybook" />
           <AccountingTabButton active={activeTab === 'vouchers'} onClick={() => setActiveTab('vouchers')} icon={<LayoutGrid size={18} />} label="Vouchers" />
-          <AccountingTabButton active={activeTab === 'bank-feed'} onClick={() => setActiveTab('bank-feed')} icon={<ArrowRightLeft size={18} />} label="Bank AI Feed" />
           <AccountingTabButton active={activeTab === 'ledgers'} onClick={() => setActiveTab('ledgers')} icon={<FileText size={18} />} label="Ledgers" />
           <AccountingTabButton active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<History size={18} />} label="Reports" />
           <AccountingTabButton active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} icon={<Settings2 size={18} />} label="Setup" />
-          <AccountingTabButton active={activeTab === 'tally-sync'} onClick={() => setActiveTab('tally-sync')} icon={<RotateCcw size={18} className="text-amber-600" />} label="Tally Sync" />
         </div>
       </header>
 
@@ -1415,11 +1415,9 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       <div className="min-h-[400px]">
         {activeTab === 'daybook' && <Daybook vouchers={vouchers} onAddVoucher={() => setIsAddingVoucher(true)} />}
         {activeTab === 'vouchers' && <VoucherManager vouchers={vouchers} onAdd={() => setIsAddingVoucher(true)} />}
-        {activeTab === 'bank-feed' && <BankFeedWorkspace accounts={accounts} franchiseId={franchiseId} />}
         {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} />}
         {activeTab === 'reports' && <FinancialReports accounts={accounts} vouchers={vouchers} groups={groups} />}
         {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} onAddAccount={() => setIsAddingAccount(true)} />}
-        {activeTab === 'tally-sync' && <TallySyncWorkspace accounts={accounts} groups={groups} franchiseId={franchiseId} />}
       </div>
 
       {/* Modals */}
@@ -2769,7 +2767,7 @@ interface LearnedRule {
   type: 'Cr' | 'Dr';
 }
 
-function BankFeedWorkspace({ accounts, franchiseId }: { accounts: Account[], franchiseId?: string }) {
+function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: Account[], franchiseId?: string, isSuperAdmin?: boolean }) {
   // File upload state
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -2790,16 +2788,19 @@ function BankFeedWorkspace({ accounts, franchiseId }: { accounts: Account[], fra
 
   // Fetch previous learned rules on mount
   useEffect(() => {
+    const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
     let rulesQuery = query(collection(db, 'bankStatementRules'));
-    if (franchiseId) {
-      rulesQuery = query(collection(db, 'bankStatementRules'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      rulesQuery = query(collection(db, 'bankStatementRules'), where('franchiseId', '==', fid));
+    } else if (!isSuperAdmin) {
+      rulesQuery = query(collection(db, 'bankStatementRules'), where('franchiseId', '==', 'PLACEHOLDER_NONE'));
     }
     const unsub = onSnapshot(rulesQuery, (snapshot) => {
       const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LearnedRule));
       setLearnedRules(fetched);
     });
     return () => unsub();
-  }, [franchiseId]);
+  }, [franchiseId, isSuperAdmin]);
 
   // Match harvested transactions against machine-learned patterns
   const applyRulesAndLoad = (rawTxList: BankTx[]) => {

@@ -166,6 +166,7 @@ export default function App() {
   const [currentFranchise, setCurrentFranchise] = useState<Franchise | null>(
     null,
   );
+  const [franchiseLoaded, setFranchiseLoaded] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [inspectedFranchiseId, setInspectedFranchiseId] = useState<
     string | null
@@ -219,6 +220,7 @@ export default function App() {
       } else {
         setUser(null);
         setCurrentFranchise(null);
+        setFranchiseLoaded(false);
         setIsSuperAdmin(false);
         setInspectedFranchiseId(null);
       }
@@ -230,10 +232,12 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setCurrentFranchise(null);
+      setFranchiseLoaded(false);
       return;
     }
 
     let unsub: (() => void) | null = null;
+    setFranchiseLoaded(false);
 
     if (isSuperAdmin) {
       if (inspectedFranchiseId) {
@@ -241,9 +245,13 @@ export default function App() {
           if (snap.exists()) {
             setCurrentFranchise({ id: snap.id, ...snap.data() } as Franchise);
           }
+          setFranchiseLoaded(true);
+        }, (err) => {
+          setFranchiseLoaded(true);
         });
       } else {
         setCurrentFranchise(null);
+        setFranchiseLoaded(true);
       }
     } else {
       const email = user.email || "";
@@ -257,6 +265,7 @@ export default function App() {
           status: "Active",
           createdAt: new Date(),
         });
+        setFranchiseLoaded(true);
       } else if (email === "rajhanspilefoundation@gmail.com") {
         setCurrentFranchise({
           id: "legacy-pile",
@@ -267,6 +276,7 @@ export default function App() {
           status: "Active",
           createdAt: new Date(),
         });
+        setFranchiseLoaded(true);
       } else {
         const q = query(
           collection(db, "franchises"),
@@ -281,6 +291,9 @@ export default function App() {
           } else {
             setCurrentFranchise(null);
           }
+          setFranchiseLoaded(true);
+        }, (err) => {
+          setFranchiseLoaded(true);
         });
       }
     }
@@ -496,6 +509,53 @@ export default function App() {
           
           <p className="mt-8 text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Authorized Access Only</p>
         </motion.div>
+      </div>
+    );
+  }
+
+  if (!franchiseLoaded) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="relative mb-8">
+          <div className="absolute inset-0 flex items-center justify-center opacity-10 animate-pulse scale-[2.5]">
+            <Logo size={120} />
+          </div>
+          <div className="w-24 h-24 bg-slate-900 rounded-[2rem] flex items-center justify-center relative z-10 shadow-2xl shadow-blue-200">
+            <Logo size={48} color="white" />
+          </div>
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 mb-1">TankerWala</h2>
+        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest animate-pulse">
+          Loading Franchise...
+        </p>
+      </div>
+    );
+  }
+
+  if (!isSuperAdmin && !currentFranchise) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-center">
+        <div className="bg-white p-8 md:p-12 rounded-[3.5rem] shadow-2xl max-w-md w-full text-center border border-slate-100 flex flex-col items-center">
+          <div className="w-20 h-20 bg-amber-50 rounded-[2rem] flex items-center justify-center text-amber-500 mb-6 border border-amber-100 animate-pulse">
+            <ShieldAlert size={40} />
+          </div>
+          <h2 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">
+            Authorization Pending
+          </h2>
+          <p className="text-slate-500 text-sm leading-relaxed mb-6">
+            Your Google Account (<span className="font-bold text-slate-800">{user.email}</span>) is not linked to any active regional franchise.
+          </p>
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-6 text-left w-full text-xs text-slate-500 leading-relaxed">
+            <p className="font-bold text-slate-700 mb-1 text-slate-800">Proposed Next Steps:</p>
+            Please contact Milan Sharma (<span className="font-semibold text-slate-800">milan.sharma6565@gmail.com</span>) to register your regional branch and activate your workspace credentials.
+          </div>
+          <button 
+            onClick={() => auth.signOut()}
+            className="w-full bg-slate-900 hover:bg-slate-800 text-white h-14 rounded-2xl font-bold transition-all text-sm"
+          >
+            Sign Out & Switch Account
+          </button>
+        </div>
       </div>
     );
   }

@@ -45,6 +45,7 @@ import { formatCurrency, PAYMENT_MODES, generateBillNumber, getPublicAppUrl, cop
 import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isToday, subMonths, addMonths } from 'date-fns';
 import { generatePDF } from '../lib/pdfUtils';
 import { printThermalReceipt } from '../lib/printUtils';
+import { openWhatsAppDirect } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
 import { QRCodeSVG } from 'qrcode.react';
@@ -52,6 +53,7 @@ import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
 import { X as LucideX } from 'lucide-react';
 import { SandboxSimulatorHub } from './SandboxSimulatorHub';
+import { ledgerAutomation } from '../services/ledgerAutomation';
 
 function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void }) {
    const [text, setText] = useState('');
@@ -625,15 +627,26 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     let accountsQ = query(collection(db, 'accounts'));
 
     // Apply Franchise Filter if present
-    if (franchiseId) {
-      billsQ = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
-      requestsQ = query(collection(db, 'bookingRequests'), where('franchiseId', '==', franchiseId), where('status', '==', 'Pending'));
-      dieselQ = query(collection(db, 'dieselRequests'), where('franchiseId', '==', franchiseId), where('status', '==', 'Pending'));
-      feedbacksQ = query(collection(db, 'feedbacks'), where('franchiseId', '==', franchiseId));
-      customersQ = query(collection(db, 'customers'), where('franchiseId', '==', franchiseId));
-      driversQ = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
-      tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', franchiseId));
-      accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
+    if (fid) {
+      billsQ = query(collection(db, 'bills'), where('franchiseId', '==', fid), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
+      requestsQ = query(collection(db, 'bookingRequests'), where('franchiseId', '==', fid), where('status', '==', 'Pending'));
+      dieselQ = query(collection(db, 'dieselRequests'), where('franchiseId', '==', fid), where('status', '==', 'Pending'));
+      feedbacksQ = query(collection(db, 'feedbacks'), where('franchiseId', '==', fid));
+      customersQ = query(collection(db, 'customers'), where('franchiseId', '==', fid));
+      driversQ = query(collection(db, 'drivers'), where('franchiseId', '==', fid));
+      tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', fid));
+      accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
+    } else if (!isSuperAdmin) {
+      const none = 'PLACEHOLDER_NONE';
+      billsQ = query(collection(db, 'bills'), where('franchiseId', '==', none));
+      requestsQ = query(collection(db, 'bookingRequests'), where('franchiseId', '==', none));
+      dieselQ = query(collection(db, 'dieselRequests'), where('franchiseId', '==', none));
+      feedbacksQ = query(collection(db, 'feedbacks'), where('franchiseId', '==', none));
+      customersQ = query(collection(db, 'customers'), where('franchiseId', '==', none));
+      driversQ = query(collection(db, 'drivers'), where('franchiseId', '==', none));
+      tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', none));
+      accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', none));
     }
 
     const unsubBills = onSnapshot(billsQ, 
@@ -988,6 +1001,14 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           console.warn(`[Master Reset] Failed to clean collection "${collName}":`, collErr?.message || String(collErr));
           overallFailCount++;
         }
+      }
+      
+      // Re-initialize default chart of accounts and groups for a perfect fresh start
+      try {
+        console.log(`[Master Reset] Re-seeding default chart of accounts for franchise ${fName} (${fid})...`);
+        await ledgerAutomation.setupFranchiseLedgers(fid, fName);
+      } catch (setupErr) {
+        console.error("Failed to re-initialize baseline ledgers:", setupErr);
       }
       
       alert(`✅ Fresh Start! Database wiped successfully for this franchise. Wiped successfully: ${overallSuccessCount}/${collectionsToWipe.length} categories. System is now clean.`);
@@ -3670,12 +3691,14 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                       try {
                         await handlePrint();
                       } catch (err) {
-                        alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
+                        console.warn("Direct Printing failed, falling back to window.print:", err);
                       }
+                      // Auto-send direct preloaded WhatsApp to customer
+                      openWhatsAppDirect(editingBill, franchiseDetail || currentFranchise);
                     }}
-                    className="col-span-2 material-btn bg-white border-2 border-slate-100 text-slate-900 flex items-center justify-center gap-2 py-4 shadow-sm"
+                    className="col-span-2 material-btn bg-blue-600 text-white flex items-center justify-center gap-2 py-4 shadow-md font-extrabold hover:bg-blue-700 transition-all border border-blue-500"
                   >
-                    <Printer size={20} /> Print Bill
+                    <Printer size={20} /> Print & Auto-Send WhatsApp 🚛
                   </button>
                 </div>
               </div>

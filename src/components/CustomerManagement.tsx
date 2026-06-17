@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { generatePDF } from '../lib/pdfUtils';
 import { printThermalReceipt } from '../lib/printUtils';
+import { openWhatsAppDirect } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { ConfirmationModal } from './ConfirmationModal';
 import { jsPDF } from 'jspdf';
@@ -1251,6 +1252,7 @@ function CustomerHistoryModal({
 
   const handlePrint = async () => {
     if (printRef.current) {
+      const currentBill = selectedBillForPrint;
       try {
         await printThermalReceipt(printRef.current);
         setSelectedBillForPrint(null);
@@ -1264,6 +1266,11 @@ function CustomerHistoryModal({
           console.error("PDF Export Error:", pdfErr?.message || String(pdfErr));
           alert("Failed to print. Try opening the application in a new tab.");
         }
+      }
+
+      // Automatically trigger prefilled WhatsApp to the customer on print click
+      if (currentBill) {
+        openWhatsAppDirect(currentBill);
       }
     }
   };

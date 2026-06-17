@@ -29,9 +29,11 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
   const [longPressTimer, setLongPressTimer] = useState<any | null>(null);
 
   useEffect(() => {
+    const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
+    
     let q = query(collection(db, 'drivers'));
-    if (!isSuperAdmin && franchiseId) {
-      q = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      q = query(collection(db, 'drivers'), where('franchiseId', '==', fid));
     }
     const unsubDrivers = onSnapshot(q, 
       (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
@@ -39,8 +41,8 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
     );
 
     let qAccounts = query(collection(db, 'accounts'));
-    if (!isSuperAdmin && franchiseId) {
-      qAccounts = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      qAccounts = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
     }
     const unsubAccounts = onSnapshot(qAccounts, 
       (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),

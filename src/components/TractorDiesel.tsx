@@ -62,18 +62,20 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
   const [dieselRequests, setDieselRequests] = useState<any[]>([]);
 
   useEffect(() => {
+    const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
+    
     let qTractors = query(collection(db, 'tractors'));
     let qDiesel = query(collection(db, 'dieselLogs'), orderBy('date', 'desc'));
     let qMaint = query(collection(db, 'maintenanceLogs'), orderBy('date', 'desc'));
     let qAccounts = query(collection(db, 'accounts'));
     let qRequests = query(collection(db, 'dieselRequests'));
 
-    if (!isSuperAdmin && franchiseId) {
-      qTractors = query(collection(db, 'tractors'), where('franchiseId', '==', franchiseId));
-      qDiesel = query(collection(db, 'dieselLogs'), where('franchiseId', '==', franchiseId), orderBy('date', 'desc'));
-      qMaint = query(collection(db, 'maintenanceLogs'), where('franchiseId', '==', franchiseId), orderBy('date', 'desc'));
-      qAccounts = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
-      qRequests = query(collection(db, 'dieselRequests'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      qTractors = query(collection(db, 'tractors'), where('franchiseId', '==', fid));
+      qDiesel = query(collection(db, 'dieselLogs'), where('franchiseId', '==', fid), orderBy('date', 'desc'));
+      qMaint = query(collection(db, 'maintenanceLogs'), where('franchiseId', '==', fid), orderBy('date', 'desc'));
+      qAccounts = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
+      qRequests = query(collection(db, 'dieselRequests'), where('franchiseId', '==', fid));
     }
 
     const unsubTractors = onSnapshot(qTractors, 
@@ -90,8 +92,8 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
     );
     const ninetyDaysAgo = subDays(new Date(), 90);
     let qBills = query(collection(db, 'bills'), where('createdAt', '>=', ninetyDaysAgo), orderBy('createdAt', 'desc'));
-    if (!isSuperAdmin && franchiseId) {
-      qBills = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), where('createdAt', '>=', ninetyDaysAgo), orderBy('createdAt', 'desc'));
+    if (fid) {
+      qBills = query(collection(db, 'bills'), where('franchiseId', '==', fid), where('createdAt', '>=', ninetyDaysAgo), orderBy('createdAt', 'desc'));
     }
     const unsubBills = onSnapshot(qBills, 
       (snapshot) => setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bill))),

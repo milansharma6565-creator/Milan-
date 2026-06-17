@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES, getPublicAppUrl } from '../constants';
 import { ThermalInvoice } from './ThermalInvoice';
 import { printThermalReceipt } from '../lib/printUtils';
+import { getWhatsAppBillLink } from '../lib/whatsappUtils';
 import { format } from 'date-fns';
 import { toJpeg } from 'html-to-image';
 import { ledgerAutomation } from '../services/ledgerAutomation';
@@ -290,22 +291,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
   const sendWhatsApp = (bill: any) => {
     if (!selectedCustomer) return;
-    const urlObj = getPublicAppUrl();
-    urlObj.search = ''; // Clear current params
-    urlObj.searchParams.set('o', bill.id);
-    const rebookUrl = urlObj.toString();
-    
-    const message = `*Order Token - TankerWala* 🚛\n\n` +
-      `Token: #${bill.billNumber}\n` +
-      `Amt: ₹${bill.grandTotal}\n` +
-      `Category: ${bill.category}\n` +
-      `Size: ${bill.category === 'TANKER' ? bill.tankerSize : bill.bottleSize || '20L'}\n\n` +
-      `Rebook: ${rebookUrl}\n\n` +
-      `TankerWala Powered by Rajhans`;
-    
-    // Using international format for mobile if needed, but assuming 10 digit Indian number
-    const phone = selectedCustomer.mobile.startsWith('91') ? selectedCustomer.mobile : `91${selectedCustomer.mobile}`;
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    const url = getWhatsAppBillLink(bill, currentFranchise);
     window.open(url, '_blank');
   };
 
@@ -941,11 +927,13 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                         window.print();
                       }
                     }
+                    // Automatically trigger direct prefilled WhatsApp
+                    sendWhatsApp(bookedBill);
                   }}
-                  className="h-16 font-bold text-white bg-blue-600 rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center justify-center gap-3 active:scale-95"
+                  className="h-16 font-extrabold text-white bg-blue-600 rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center justify-center gap-3 active:scale-95"
                 >
                   <Printer size={24} />
-                  Print Bill (Thermal)
+                  Print & Auto-Send WhatsApp 🚛
                 </button>
                 <button 
                   onClick={() => sendWhatsApp(bookedBill)}

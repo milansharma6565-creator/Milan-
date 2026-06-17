@@ -206,9 +206,11 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
   });
 
   useEffect(() => {
+    const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
+
     let fillingsQuery = query(collection(db, 'hydrantFillings'), orderBy('date', 'desc'));
-    if (!isSuperAdmin && franchiseId) {
-      fillingsQuery = query(collection(db, 'hydrantFillings'), where('franchiseId', '==', franchiseId), orderBy('date', 'desc'));
+    if (fid) {
+      fillingsQuery = query(collection(db, 'hydrantFillings'), where('franchiseId', '==', fid), orderBy('date', 'desc'));
     }
     const unsubFillings = onSnapshot(fillingsQuery, 
       (snapshot) => setFillings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HydrantFillingType))),
@@ -216,8 +218,8 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
     );
 
     let accountsQuery = query(collection(db, 'accounts'));
-    if (!isSuperAdmin && franchiseId) {
-      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
     }
     const unsubAcc = onSnapshot(accountsQuery,
       (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
@@ -225,8 +227,8 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
     );
 
     let tractorsQuery = query(collection(db, 'tractors'));
-    if (!isSuperAdmin && franchiseId) {
-      tractorsQuery = query(collection(db, 'tractors'), where('franchiseId', '==', franchiseId));
+    if (fid) {
+      tractorsQuery = query(collection(db, 'tractors'), where('franchiseId', '==', fid));
     }
     const unsubTractors = onSnapshot(tractorsQuery,
       (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
