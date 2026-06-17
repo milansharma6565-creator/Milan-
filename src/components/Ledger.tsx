@@ -391,6 +391,74 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     }
   };
 
+  const handleDeleteVoucher = async (vchId: string) => {
+    if (!window.confirm("Are you sure you want to delete this transaction? This will permanently revert all debit and credit effects of this entry across all accounts.")) return;
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const vchRef = doc(db, 'vouchers', vchId);
+        const vchDoc = await transaction.get(vchRef);
+        if (!vchDoc.exists()) {
+          throw new Error("Transaction entry not found.");
+        }
+        
+        const vchData = vchDoc.data();
+        const items: VoucherItem[] = vchData.items || [];
+
+        // Fetch all unique accounts associated with the voucher items
+        const uniqueAccountIds = Array.from(new Set(items.map(item => item.accountId)));
+        const accDocMap: Record<string, { ref: any, data: any }> = {};
+
+        for (const accId of uniqueAccountIds) {
+          if (!accId) continue;
+          const accRef = doc(db, 'accounts', accId);
+          const accDoc = await transaction.get(accRef);
+          if (accDoc.exists()) {
+            accDocMap[accId] = { ref: accRef, data: accDoc.data() };
+          }
+        }
+
+        // For each item, reverse the impact on the account's currentBalance
+        const balanceUpdates: Record<string, number> = {};
+        for (const item of items) {
+          if (!item.accountId || !accDocMap[item.accountId]) continue;
+          const { data: accData } = accDocMap[item.accountId];
+          
+          if (balanceUpdates[item.accountId] === undefined) {
+            balanceUpdates[item.accountId] = accData.currentBalance || 0;
+          }
+
+          const balanceType = accData.balanceType || 'Dr';
+          
+          // Revert: subtract what was originally added.
+          // Original addition logic was:
+          // if (item.type === 'Dr') newBalance += (accData.balanceType === 'Dr' ? item.amount : -item.amount);
+          // if (item.type === 'Cr') newBalance += (accData.balanceType === 'Cr' ? item.amount : -item.amount);
+          if (item.type === 'Dr') {
+            balanceUpdates[item.accountId] -= (balanceType === 'Dr' ? item.amount : -item.amount);
+          } else {
+            balanceUpdates[item.accountId] -= (balanceType === 'Cr' ? item.amount : -item.amount);
+          }
+        }
+
+        // Update the account documents with the reverted balance
+        for (const [accId, newBal] of Object.entries(balanceUpdates)) {
+          const { ref } = accDocMap[accId];
+          transaction.update(ref, { currentBalance: newBal });
+        }
+
+        // Delete the voucher document
+        transaction.delete(vchRef);
+      });
+
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      alert("✅ Transaction entry deleted successfully!\n\nAll debit and credit effects have been automatically reverted, and corresponding account balances have been updated.");
+    } catch (error: any) {
+      console.error("Error deleting transaction:", error);
+      alert("Failed to delete entry: " + (error?.message || String(error)));
+    }
+  };
+
   // Keyboard shortcut routing logic for Retro Tally HUD
   useEffect(() => {
     if (!tallyMode) return;
@@ -1081,6 +1149,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                           <th className="p-2 border border-[#146067]">Vch No.</th>
                           <th className="p-2 border border-[#146067] text-right">Debit (Dr)</th>
                           <th className="p-2 border border-[#146067] text-right">Credit (Cr)</th>
+                          <th className="p-2 border border-[#146067] text-center">Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1099,6 +1168,18 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                               <td className="p-2 text-[#86cac6]">{v.voucherNumber}</td>
                               <td className="p-2 text-right font-bold text-yellow-200">₹{v.totalAmount.toLocaleString('en-IN')}</td>
                               <td className="p-2 text-right font-bold text-teal-300">₹{v.totalAmount.toLocaleString('en-IN')}</td>
+                              <td className="p-2 text-center border border-[#146067]">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteVoucher(v.id);
+                                  }}
+                                  className="text-red-400 bg-red-950/20 hover:bg-red-900 hover:text-white px-2 py-0.5 border border-red-900/50 rounded font-mono text-[10px] cursor-pointer"
+                                  title="Delete Entry"
+                                >
+                                  [Del]
+                                </button>
+                              </td>
                             </tr>
                           );
                         })}
@@ -1413,9 +1494,9 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
       {/* Main Content Area */}
       <div className="min-h-[400px]">
-        {activeTab === 'daybook' && <Daybook vouchers={vouchers} onAddVoucher={() => setIsAddingVoucher(true)} />}
+        {activeTab === 'daybook' && <Daybook vouchers={vouchers} onAddVoucher={() => setIsAddingVoucher(true)} onDeleteVoucher={handleDeleteVoucher} />}
         {activeTab === 'vouchers' && <VoucherManager vouchers={vouchers} onAdd={() => setIsAddingVoucher(true)} />}
-        {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} />}
+        {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} onDeleteVoucher={handleDeleteVoucher} />}
         {activeTab === 'reports' && <FinancialReports accounts={accounts} vouchers={vouchers} groups={groups} />}
         {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} onAddAccount={() => setIsAddingAccount(true)} />}
       </div>
@@ -1460,7 +1541,7 @@ function AccountingTabButton({ active, onClick, icon, label }: { active: boolean
 // --- SUB COMPONENTS ---
 
 /** Daybook View */
-function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher: () => void }) {
+function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Voucher[], onAddVoucher: () => void, onDeleteVoucher: (id: string) => Promise<void> }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState<'All' | 'Today' | 'Custom'>('Today');
   const [customDate, setCustomDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -1589,7 +1670,8 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
               <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vch No.</th>
               <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type</th>
               <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Particulars</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right pr-8">Amount</th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Amount</th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest pr-8 text-center print:hidden">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
@@ -1624,8 +1706,20 @@ function Daybook({ vouchers, onAddVoucher }: { vouchers: Voucher[], onAddVoucher
                     <p className="text-[10px] text-slate-400 font-medium truncate">{v.narration}</p>
                   </div>
                 </td>
-                <td className="p-4 pr-8 text-right">
+                <td className="p-4 text-right">
                   <p className="text-sm font-display font-black text-slate-900">{formatCurrency(v.totalAmount)}</p>
+                </td>
+                <td className="p-4 pr-8 text-center print:hidden">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteVoucher(v.id);
+                    }}
+                    className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                    title="Delete Transaction Entry"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -2055,7 +2149,7 @@ function AccountEntryModal({ onClose, groups, franchiseId }: { onClose: () => vo
 }
 
 /** Ledger Statements View */
-function LedgerStatements({ accounts, vouchers }: { accounts: Account[], vouchers: Voucher[] }) {
+function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: Account[], vouchers: Voucher[], onDeleteVoucher: (id: string) => Promise<void> }) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [hiddenRows, setHiddenRows] = useState<Set<number>>(new Set());
@@ -2251,7 +2345,8 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
                     <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Particulars</th>
                     <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Debit</th>
                     <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Credit</th>
-                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right pr-8">Balance</th>
+                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Balance</th>
+                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center pr-8 print:hidden">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -2277,8 +2372,24 @@ function LedgerStatements({ accounts, vouchers }: { accounts: Account[], voucher
                       <td className="p-4 text-right text-sm font-bold text-amber-600">
                         {row.cr > 0 ? formatCurrency(row.cr) : ''}
                       </td>
-                      <td className="p-4 pr-8 text-right font-display font-black text-slate-900">
+                      <td className="p-4 text-right font-display font-black text-slate-900">
                         {formatCurrency(row.balance)} <span className="text-[10px] font-black">{row.balType}</span>
+                      </td>
+                      <td className="p-4 pr-8 text-center print:hidden">
+                        {row.id !== 'OP' ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteVoucher(row.id);
+                            }}
+                            className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Transaction Entry"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-300 font-bold font-mono">-</span>
+                        )}
                       </td>
                     </tr>
                   ))}
