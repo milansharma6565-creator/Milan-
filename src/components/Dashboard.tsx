@@ -898,6 +898,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [editingBill, setEditingBill] = React.useState<any>(null);
   const [chatBill, setChatBill] = React.useState<any>(null);
   const [showPaymentSelection, setShowPaymentSelection] = React.useState(false);
+  const [promptSettleMode, setPromptSettleMode] = React.useState<'UPI' | 'Bank' | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, number: string } | null>(null);
 
   const [isWiping, setIsWiping] = useState(false);
@@ -1194,7 +1195,21 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
   const [isSettling, setIsSettling] = useState<string | null>(null);
 
-  const handleSettleOrder = async (mode: 'Cash' | 'UPI' | 'Credit' | 'Bank') => {
+  const triggerSettleSettleButton = (mode: 'Cash' | 'UPI' | 'Credit' | 'Bank') => {
+    const bankAccs = accounts.filter(a => 
+      a.name.toLowerCase().includes('bank') || 
+      a.name.toLowerCase().includes('baroda') || 
+      a.name.toLowerCase().includes('sbi') || 
+      a.name.toLowerCase().includes('hdfc')
+    );
+    if ((mode === 'UPI' || mode === 'Bank') && bankAccs.length > 0) {
+      setPromptSettleMode(mode);
+    } else {
+      handleSettleOrder(mode);
+    }
+  };
+
+  const handleSettleOrder = async (mode: 'Cash' | 'UPI' | 'Credit' | 'Bank', targetBankAccountId?: string) => {
     if (!editingBill?.id || isSettling) return;
 
     setIsSettling(mode);
@@ -1204,10 +1219,15 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     try {
       // 1. Fetch required data outside transaction including fallback franchise & loyalty ledger details
       const franchiseIdForBill = editingBill.franchiseId || 'legacy-rajhans';
+      
+      const bankQueryPromise = targetBankAccountId
+        ? getDoc(doc(db, 'accounts', targetBankAccountId))
+        : getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill)));
+
       const [
         incomeSnap,
         cashSnap,
-        bankSnap,
+        bankQueryResult,
         debtorsGroupSnap,
         customerSnap,
         assetsGroupSnap,
@@ -1219,7 +1239,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       ] = await Promise.all([
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
+        bankQueryPromise,
         getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Sundry Debtors'), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'), where('franchiseId', '==', franchiseIdForBill))),
@@ -1232,7 +1252,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
       let incomeAccId = incomeSnap.docs[0]?.id;
       let cashAccId = cashSnap.docs[0]?.id;
-      let bankAccId = bankSnap.docs[0]?.id;
+      
+      let bankAccId = targetBankAccountId;
+      if (!bankAccId) {
+        bankAccId = (bankQueryResult as any).docs ? (bankQueryResult as any).docs[0]?.id : (bankQueryResult as any).id;
+      }
       let debtorsGroupId = debtorsGroupSnap.docs[0]?.id;
       let customerAccId = customerSnap.docs[0]?.id;
       let assetsGroupId = assetsGroupSnap.docs[0]?.id;
@@ -2444,68 +2468,38 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           </motion.div>
         )}
 
-        {/* Consolidated Bank Card */}
-        {(() => {
-          const firstAvailableBankAcc = accounts.find(a => a.name === 'BARODA129') 
-            || accounts.find(a => a.name === 'Bank Account') 
-            || accounts.find(a => a.name === 'BARODA934')
-            || accounts.find(a => a.name.toLowerCase().includes('bank'));
-          const defaultBankAccName = firstAvailableBankAcc ? firstAvailableBankAcc.name : 'Bank Account';
-          
-          const baroda129Bal = accounts.find(a => a.name === 'BARODA129')?.currentBalance || 0;
-          const baroda934Bal = accounts.find(a => a.name === 'BARODA934')?.currentBalance || 0;
-          const generalBankBal = accounts.find(a => a.name === 'Bank Account')?.currentBalance || 0;
-          const totalBankBalance = baroda129Bal + baroda934Bal + generalBankBal;
-
+        {/* Individual Bank Cards */}
+        {accounts.filter(a => 
+          a.name.toLowerCase().includes('bank') || 
+          a.name.toLowerCase().includes('baroda') || 
+          a.name.toLowerCase().includes('sbi') || 
+          a.name.toLowerCase().includes('hdfc')
+        ).map((bankAcc, index) => {
+          const bankName = bankAcc.name;
+          const bankBalance = bankAcc.currentBalance || 0;
           return (
             <motion.div 
+              key={`bank-card-${bankAcc.id}`}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               whileHover={{ y: -6, scale: 1.02 }}
-              transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 }}
+              transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 + (index * 0.05) }}
               className="bg-white p-6 rounded-[2.5rem] border-t border-x border-indigo-50 border-b-[8px] border-b-indigo-200/50 shadow-[0_20px_40px_rgba(99,102,241,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative"
               style={{
                 background: "linear-gradient(135deg, #ffffff 0%, #fbfbfe 100%)"
               }}
             >
               <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
-                 {(() => {
-                   const hour = new Date().getHours();
-                   const theme = hour % 3;
-                   if (theme === 0) {
-                     return [...Array(15)].map((_, i) => (
-                       <motion.div
-                         key={`bank1-dots-${i}`}
-                         initial={{ scale: 0, opacity: 0 }}
-                         animate={{ scale: [0, 1.5, 0], opacity: [0, 1, 0] }}
-                         transition={{ duration: 2, repeat: Infinity, delay: Math.random() * 5 }}
-                         className="absolute w-2 h-2 bg-blue-600 rounded-full"
-                         style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
-                       />
-                     ));
-                   } else if (theme === 1) {
-                     return [...Array(10)].map((_, i) => (
-                       <motion.div
-                         key={`bank1-rings-${i}`}
-                         initial={{ scale: 0.5, opacity: 0.8 }}
-                         animate={{ scale: 3, opacity: 0 }}
-                         transition={{ duration: 3, repeat: Infinity, delay: i * 0.5 }}
-                         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-2 border-blue-400 rounded-full"
-                       />
-                     ));
-                   } else {
-                     return [...Array(12)].map((_, i) => (
-                       <motion.div
-                         key={`bank1-bars-${i}`}
-                         initial={{ height: 0 }}
-                         animate={{ height: [10, 40, 10] }}
-                         transition={{ duration: 1, repeat: Infinity, delay: Math.random() }}
-                         className="absolute bottom-0 w-2 bg-blue-400/40 rounded-t"
-                         style={{ left: `${i * 8 + 5}%` }}
-                       />
-                     ));
-                   }
-                 })()}
+                {[...Array(10)].map((_, i) => (
+                  <motion.div
+                    key={`bank-dots-${bankAcc.id}-${i}`}
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: [0, 1.5, 0], opacity: [0, 1, 0] }}
+                    transition={{ duration: 2, repeat: Infinity, delay: Math.random() * 5 }}
+                    className="absolute w-2 h-2 bg-blue-600 rounded-full"
+                    style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
+                  />
+                ))}
               </div>
 
               <div className="relative z-10">
@@ -2513,16 +2507,22 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                   <Smartphone size={20} />
                 </div>
                 <div className="flex items-center justify-between mb-1">
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Consolidated Bank Account</div>
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate max-w-[150px]" title={bankName}>{bankName}</div>
                   <div className="flex gap-1">
                     <button 
-                      onClick={() => setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: defaultBankAccName })}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: bankName });
+                      }}
                       className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
                     >
                       <Plus size={16} />
                     </button>
                     <button 
-                      onClick={() => setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: defaultBankAccName })}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: bankName });
+                      }}
                       className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
                     >
                       <Minus size={16} />
@@ -2531,12 +2531,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 </div>
                 <div className="text-3xl font-display font-black text-slate-900 flex items-baseline">
                   <span className="text-xl mr-1 text-blue-600">₹</span>
-                  {formatCurrency(totalBankBalance).replace('₹', '')}
+                  {formatCurrency(bankBalance).replace('₹', '')}
                 </div>
               </div>
             </motion.div>
           );
-        })()}
+        })}
       </div>
 
       {/* Automation Desk */}
@@ -3325,7 +3325,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 </button>
 
                 <button 
-                  onClick={() => handleSettleOrder('UPI')}
+                  onClick={() => triggerSettleSettleButton('UPI')}
                   disabled={isSettling !== null}
                   className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all group overflow-hidden relative ${
                     isSettling === 'UPI' ? 'border-blue-600 bg-blue-50' : 
@@ -3362,7 +3362,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     <History size={24} />
                   </div>
                   <div className="flex-1">
-                    <div className="font-bold text-slate-900">Credit (Udhaar)</div>
+                    <div className="font-bold text-slate-900">Debit udhar</div>
                     <div className="text-[10px] text-slate-400 font-bold uppercase">Added to Customer Due Account</div>
                   </div>
                   {isSettling === 'Credit' && (
@@ -3403,6 +3403,66 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 className="w-full mt-6 py-4 text-slate-400 font-bold hover:text-slate-600 transition-colors"
               >
                 Back
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {promptSettleMode && editingBill && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[95] flex items-center justify-center p-6">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative border border-slate-100"
+            >
+              <button 
+                onClick={() => setPromptSettleMode(null)}
+                className="absolute top-6 right-6 w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 cursor-pointer transition-all"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="text-center mb-6">
+                <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                  <Banknote size={28} />
+                </div>
+                <h3 className="text-xl font-display font-black text-slate-900">Select Deposit Bank</h3>
+                <p className="text-xs text-slate-400 font-mono mt-1 uppercase tracking-widest">{promptSettleMode} Mode - #{editingBill.billNumber}</p>
+                <p className="text-lg font-black text-slate-800 mt-2">{formatCurrency(editingBill.grandTotal)}</p>
+              </div>
+
+              <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                {accounts.filter(a => 
+                  a.name.toLowerCase().includes('bank') || 
+                  a.name.toLowerCase().includes('baroda') || 
+                  a.name.toLowerCase().includes('sbi') || 
+                  a.name.toLowerCase().includes('hdfc')
+                ).map((bank) => (
+                  <button
+                    key={bank.id}
+                    onClick={() => {
+                      handleSettleOrder(promptSettleMode, bank.id);
+                      setPromptSettleMode(null);
+                    }}
+                    className="w-full text-left p-4 rounded-2xl border border-slate-100 hover:border-indigo-500 hover:bg-indigo-50/20 active:scale-[0.98] transition-all flex justify-between items-center group cursor-pointer"
+                  >
+                    <div>
+                      <div className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{bank.name}</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Bal: {formatCurrency(bank.currentBalance || 0)}</div>
+                    </div>
+                    <ChevronRight size={16} className="text-slate-300 group-hover:text-indigo-500 transition-colors" />
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setPromptSettleMode(null)}
+                className="w-full mt-5 py-3.5 bg-slate-100 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-200 transition-all uppercase tracking-widest cursor-pointer"
+              >
+                Cancel
               </button>
             </motion.div>
           </div>
@@ -3467,7 +3527,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                           <span className="text-[10px] uppercase">Cash</span>
                         </button>
                         <button 
-                          onClick={() => handleSettleOrder('UPI')}
+                          onClick={() => triggerSettleSettleButton('UPI')}
                           disabled={isSettling !== null}
                           className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-blue-500 hover:text-blue-600 transition-all shadow-sm"
                         >
@@ -3477,7 +3537,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <button 
-                          onClick={() => handleSettleOrder('Bank')}
+                          onClick={() => triggerSettleSettleButton('Bank')}
                           disabled={isSettling !== null}
                           className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-indigo-500 hover:text-indigo-600 transition-all shadow-sm"
                         >
@@ -3490,7 +3550,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                           className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-orange-500 hover:text-orange-600 transition-all shadow-sm"
                         >
                           <Plus size={20} />
-                          <span className="text-[10px] uppercase">Udhaar</span>
+                          <span className="text-[10px] uppercase">Debit udhar</span>
                         </button>
                       </div>
                     </div>

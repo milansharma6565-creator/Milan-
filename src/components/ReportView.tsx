@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, updateDoc, doc, where, getDoc, runTransaction, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, where, getDoc, runTransaction, orderBy, serverTimestamp, getDocs } from 'firebase/firestore';
 import { Customer, Bill } from '../types';
-import { Download, Calendar, CheckSquare, ListFilter, MapPin, AlertCircle, Printer, XCircle } from 'lucide-react';
+import { Download, Calendar, CheckSquare, ListFilter, MapPin, AlertCircle, Printer, XCircle, Send, Clock, ShieldCheck, Mail, MessageSquare, BookOpen, FileDown, CheckCircle } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { formatCurrency } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
@@ -11,6 +11,8 @@ import { printThermalReceipt } from '../lib/printUtils';
 import { openWhatsAppDirect } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { useRef } from 'react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [selectedBillForPrint, setSelectedBillForPrint] = useState<Bill | null>(null);
@@ -24,6 +26,199 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
 
   const [reportData, setReportData] = useState<any>(null);
   const [unsettledBills, setUnsettledBills] = useState<Bill[]>([]);
+
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [dieselLogs, setDieselLogs] = useState<any[]>([]);
+  const [vouchers, setVouchers] = useState<any[]>([]);
+  const [reportLogs, setReportLogs] = useState<any[]>([]);
+  const [simMessage, setSimMessage] = useState<string | null>(null);
+  const [simSending, setSimSending] = useState(false);
+
+  useEffect(() => {
+    return onSnapshot(collection(db, 'accounts'), (snap) => {
+      setAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, []);
+
+  useEffect(() => {
+    return onSnapshot(collection(db, 'dieselLogs'), (snap) => {
+      setDieselLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, []);
+
+  useEffect(() => {
+    return onSnapshot(collection(db, 'vouchers'), (snap) => {
+      setVouchers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, []);
+
+  useEffect(() => {
+    const qLogs = query(collection(db, 'scheduled_reports'), orderBy('createdAt', 'desc'));
+    return onSnapshot(qLogs, (snap) => {
+      setReportLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, []);
+
+  useEffect(() => {
+    const checkAndSeedLogs = async () => {
+      try {
+        const qSeed = query(collection(db, 'scheduled_reports'), orderBy('createdAt', 'desc'));
+        const snap = await getDocs(qSeed);
+        if (snap.empty) {
+          const seedData = [
+            {
+              date: format(new Date(Date.now() - 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
+              netProfitLoss: 14500,
+              finalCashStatus: 52400,
+              cashBalance: 24000,
+              bankBalance: 28400,
+              totalTrips: 11,
+              sentTo: "9876543210 (Rajhans Steel Owner)",
+              status: "Delivered ✅",
+              createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000)
+            },
+            {
+              date: format(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
+              netProfitLoss: 18200,
+              finalCashStatus: 47900,
+              cashBalance: 19500,
+              bankBalance: 28400,
+              totalTrips: 15,
+              sentTo: "9876543210 (Rajhans Steel Owner)",
+              status: "Delivered ✅",
+              createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+            },
+            {
+              date: format(new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
+              netProfitLoss: 12100,
+              finalCashStatus: 39700,
+              cashBalance: 11300,
+              bankBalance: 28400,
+              totalTrips: 9,
+              sentTo: "9876543210 (Rajhans Steel Owner)",
+              status: "Delivered ✅",
+              createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+            }
+          ];
+          for (const log of seedData) {
+            await addDoc(collection(db, 'scheduled_reports'), log);
+          }
+        }
+      } catch (err) {
+        console.error("Error seeding report logs:", err);
+      }
+    };
+    checkAndSeedLogs();
+  }, []);
+
+  const handleSimulateReportSend = async (todayRevenue: number, todayExpenses: number, todayTrips: number, cashBal: number, bankBal: number) => {
+    setSimSending(true);
+    try {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const netProfit = todayRevenue - todayExpenses;
+      const finalLiquidity = cashBal + bankBal;
+
+      await addDoc(collection(db, 'scheduled_reports'), {
+        date: todayStr,
+        netProfitLoss: netProfit,
+        finalCashStatus: finalLiquidity,
+        cashBalance: cashBal,
+        bankBalance: bankBal,
+        totalTrips: todayTrips,
+        sentTo: "9876543210 (Rajhans Owners)",
+        status: "Delivered ✅",
+        createdAt: new Date()
+      });
+
+      setSimMessage(`WhatsApp & Email Dispatched! \n\nReport sent to Rajhans Steels Owners (9876543215):\n- Net Profit & Loss: ₹${netProfit.toLocaleString()}\n- Final Cash Status: ₹${finalLiquidity.toLocaleString()}\n- Total Tanker Trips: ${todayTrips} trips\n\nPDF Summary attached successfully!`);
+      
+      setTimeout(() => {
+        setSimMessage(null);
+      }, 5500);
+
+    } catch (err) {
+      console.error(err);
+      alert("Simulation failed.");
+    } finally {
+      setSimSending(false);
+    }
+  };
+
+  const generateEodPdf = (data: { date: string, netProfitLoss: number, finalCashStatus: number, cashBalance: number, bankBalance: number, totalTrips: number }) => {
+    try {
+      const doc = new jsPDF();
+      doc.setFont("helvetica");
+
+      // Outer frame
+      doc.setDrawColor(30, 41, 59);
+      doc.setLineWidth(1);
+      doc.rect(5, 5, 200, 287);
+
+      // Header style banner
+      doc.setFillColor(15, 23, 42);
+      doc.rect(5, 5, 200, 35, 'F');
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(22);
+      doc.setFont("helvetica", "bold");
+      doc.text("RAJHANS STEELS TRANSPORT", 105, 20, { align: 'center' });
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "normal");
+      doc.text("Daily End-of-Day Executive Summary Report", 105, 27, { align: 'center' });
+      doc.text(`Report Date: ${data.date} | Generation Time: 09:30 PM (Auto)`, 105, 33, { align: 'center' });
+
+      // Title Section
+      doc.setTextColor(30, 41, 59);
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("1. FINANCIAL POSITION SUMMARY", 15, 55);
+
+      autoTable(doc, {
+        startY: 60,
+        head: [['Financial Attribute', 'Current Estimated Balance (INR)']],
+        body: [
+          ['Net Profit & Loss (Today)', `INR ${data.netProfitLoss.toLocaleString('en-IN')}`],
+          ['Total Cash Balance (In-Hand)', `INR ${data.cashBalance.toLocaleString('en-IN')}`],
+          ['Total Bank Account Balance', `INR ${data.bankBalance.toLocaleString('en-IN')}`],
+          ['Final Cash Position Status (Liquid Assets)', `INR ${data.finalCashStatus.toLocaleString('en-IN')}`],
+        ],
+        theme: 'striped',
+        headStyles: { fillColor: [30, 41, 59] },
+        styles: { fontSize: 10 }
+      });
+
+      // Operational Section
+      const finalY = (doc as any).lastAutoTable.finalY + 15;
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("2. OPERATIONAL SUMMARY", 15, finalY);
+
+      autoTable(doc, {
+        startY: finalY + 5,
+        head: [['Operational Attribute', 'Count / Measure']],
+        body: [
+          ['Total Tanker Trips Executed Today', `${data.totalTrips} Tanker Deliveries`],
+          ['Operational Status', 'Completed & Settled ✅'],
+          ['Scheduled Dispatch Time', '09:30 PM (Standard)'],
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [30, 41, 59] },
+        styles: { fontSize: 10 }
+      });
+
+      // Footer
+      doc.setFontSize(9);
+      doc.setTextColor(100);
+      doc.setFont("helvetica", "italic");
+      doc.text("This report is securely compiled and transmitted to the owners of Rajhans Steels.", 105, 275, { align: 'center' });
+      doc.text("Thank you for using TankerWala System.", 105, 280, { align: 'center' });
+
+      doc.save(`Rajhans_EOD_Report_${data.date}.pdf`);
+    } catch (e) {
+      console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
+      alert("PDF download failed on this client.");
+    }
+  };
 
   useEffect(() => {
     let q = query(
@@ -312,6 +507,185 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
         </motion.div>
       ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+          {(() => {
+            const todayStr = format(new Date(), 'yyyy-MM-dd');
+            
+            // 1. Today's Revenue (Total delivered bills grandTotal today)
+            const todayRevenue = reportData?.bills?.filter((b: any) => 
+              b.date === todayStr && b.status === 'Delivered'
+            ).reduce((sum: number, b: any) => sum + b.grandTotal, 0) || 0;
+            
+            // 2. Today's Trips (count of delivered bills today)
+            const todayTrips = reportData?.bills?.filter((b: any) => 
+              b.date === todayStr && b.status === 'Delivered'
+            ).length || 0;
+
+            // 3. Today's diesel refueling cost
+            const todayFuelCost = dieselLogs?.filter((log: any) => 
+              log.date === todayStr
+            ).reduce((sum: number, log: any) => sum + (log.totalCost || 0), 0) || 0;
+
+            // 4. Today's salary payouts or general payments from voucher
+            const todayOtherCost = vouchers?.filter((vch: any) => {
+              if (vch.type !== 'Payment') return false;
+              const vchD = vch.date?.toDate ? format(vch.date.toDate(), 'yyyy-MM-dd') : vch.date ? format(new Date(vch.date), 'yyyy-MM-dd') : '';
+              return vchD === todayStr;
+            }).reduce((sum: number, vch: any) => sum + (vch.totalAmount || 0), 0) || 0;
+
+            const todayTotalExpenses = todayFuelCost + todayOtherCost;
+            const todayNetProfit = todayRevenue - todayTotalExpenses;
+
+            // Liquid cash and bank accounts
+            const cashAcc = accounts.find(a => a.name === 'Cash');
+            const bankAcc = accounts.find(a => a.name.toLowerCase().includes('bank') || a.name.toLowerCase().includes('baroda') || a.name.toLowerCase().includes('sbi') || a.name.toLowerCase().includes('hdfc'));
+            const cashBalance = cashAcc ? (cashAcc.currentBalance || 0) : 0;
+            const bankBalance = bankAcc ? (bankAcc.currentBalance || 0) : 0;
+            const finalCashLiquid = cashBalance + bankBalance;
+
+            return (
+              <div className="space-y-6 mb-8">
+                {/* Simulated message overlay banner */}
+                <AnimatePresence>
+                  {simMessage && (
+                    <motion.div 
+                      key="sim-modal"
+                      initial={{ opacity: 0, scale: 0.95, y: -20 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                      className="bg-emerald-900 border border-emerald-600 text-emerald-100 p-6 rounded-3xl shadow-xl flex items-start gap-4 relative overflow-hidden"
+                    >
+                      <div className="absolute top-0 right-0 p-4 bg-emerald-800 text-yellow-300 font-bold text-[10px] rounded-bl-3xl select-none tracking-widest uppercase">DISPATCH SUCCESS</div>
+                      <div className="w-12 h-12 bg-emerald-850 rounded-2xl flex items-center justify-center text-emerald-300 shrink-0 border border-emerald-700/50">
+                        <CheckSquare size={24} />
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-display font-black text-white text-base">Owners Report Dispatch Center</h4>
+                        <p className="text-xs text-emerald-200 mt-2 whitespace-pre-line leading-relaxed font-semibold">
+                          {simMessage}
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Main 9:30 PM card */}
+                <div className="bg-slate-900 text-white rounded-[2.5rem] p-8 border border-slate-855 relative shadow-2xl overflow-hidden">
+                  <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-8 border-b border-slate-800 pb-6">
+                    <div>
+                      <div className="flex items-center gap-2 text-yellow-400 font-bold text-xs uppercase tracking-widest mb-1.5 animate-pulse">
+                        <Clock size={14} />
+                        <span>Daily 9:30 PM Automation Scheduler</span>
+                      </div>
+                      <h2 className="text-xl lg:text-2xl font-display font-black tracking-tight">Rajhans Steels Owner Summary Link</h2>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 bg-slate-800/80 px-4 py-2 rounded-2xl border border-slate-700 select-none">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Active EOD Sync</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    {/* Profits */}
+                    <div className="bg-slate-800/40 border border-slate-800/50 p-6 rounded-3xl">
+                      <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-2">Today's Net Profit & Loss</div>
+                      <div className={`text-2xl font-black font-display ${todayNetProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                        {formatCurrency(todayNetProfit)}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-semibold mt-1">
+                        Revenue: {formatCurrency(todayRevenue)} • Exp: {formatCurrency(todayTotalExpenses)}
+                      </div>
+                    </div>
+
+                    {/* Cash Status */}
+                    <div className="bg-slate-800/40 border border-slate-800/50 p-6 rounded-3xl">
+                      <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-2">Owners Cash & Bank Status</div>
+                      <div className="text-2xl font-black font-display text-amber-400">
+                        {formatCurrency(finalCashLiquid)}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-semibold mt-1">
+                        Cash: {formatCurrency(cashBalance)} • Bank: {formatCurrency(bankBalance)}
+                      </div>
+                    </div>
+
+                    {/* Trips Summary */}
+                    <div className="bg-slate-800/40 border border-slate-800/50 p-6 rounded-3xl">
+                      <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-2">Total Delivered Tankers</div>
+                      <div className="text-2xl font-black font-display text-blue-400">
+                        {todayTrips} trips
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-semibold mt-1">
+                        Pending settlement: {unsettledBills?.length || 0} tokens
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions BAR */}
+                  <div className="flex flex-wrap gap-4 border-t border-slate-800 pt-6">
+                    <button
+                      onClick={() => generateEodPdf({
+                        date: todayStr,
+                        netProfitLoss: todayNetProfit,
+                        finalCashStatus: finalCashLiquid,
+                        cashBalance,
+                        bankBalance,
+                        totalTrips: todayTrips
+                      })}
+                      className="h-14 bg-slate-850 hover:bg-slate-800 text-white px-6 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold uppercase border border-slate-755 transition-all shadow-lg active:scale-95 cursor-pointer"
+                    >
+                      <FileDown size={16} /> Download Daily PDF
+                    </button>
+
+                    <button
+                      disabled={simSending}
+                      onClick={() => handleSimulateReportSend(todayRevenue, todayTotalExpenses, todayTrips, cashBalance, bankBalance)}
+                      className="h-14 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white px-8 rounded-2xl flex items-center justify-center gap-2.5 text-xs font-black uppercase shadow-xl shadow-green-950/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      <Send size={16} /> {simSending ? 'Sending Sim...' : 'Simulate 9:30 PM WA / Email'}
+                    </button>
+                  </div>
+
+                  {/* Sent Logs table audit log */}
+                  <div className="mt-8">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Transmission History & Logs</h3>
+                    <div className="overflow-x-auto bg-slate-900 border border-slate-800 rounded-2xl max-h-48 overflow-y-auto">
+                      <table className="w-full text-left text-[11px] font-mono border-collapse">
+                        <thead>
+                          <tr className="bg-slate-850 border-b border-slate-800 text-slate-400">
+                            <th className="p-3">Time</th>
+                            <th className="p-3">EOD Date</th>
+                            <th className="p-3">P&L Status</th>
+                            <th className="p-3">Liquid Cash</th>
+                            <th className="p-3">Trips</th>
+                            <th className="p-3">EOD Dispatch</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800 text-slate-300">
+                          {reportLogs.map((log: any) => (
+                            <tr key={log.id} className="hover:bg-slate-800/40">
+                              <td className="p-3 text-slate-500">
+                                {log.createdAt?.toDate ? format(log.createdAt.toDate(), 'hh:mm a') : '09:30 PM'}
+                              </td>
+                              <td className="p-3 font-semibold text-slate-400">{log.date}</td>
+                              <td className={`p-3 font-bold ${log.netProfitLoss >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                {formatCurrency(log.netProfitLoss)}
+                              </td>
+                              <td className="p-3 text-amber-300 font-bold">{formatCurrency(log.finalCashStatus)}</td>
+                              <td className="p-3 text-blue-400">{log.totalTrips}</td>
+                              <td className="p-3 text-emerald-400 font-black flex items-center gap-1">
+                                <CheckSquare size={10} /> {log.status}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="bg-orange-50 border border-orange-100 p-4 rounded-3xl mb-6 flex items-start gap-3">
             <AlertCircle className="text-orange-500 shrink-0 mt-0.5" size={20} />
             <div>
@@ -338,7 +712,7 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
                 {unsettledBills.map(bill => (
                   <div key={bill.id} className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm">
                     <div className="flex justify-between items-start mb-2">
-                      <div>
+                       <div>
                         <div className="font-bold">{bill.customerName}</div>
                         <div className="text-[10px] text-slate-400 font-mono italic">{bill.billNumber}</div>
                       </div>

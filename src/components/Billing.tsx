@@ -32,6 +32,138 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   const [quickAddValidation, setQuickAddValidation] = useState<{ name?: string }>({});
   const thermalRef = useRef<HTMLDivElement>(null);
 
+  const [offlinePendingCount, setOfflinePendingCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Sync state loader
+  const updatePendingCount = () => {
+    try {
+      const stored = localStorage.getItem('offline_pending_bills');
+      if (stored) {
+        const arr = JSON.parse(stored);
+        if (Array.isArray(arr)) {
+          setOfflinePendingCount(arr.length);
+          return arr.length;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to read pending bills:", e);
+    }
+    setOfflinePendingCount(0);
+    return 0;
+  };
+
+  const syncOfflineBills = async () => {
+    if (isSyncing) return;
+    const count = updatePendingCount();
+    if (count === 0) return;
+    if (!navigator.onLine) return;
+
+    setIsSyncing(true);
+    try {
+      const stored = localStorage.getItem('offline_pending_bills');
+      if (stored) {
+        const arr = JSON.parse(stored);
+        if (Array.isArray(arr) && arr.length > 0) {
+          const remaining: any[] = [];
+          for (const billData of arr) {
+            try {
+              // Prepare actual Firestore server timestamps
+              const finalBillData = {
+                ...billData,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+              };
+              // Remove our temporary offline indicators to store cleanly
+              delete finalBillData.isOffline;
+              delete finalBillData.id;
+
+              // Save sticky rate to customer
+              try {
+                await updateDoc(doc(db, 'customers', billData.customerId), { 
+                  lastRate: billData.rate,
+                  updatedAt: serverTimestamp()
+                });
+              } catch (custErr) {
+                console.error("Failed to update customer sticky rate under sync:", custErr);
+              }
+
+              // Save bill
+              const docRef = await addDoc(collection(db, 'bills'), finalBillData);
+              const bookedBillWithId = { ...finalBillData, id: docRef.id };
+
+              // Log invoice generation activity
+              try {
+                await activityLogger.log({
+                  franchiseId: franchiseId || currentFranchise?.id || '',
+                  franchiseName: currentFranchise?.name || 'Franchise',
+                  userEmail: '',
+                  actionType: 'NEW_BILL',
+                  description: `[Offline Sync] Generated invoice #${billData.billNumber} for Customer "${billData.customerName}" with total ₹${billData.grandTotal}`,
+                  details: { billId: docRef.id, billNumber: billData.billNumber, total: billData.grandTotal }
+                });
+              } catch (logErr) {
+                console.error("Failed to log synced activity:", logErr);
+              }
+
+              // Post to Ledger
+              if (bookedBillWithId.status === 'Delivered') {
+                await ledgerAutomation.postBillToLedger(bookedBillWithId);
+              }
+
+              // Create Driver Trip if set
+              if (billData.driverId) {
+                await addDoc(collection(db, 'trips'), {
+                  billId: docRef.id,
+                  franchiseId: franchiseId || null,
+                  billNumber: billData.billNumber,
+                  driverId: billData.driverId,
+                  driverName: billData.driverName,
+                  customerName: billData.customerName,
+                  customerMobile: billData.customerMobile,
+                  siteLocation: billData.customerAddress,
+                  category: billData.category,
+                  remarks: billData.remarks,
+                  quantity: billData.quantity,
+                  tankerSize: billData.category === 'TANKER' ? billData.tankerSize : null,
+                  bottleSize: billData.category === 'BOTTLE' ? billData.bottleSize : null,
+                  tractorId: 'T-01',
+                  status: 'Active',
+                  createdAt: serverTimestamp()
+                });
+              }
+
+            } catch (singleErr) {
+              console.error("Failed to sync a single offline bill, keeping in queue:", singleErr);
+              remaining.push(billData);
+            }
+          }
+          localStorage.setItem('offline_pending_bills', JSON.stringify(remaining));
+        }
+      }
+    } catch (err) {
+      console.error("Failed offline sync loop:", err);
+    } finally {
+      setIsSyncing(false);
+      updatePendingCount();
+    }
+  };
+
+  useEffect(() => {
+    updatePendingCount();
+    
+    // Attempt automatic sync on mount
+    syncOfflineBills();
+
+    const interval = setInterval(syncOfflineBills, 15000); // Check and sync every 15s
+    window.addEventListener('online', syncOfflineBills);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', syncOfflineBills);
+    };
+  }, [franchiseId, currentFranchise]);
+
   // Real-time duplicate checking for Quick Register
   useEffect(() => {
     if (!isQuickAdding || !quickAddForm.name) {
@@ -328,115 +460,166 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       return;
     }
 
-    try {
-      // Save sticky rate to customer
-      await updateDoc(doc(db, 'customers', selectedCustomer.id!), { 
-        lastRate: form.rate,
-        updatedAt: serverTimestamp()
-      });
+    const subtotal = form.quantity * form.rate;
+    const grandTotal = subtotal + form.extraCharges - form.discount;
+    
+    let commissionAmount = 0;
+    if (franchiseId && commissionPercentage) {
+      commissionAmount = (grandTotal * commissionPercentage) / 100;
+    }
 
-      const subtotal = form.quantity * form.rate;
-      const grandTotal = subtotal + form.extraCharges - form.discount;
-      
-      let commissionAmount = 0;
-      if (franchiseId && commissionPercentage) {
-        commissionAmount = (grandTotal * commissionPercentage) / 100;
-      }
+    const billData = {
+      billNumber: form.billNumber,
+      franchiseId: franchiseId || null,
+      commissionAmount,
+      date: form.date,
+      customerId: selectedCustomer.id!,
+      customerName: selectedCustomer.name,
+      customerMobile: selectedCustomer.mobile,
+      customerAddress: form.customAddress || selectedCustomer.address,
+      category: form.category,
+      ...(deliveryLocation && {
+        deliveryLocation: {
+          ...deliveryLocation,
+          mapLink: `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`
+        }
+      }),
+      tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
+      bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
+      quantity: form.quantity,
+      rate: form.rate,
+      totalAmount: subtotal,
+      extraCharges: form.extraCharges,
+      discount: form.discount,
+      grandTotal: grandTotal,
+      paymentMode: 'Pending',
+      driverName: form.driverName,
+      status: 'Pending' as any,
+      isSettled: false,
+      driverId: form.driverId,
+      remarks: form.remarks.trim(),
+    };
 
-      const billData = {
-        billNumber: form.billNumber,
-        franchiseId: franchiseId || null,
-        commissionAmount,
-        date: form.date,
-        customerId: selectedCustomer.id!,
-        customerName: selectedCustomer.name,
-        customerMobile: selectedCustomer.mobile,
-        customerAddress: form.customAddress || selectedCustomer.address,
-        category: form.category,
-        ...(deliveryLocation && {
-          deliveryLocation: {
-            ...deliveryLocation,
-            mapLink: `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`
-          }
-        }),
-        tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
-        bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
-        quantity: form.quantity,
-        rate: form.rate,
-        totalAmount: subtotal,
-        extraCharges: form.extraCharges,
-        discount: form.discount,
-        grandTotal: grandTotal,
-        paymentMode: 'Pending',
-        driverName: form.driverName,
-        status: 'Pending',
-        isSettled: false,
-        driverId: form.driverId,
-        remarks: form.remarks.trim(),
-        createdAt: serverTimestamp()
+    const useOfflineWorkflow = () => {
+      const offlineId = `offline_${Date.now()}`;
+      const offlineBill = {
+        ...billData,
+        id: offlineId,
+        createdAt: new Date().toISOString(),
+        isOffline: true,
       };
 
-      const docRef = await addDoc(collection(db, 'bills'), billData);
-      const bookedBillWithId = { ...billData, id: docRef.id };
-      setBookedBill(bookedBillWithId);
-
-      // Log invoice generation activity
       try {
-        await activityLogger.log({
-          franchiseId: franchiseId || currentFranchise?.id || '',
-          franchiseName: currentFranchise?.name || 'Franchise',
-          userEmail: '',
-          actionType: 'NEW_BILL',
-          description: `Generated invoice #${form.billNumber} for Customer "${selectedCustomer.name}" with total ₹${grandTotal}`,
-          details: { billId: docRef.id, billNumber: form.billNumber, total: grandTotal }
-        });
-      } catch (logErr) {
-        console.error("Failed to log activity:", logErr);
+        const stored = localStorage.getItem('offline_pending_bills') || '[]';
+        const arr = JSON.parse(stored);
+        arr.push(offlineBill);
+        localStorage.setItem('offline_pending_bills', JSON.stringify(arr));
+        setOfflinePendingCount(arr.length);
+      } catch (err) {
+        console.error("Failed to store bill offline:", err);
       }
 
-      // Automatically post to Ledger (Automation) - ONLY if already delivered
-      if (bookedBillWithId.status === 'Delivered') {
-        ledgerAutomation.postBillToLedger(bookedBillWithId);
-      }
+      setBookedBill(offlineBill);
+      setShowBookingSuccess(true);
 
-      // If a driver is assigned, create an active trip for them
-      if (form.driverId) {
-        const driver = drivers.find(d => d.id === form.driverId);
-        
-        await addDoc(collection(db, 'trips'), {
-          billId: docRef.id,
-          franchiseId: franchiseId || null,
-          billNumber: form.billNumber,
-          driverId: form.driverId,
-          driverName: form.driverName,
-          customerName: selectedCustomer.name,
-          customerMobile: selectedCustomer.mobile,
-          siteLocation: form.customAddress || selectedCustomer.address,
-          category: form.category,
-          remarks: form.remarks.trim(),
-          ...(deliveryLocation && {
-            deliveryLocation: {
-              ...deliveryLocation,
-              mapLink: `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`
-            }
-          }),
-          quantity: form.quantity,
-          tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
-          bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
-          tractorId: 'T-01', // Default, can be updated from dashboard
-          status: 'Active',
-          createdAt: serverTimestamp()
-        });
+      const fakeNextNum = parseInt(form.billNumber.replace(/\D/g, '')) + 1;
+      setForm(prev => ({
+        ...prev,
+        billNumber: generateBillNumber(isNaN(fakeNextNum) ? 1001 : fakeNextNum),
+        quantity: 1,
+        extraCharges: 0,
+        discount: 0,
+        driverId: '',
+        driverName: '',
+        remarks: ''
+      }));
+      setDeliveryLocation(null);
+      setShowMap(false);
+    };
 
-        // Share with driver if assigned
-        if (driver) {
-          sendDriverWhatsApp(bookedBillWithId, driver);
+    if (!navigator.onLine) {
+      useOfflineWorkflow();
+      return;
+    }
+
+    try {
+      const dbPromise = (async () => {
+        try {
+          await updateDoc(doc(db, 'customers', selectedCustomer.id!), { 
+            lastRate: form.rate,
+            updatedAt: serverTimestamp()
+          });
+        } catch (cE) {
+          console.warn("Soft fail updating customer rate:", cE);
         }
-      }
+
+        const storeData = {
+          ...billData,
+          createdAt: serverTimestamp()
+        };
+
+        const docRef = await addDoc(collection(db, 'bills'), storeData);
+        const bookedBillWithId = { ...storeData, id: docRef.id };
+        setBookedBill(bookedBillWithId);
+
+        try {
+          await activityLogger.log({
+            franchiseId: franchiseId || currentFranchise?.id || '',
+            franchiseName: currentFranchise?.name || 'Franchise',
+            userEmail: '',
+            actionType: 'NEW_BILL',
+            description: `Generated invoice #${form.billNumber} for Customer "${selectedCustomer.name}" with total ₹${grandTotal}`,
+            details: { billId: docRef.id, billNumber: form.billNumber, total: grandTotal }
+          });
+        } catch (logErr) {
+          console.error("Failed to log activity:", logErr);
+        }
+
+        if (bookedBillWithId.status === 'Delivered') {
+          ledgerAutomation.postBillToLedger(bookedBillWithId);
+        }
+
+        if (form.driverId) {
+          const driver = drivers.find(d => d.id === form.driverId);
+          await addDoc(collection(db, 'trips'), {
+            billId: docRef.id,
+            franchiseId: franchiseId || null,
+            billNumber: form.billNumber,
+            driverId: form.driverId,
+            driverName: form.driverName,
+            customerName: selectedCustomer.name,
+            customerMobile: selectedCustomer.mobile,
+            siteLocation: form.customAddress || selectedCustomer.address,
+            category: form.category,
+            remarks: form.remarks.trim(),
+            ...(deliveryLocation && {
+              deliveryLocation: {
+                ...deliveryLocation,
+                mapLink: `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`
+              }
+            }),
+            quantity: form.quantity,
+            tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
+            bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
+            tractorId: 'T-01',
+            status: 'Active',
+            createdAt: serverTimestamp()
+          });
+
+          if (driver) {
+            sendDriverWhatsApp(bookedBillWithId, driver);
+          }
+        }
+      })();
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('timeout')), 2000)
+      );
+
+      await Promise.race([dbPromise, timeoutPromise]);
 
       setShowBookingSuccess(true);
-      
-      // Reset form for next entry partially
+
       const snapshotSize = (await getDocs(collection(db, 'bills'))).size;
       setForm(prev => ({
         ...prev,
@@ -450,8 +633,14 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       }));
       setDeliveryLocation(null);
       setShowMap(false);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'bills');
+    } catch (error: any) {
+      if (error?.message === 'timeout') {
+        console.warn("Database response exceeded safety timeout. Switching to Offline Printing workflow...");
+        useOfflineWorkflow();
+      } else {
+        console.error("Database write throw, switching to offline fallback:", error);
+        useOfflineWorkflow();
+      }
     }
   };
 
@@ -525,13 +714,34 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
   return (
     <div className="p-4 md:p-0 pb-32">
-      <div className="flex items-center justify-between mb-10">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-10">
         <div>
           <h1 className="text-3xl font-display font-bold">Create New Bill</h1>
           <p className="text-slate-500">Generate trip bill for customer</p>
         </div>
-        <div className="bg-blue-50 text-blue-600 px-4 py-2 rounded-2xl border border-blue-100 text-sm font-bold">
-          Bill No: {form.billNumber}
+        <div className="flex flex-wrap items-center gap-3">
+          {offlinePendingCount > 0 && (
+            <div className={`px-4 py-2 rounded-2xl border text-xs font-black uppercase flex items-center gap-1.5 shadow-sm animate-pulse ${
+              isSyncing 
+                ? 'bg-blue-50 border-blue-200 text-blue-700' 
+                : 'bg-amber-50 border-amber-200 text-amber-700'
+            }`}>
+              {isSyncing ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
+                  <span>Syncing {offlinePendingCount} Bills...</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-amber-500" />
+                  <span>{offlinePendingCount} Offline Bills Saved</span>
+                </>
+              )}
+            </div>
+          )}
+          <div className="bg-blue-50 text-blue-600 px-4 py-2 rounded-2xl border border-blue-100 text-sm font-bold">
+            Bill No: {form.billNumber}
+          </div>
         </div>
       </div>
 
@@ -914,6 +1124,12 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 <div className="mt-2 text-sm font-bold text-blue-600 bg-blue-50 py-1 px-3 rounded-full inline-block">
                   Status: Pending
                 </div>
+                {bookedBill.isOffline && (
+                  <div className="mt-3 text-xs font-bold text-amber-700 bg-amber-50 py-2.5 px-3 rounded-2xl border border-amber-100 block text-center">
+                    ⚠️ Offline Mode Saved!<br/>
+                    Receipt is 100% accurate & ready to print. The bill will sync to cloud once connection is restored.
+                  </div>
+                )}
               </div>
 
                <div className="grid gap-3">

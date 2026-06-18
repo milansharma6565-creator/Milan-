@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, where, getDocs, runTransaction, serverTimestamp, updateDoc, getDoc } from 'firebase/firestore';
 import { Driver, Account } from '../types';
-import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Download, UserPlus, UserMinus, FileText, IndianRupee, CheckCircle2, Minus, AlertCircle, Lock } from 'lucide-react';
+import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Download, UserPlus, UserMinus, FileText, IndianRupee, CheckCircle2, Minus, AlertCircle, Lock, Edit2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmationModal } from './ConfirmationModal';
 import { ledgerAutomation } from '../services/ledgerAutomation';
@@ -11,6 +11,7 @@ import autoTable from 'jspdf-autotable';
 
 export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [isAdding, setIsAdding] = useState(false);
+  const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [activeTab, setActiveTab] = useState<'Active' | 'Inactive' | 'pending'>('Active');
   const [newDriver, setNewDriver] = useState({ name: '', mobile: '', email: '', monthlySalary: '', pin: '' });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, name: string } | null>(null);
@@ -248,8 +249,41 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
     try {
       await deleteDoc(doc(db, 'drivers', id));
       setDeleteConfirm(null);
+      alert("✅ Driver deleted successfully!");
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `drivers/${id}`);
+    }
+  };
+
+  const handleEditDriver = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDriver || !editingDriver.name || !editingDriver.mobile) return;
+
+    try {
+      const drvRef = doc(db, 'drivers', editingDriver.id!);
+      await updateDoc(drvRef, {
+        name: editingDriver.name.trim(),
+        mobile: editingDriver.mobile.replace(/\D/g, ''),
+        email: editingDriver.email.trim().toLowerCase(),
+        monthlySalary: Number(editingDriver.monthlySalary) || 0,
+        pin: editingDriver.pin || '1234'
+      });
+
+      // Synchronize associated account name in Ledger
+      const qAcc = query(collection(db, 'accounts'), where('driverId', '==', editingDriver.id));
+      const accSnap = await getDocs(qAcc);
+      if (!accSnap.empty) {
+        const accDoc = accSnap.docs[0];
+        await updateDoc(accDoc.ref, {
+          name: editingDriver.name.trim()
+        });
+      }
+
+      setEditingDriver(null);
+      alert("✅ Driver details and associated ledger account updated successfully!");
+    } catch (error: any) {
+      console.error(error);
+      alert("Error updating driver: " + (error?.message || error));
     }
   };
 
@@ -450,6 +484,13 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
                         </button>
                       </>
                     )}
+                    <button 
+                      onClick={() => setEditingDriver(driver)}
+                      className="w-10 h-10 bg-blue-50 text-blue-500 rounded-xl flex items-center justify-center hover:bg-blue-100 transition-colors border border-blue-100"
+                      title="Edit Driver Details"
+                    >
+                      <Edit2 size={18} />
+                    </button>
                     <button 
                       onClick={() => driver.id && setDeleteConfirm({ id: driver.id, name: driver.name })}
                       className="w-10 h-10 bg-slate-50 text-slate-300 rounded-xl flex items-center justify-center hover:bg-red-50 hover:text-red-500 transition-colors"
@@ -704,6 +745,131 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
                     </>
                   )}
                 </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Edit Driver Modal */}
+        {editingDriver && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-[0_30px_60px_-15px_rgba(15,23,42,0.15)] overflow-hidden"
+            >
+              <div className="bg-slate-50 px-8 py-6 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="font-display font-black text-xl text-slate-800">Edit Driver Details</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Modify registration profile</p>
+                </div>
+                <button 
+                  onClick={() => setEditingDriver(null)}
+                  className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleEditDriver} className="p-8 flex flex-col gap-5">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Driver Name *</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                      <User size={18} />
+                    </span>
+                    <input
+                      required
+                      type="text"
+                      value={editingDriver.name}
+                      onChange={e => setEditingDriver({ ...editingDriver, name: e.target.value })}
+                      placeholder="Enter driver's full name"
+                      className="w-full h-12 bg-slate-50 rounded-xl pl-12 pr-4 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Mobile Number *</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                        <Phone size={18} />
+                      </span>
+                      <input
+                        required
+                        type="tel"
+                        value={editingDriver.mobile}
+                        onChange={e => setEditingDriver({ ...editingDriver, mobile: e.target.value })}
+                        placeholder="Mobile"
+                        className="w-full h-12 bg-slate-50 rounded-xl pl-12 pr-4 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Login PIN *</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                        <Lock size={18} />
+                      </span>
+                      <input
+                        required
+                        type="text"
+                        maxLength={4}
+                        value={editingDriver.pin || ''}
+                        onChange={e => setEditingDriver({ ...editingDriver, pin: e.target.value })}
+                        placeholder="4 digit PIN"
+                        className="w-full h-12 bg-slate-50 rounded-xl pl-12 pr-4 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Monthly Salary *</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₹</span>
+                      <input
+                        required
+                        type="number"
+                        value={editingDriver.monthlySalary}
+                        onChange={e => setEditingDriver({ ...editingDriver, monthlySalary: Number(e.target.value) || 0 })}
+                        placeholder="Salary Amount"
+                        className="w-full h-12 bg-slate-50 rounded-xl pl-12 pr-4 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">Email (Optional)</label>
+                    <input
+                      type="email"
+                      value={editingDriver.email || ''}
+                      onChange={e => setEditingDriver({ ...editingDriver, email: e.target.value })}
+                      placeholder="driver@example.com"
+                      className="w-full h-12 bg-slate-50 rounded-xl px-4 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setEditingDriver(null)}
+                    className="flex-1 h-14 rounded-xl border border-slate-200 text-slate-500 font-bold text-sm hover:bg-slate-50 active:scale-[0.98] transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 h-14 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-100 hover:bg-blue-700 active:scale-[0.98] transition-all cursor-pointer"
+                  >
+                    Save Changes
+                  </button>
+                </div>
               </form>
             </motion.div>
           </div>

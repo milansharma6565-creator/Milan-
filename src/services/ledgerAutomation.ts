@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc, query, where } from 'firebase/firestore';
 import { VoucherItem, Account } from '../types';
 
 export const ledgerAutomation = {
@@ -8,12 +8,20 @@ export const ledgerAutomation = {
    */
   ensureCustomerAccount: async (customerId: string, customerName: string, franchiseId: any): Promise<string | null> => {
     try {
-      const accountsSnap = await getDocs(collection(db, 'accounts'));
-      const customerAccDoc = accountsSnap.docs.find(d => {
-        const data = d.data();
-        return (data.customerId === customerId) || 
-               (data.name && data.name.toLowerCase() === customerName.toLowerCase());
-      });
+      // 1. Query by customerId to see if linked account exists
+      const qCust = query(collection(db, 'accounts'), where('customerId', '==', customerId));
+      const custSnap = await getDocs(qCust);
+      
+      let customerAccDoc = !custSnap.empty ? custSnap.docs[0] : null;
+
+      // 2. If not found, try querying by customer name
+      if (!customerAccDoc) {
+        const qName = query(collection(db, 'accounts'), where('name', '==', customerName));
+        const nameSnap = await getDocs(qName);
+        if (!nameSnap.empty) {
+          customerAccDoc = nameSnap.docs[0];
+        }
+      }
 
       if (customerAccDoc) {
         // If it exists but doesn't have customerId, update it to link it
@@ -23,14 +31,19 @@ export const ledgerAutomation = {
         return customerAccDoc.id;
       }
 
-      // Find or create 'Sundry Debtors' group
-      const groupsSnap = await getDocs(collection(db, 'accountGroups'));
-      let debtorsGroup = groupsSnap.docs.find(d => d.data().name === 'Sundry Debtors');
+      // Find or create 'Sundry Debtors' group selectively
+      const qGroup = query(collection(db, 'accountGroups'), where('name', '==', 'Sundry Debtors'));
+      const groupsSnap = await getDocs(qGroup);
+      let debtorsGroup = !groupsSnap.empty ? groupsSnap.docs[0] : null;
       let debtorsGroupId = debtorsGroup?.id;
 
       if (!debtorsGroupId) {
-        let assetsGroup = groupsSnap.docs.find(d => d.data().name === 'Current Assets');
+        // Find or create 'Current Assets' group selectively
+        const qAssets = query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'));
+        const assetsSnap = await getDocs(qAssets);
+        let assetsGroup = !assetsSnap.empty ? assetsSnap.docs[0] : null;
         let assetsGroupId = assetsGroup?.id;
+        
         if (!assetsGroupId) {
           const newAssetsGroupRef = await addDoc(collection(db, 'accountGroups'), {
             name: 'Current Assets',

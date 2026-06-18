@@ -990,11 +990,22 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                               <option key={a.id} value={a.id}>{a.name} (Bal: {getAccountBalance(a.id!).toLocaleString()})</option>
                             ))}
                           </select>
-                          {retroDebitAcc && (
-                            <div className="text-[10px] text-teal-400 pl-2 mt-0.5 font-bold">
-                              Cur Bal: {getAccountBalance(retroDebitAcc).toLocaleString('en-IN')} Dr
-                            </div>
-                          )}
+                          {retroDebitAcc && (() => {
+                            const curBal = getAccountBalance(retroDebitAcc);
+                            const accObj = accounts.find(a => a.id === retroDebitAcc);
+                            const balType = accObj?.balanceType || 'Dr';
+                            const estBal = balType === 'Dr' ? curBal + retroAmount : curBal - retroAmount;
+                            return (
+                              <div className="flex justify-between text-[10px] text-teal-400 pl-2 mt-0.5 font-bold">
+                                <span>Cur Bal: ₹{curBal.toLocaleString('en-IN')} {balType}</span>
+                                {retroAmount > 0 && (
+                                  <span className={estBal < 0 ? "text-red-400 font-black animate-pulse" : "text-emerald-400 font-black animate-pulse"}>
+                                    Est. After: ₹{estBal.toLocaleString('en-IN')} {balType}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -1015,11 +1026,22 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                               <option key={a.id} value={a.id}>{a.name} (Bal: {getAccountBalance(a.id!).toLocaleString()})</option>
                             ))}
                           </select>
-                          {retroCreditAcc && (
-                            <div className="text-[10px] text-teal-400 pl-2 mt-0.5 font-bold">
-                              Cur Bal: {getAccountBalance(retroCreditAcc).toLocaleString('en-IN')} Cr
-                            </div>
-                          )}
+                          {retroCreditAcc && (() => {
+                            const curBal = getAccountBalance(retroCreditAcc);
+                            const accObj = accounts.find(a => a.id === retroCreditAcc);
+                            const balType = accObj?.balanceType || 'Cr';
+                            const estBal = balType === 'Cr' ? curBal + retroAmount : curBal - retroAmount;
+                            return (
+                              <div className="flex justify-between text-[10px] text-teal-400 pl-2 mt-0.5 font-bold">
+                                <span>Cur Bal: ₹{curBal.toLocaleString('en-IN')} {balType}</span>
+                                {retroAmount > 0 && (
+                                  <span className={estBal < 0 ? "text-red-400 font-black animate-pulse" : "text-emerald-400 font-black animate-pulse"}>
+                                    Est. After: ₹{estBal.toLocaleString('en-IN')} {balType}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -1926,58 +1948,90 @@ function VoucherEntryModal({ onClose, accounts, franchiseId }: { onClose: () => 
             <div className="grid grid-cols-12 gap-4 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               <div className="col-span-1">Type</div>
               <div className="col-span-6">Account Parent / Particulars</div>
-              <div className="col-span-4 text-right">Amount (₹)</div>
-              <div className="col-span-1"></div>
+              <div className="col-span-5 text-right">Amount (₹)</div>
             </div>
             
-            {items.map((item, idx) => (
-              <div key={idx} className="grid grid-cols-12 gap-4 items-center">
-                <div className="col-span-1">
-                  <select 
-                    className={`w-full h-12 px-1 rounded-2xl text-xs font-black appearance-none text-center border-none focus:ring-2 ring-slate-900/5 ${
-                      item.type === 'Dr' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'
-                    }`}
-                    value={item.type}
-                    onChange={e => updateItem(idx, { type: e.target.value as 'Dr' | 'Cr' })}
-                  >
-                    <option value="Dr">Dr</option>
-                    <option value="Cr">Cr</option>
-                  </select>
+            {items.map((item, idx) => {
+              const acc = accounts.find(a => a.id === item.accountId);
+              const curBal = acc ? (acc.currentBalance || 0) : 0;
+              const balType = acc?.balanceType || 'Dr';
+              let estBal = curBal;
+              if (acc) {
+                if (item.type === 'Dr') {
+                  estBal += (acc.balanceType === 'Dr' ? item.amount : -item.amount);
+                } else {
+                  estBal += (acc.balanceType === 'Cr' ? item.amount : -item.amount);
+                }
+              }
+
+              return (
+                <div key={idx} className="space-y-2 bg-slate-50/40 p-3 rounded-2xl border border-slate-100/60">
+                  <div className="grid grid-cols-12 gap-4 items-center">
+                    <div className="col-span-1">
+                      <select 
+                        className={`w-full h-12 px-1 rounded-2xl text-xs font-black appearance-none text-center border-none focus:ring-2 ring-slate-900/5 ${
+                          item.type === 'Dr' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'
+                        }`}
+                        value={item.type}
+                        onChange={e => updateItem(idx, { type: e.target.value as 'Dr' | 'Cr' })}
+                      >
+                        <option value="Dr">Dr</option>
+                        <option value="Cr">Cr</option>
+                      </select>
+                    </div>
+                    <div className="col-span-6">
+                      <select 
+                        required
+                        className="w-full h-12 px-4 bg-slate-50 rounded-2xl text-sm font-bold border-none appearance-none"
+                        value={item.accountId}
+                        onChange={e => updateItem(idx, { accountId: e.target.value })}
+                      >
+                        <option value="">Select Account...</option>
+                        {sortedAccounts.map(acc => (
+                          <option key={acc.id} value={acc.id}>{acc.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-span-4">
+                      <input 
+                        required
+                        type="number"
+                        placeholder="0.00"
+                        className="w-full h-12 px-4 bg-slate-50 rounded-2xl text-sm font-bold border-none text-right"
+                        value={item.amount || ''}
+                        onChange={e => updateItem(idx, { amount: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="col-span-1 flex justify-center">
+                      <button 
+                        type="button"
+                        onClick={() => setItems(items.filter((_, i) => i !== idx))}
+                        className="p-2 text-slate-300 hover:text-red-500 transition-colors cursor-pointer"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {acc && (
+                    <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold px-1 select-none">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                        <span>Cur Bal: ₹{curBal.toLocaleString('en-IN')} {balType}</span>
+                      </div>
+                      {item.amount > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <span>Resulting Bal:</span>
+                          <span className={`px-2 py-0.5 rounded ${estBal < 0 ? "bg-red-50 text-red-600 font-extrabold animate-pulse" : "bg-emerald-50 text-emerald-600 font-extrabold animate-pulse"}`}>
+                            ₹{estBal.toLocaleString('en-IN')} {balType}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="col-span-6">
-                  <select 
-                    required
-                    className="w-full h-12 px-4 bg-slate-50 rounded-2xl text-sm font-bold border-none appearance-none"
-                    value={item.accountId}
-                    onChange={e => updateItem(idx, { accountId: e.target.value })}
-                  >
-                    <option value="">Select Account...</option>
-                    {sortedAccounts.map(acc => (
-                      <option key={acc.id} value={acc.id}>{acc.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-span-4">
-                  <input 
-                    required
-                    type="number"
-                    placeholder="0.00"
-                    className="w-full h-12 px-4 bg-slate-50 rounded-2xl text-sm font-bold border-none text-right"
-                    value={item.amount || ''}
-                    onChange={e => updateItem(idx, { amount: parseFloat(e.target.value) || 0 })}
-                  />
-                </div>
-                <div className="col-span-1 flex justify-center">
-                  <button 
-                    type="button"
-                    onClick={() => setItems(items.filter((_, i) => i !== idx))}
-                    className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
 
             <button 
               type="button"

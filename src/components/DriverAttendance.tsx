@@ -27,7 +27,8 @@ import {
   TrendingUp,
   FileText,
   Save,
-  ArrowRight
+  ArrowRight,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
@@ -38,9 +39,17 @@ import autoTable from 'jspdf-autotable';
 export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Driver payment modal states
+  const [payoutDriver, setPayoutDriver] = useState<Driver | null>(null);
+  const [payoutGrossSalary, setPayoutGrossSalary] = useState<number>(0);
+  const [payoutDeducedAdvance, setPayoutDeducedAdvance] = useState<number>(0);
+  const [payoutSelectedAccountId, setPayoutSelectedAccountId] = useState<string>('');
+  const [payoutNarration, setPayoutNarration] = useState<string>('');
 
   useEffect(() => {
     const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
@@ -82,9 +91,19 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
       setLoading(false);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'attendance'));
 
+    // Fetch accounts
+    let qAccounts = query(collection(db, 'accounts'));
+    if (fid) {
+      qAccounts = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
+    }
+    const accountsUnsub = onSnapshot(qAccounts, (snapshot) => {
+      setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'accounts'));
+
     return () => {
       driversUnsub();
       attendanceUnsub();
+      accountsUnsub();
     };
   }, [selectedDate, franchiseId, isSuperAdmin]);
 
@@ -112,46 +131,33 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
         status,
         createdAt: serverTimestamp()
       });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'attendance');
+    }
+  };
 
-      // --- AUTOMATED SALARY ACCRUAL ---
-      const factor = status === 'Full Day' ? 1 : status === 'Half Day' ? 0.5 : 0;
-      const dailyAmt = Math.round((driver.monthlySalary / 30) * factor);
-      const vchNo = `ATT-${driver.id.slice(0,4)}-${format(selectedDate, 'ddMMyy')}`;
+  const postMonthlyAccrualToLedger = async (driver: Driver) => {
+    if (!driver.id) return;
+    const stats = calculateMonthlyStats(driver.id);
+    const dailyRate = driver.monthlySalary / 30;
+    const totalAccruedAmt = Math.round(stats.totalDays * dailyRate);
 
-      // 1. Check for existing voucher
+    if (totalAccruedAmt <= 0) {
+      alert("No work recorded for this driver this month.");
+      return;
+    }
+
+    if (!confirm(`Post ₹${totalAccruedAmt.toLocaleString()} as Monthly Salary Accrual (Expense & Liability) for ${driver.name}?`)) return;
+
+    setSaving(true);
+    try {
+      const vchNo = `ATT-${driver.id.slice(0, 4)}-${format(selectedDate, 'yyyyMM')}`;
+      const vchDate = endOfMonth(selectedDate);
+
+      // Check for existing monthly consolidated voucher
       const existingVchSnap = await getDocs(query(collection(db, 'vouchers'), where('voucherNumber', '==', vchNo)));
       const existingVchId = existingVchSnap.docs[0]?.id;
 
-      if (status === 'Absent' || dailyAmt === 0) {
-        // Delete voucher if it exists and status is Absent
-        if (existingVchId) {
-          await runTransaction(db, async (transaction) => {
-            const vchRef = doc(db, 'vouchers', existingVchId);
-            const vchDoc = await transaction.get(vchRef);
-            const vchData = vchDoc.data() as Voucher;
-            
-            // Revert balances
-            const items = vchData.items || [];
-            const accRefs = items.map(item => doc(db, 'accounts', item.accountId));
-            const accSnaps = await Promise.all(accRefs.map(ref => transaction.get(ref)));
-            
-            for (let i = 0; i < items.length; i++) {
-              const item = items[i];
-              const accSnap = accSnaps[i];
-              if (accSnap && accSnap.exists()) {
-                const currentBal = accSnap.data().currentBalance || 0;
-                transaction.update(accSnap.ref, {
-                  currentBalance: item.type === 'Dr' ? currentBal - item.amount : currentBal + item.amount
-                });
-              }
-            }
-            transaction.delete(vchRef);
-          });
-        }
-        return;
-      }
-
-      // 2. Status is Full or Half Day - Update or Create Voucher
       // Find or Create Salary Expense account
       let qExp = query(collection(db, 'accounts'), where('name', '==', 'Salary Expense'));
       if (!isSuperAdmin && franchiseId) {
@@ -187,7 +193,7 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
         expId = newAcc.id;
       }
 
-      // Find or Create Driver Account
+      // Find or Create Driver Account (Liability)
       let qDrvAcc = query(collection(db, 'accounts'), where('name', '==', driver.name));
       if (!isSuperAdmin && franchiseId) {
         qDrvAcc = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId), where('name', '==', driver.name));
@@ -219,45 +225,47 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
         driverAccId = newAcc.id;
       }
 
-      if (expId && driverAccId) {
-        await runTransaction(db, async (transaction) => {
-          const expRef = doc(db, 'accounts', expId!);
-          const drvRef = doc(db, 'accounts', driverAccId!);
-          const vchRef = existingVchId ? doc(db, 'vouchers', existingVchId) : null;
+      await runTransaction(db, async (transaction) => {
+        const expRef = doc(db, 'accounts', expId!);
+        const drvRef = doc(db, 'accounts', driverAccId!);
+        const [expDoc, drvDoc] = await Promise.all([
+          transaction.get(expRef),
+          transaction.get(drvRef)
+        ]);
 
-          const [expDoc, drvDoc, vchDoc] = await Promise.all([
-            transaction.get(expRef),
-            transaction.get(drvRef),
-            vchRef ? transaction.get(vchRef) : Promise.resolve(null)
-          ]);
-
-          let delta = dailyAmt;
-          const targetVchRef = existingVchId ? vchRef! : doc(collection(db, 'vouchers'));
-          
-          if (vchDoc && vchDoc.exists()) {
-            delta = dailyAmt - (vchDoc.data()?.totalAmount || 0);
+        let delta = totalAccruedAmt;
+        const targetVchRef = existingVchId ? doc(db, 'vouchers', existingVchId) : doc(collection(db, 'vouchers'));
+        
+        if (existingVchId) {
+          const vchDoc = await transaction.get(targetVchRef);
+          if (vchDoc.exists()) {
+            delta = totalAccruedAmt - (vchDoc.data()?.totalAmount || 0);
           }
+        }
 
-          transaction.set(targetVchRef, {
-            date: selectedDate,
-            franchiseId: franchiseId || null,
-            type: 'Journal',
-            voucherNumber: vchNo,
-            items: [
-              { accountId: expId, accountName: 'Salary Expense', amount: dailyAmt, type: 'Dr' },
-              { accountId: driverAccId, accountName: driver.name, amount: dailyAmt, type: 'Cr' }
-            ],
-            narration: `Daily Salary Accrued: ${driver.name} - ${status} (${format(selectedDate, 'dd MMM')})`,
-            totalAmount: dailyAmt,
-            createdAt: serverTimestamp()
-          });
-
-          transaction.update(expRef, { currentBalance: (expDoc.data()?.currentBalance || 0) + delta });
-          transaction.update(drvRef, { currentBalance: (drvDoc.data()?.currentBalance || 0) + delta });
+        transaction.set(targetVchRef, {
+          date: vchDate,
+          franchiseId: franchiseId || null,
+          type: 'Journal',
+          voucherNumber: vchNo,
+          items: [
+            { accountId: expId!, accountName: 'Salary Expense', amount: totalAccruedAmt, type: 'Dr' },
+            { accountId: driverAccId!, accountName: driver.name, amount: totalAccruedAmt, type: 'Cr' }
+          ],
+          narration: `Consolidated Monthly Salary Accrued: ${driver.name} - ${format(selectedDate, 'MMMM yyyy')} (${stats.totalDays} days active)`,
+          totalAmount: totalAccruedAmt,
+          createdAt: serverTimestamp()
         });
-      }
+
+        transaction.update(expRef, { currentBalance: (expDoc.data()?.currentBalance || 0) + delta });
+        transaction.update(drvRef, { currentBalance: (drvDoc.data()?.currentBalance || 0) + delta });
+      });
+
+      alert("Monthly Accrual Journal entry posted to ledger successfully!");
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'attendance');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -311,54 +319,158 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
     doc.save(`Attendance_${monthYear}.pdf`);
   };
 
-  const postSalaryToLedger = async (driver: Driver) => {
+  const handleOpenPayoutModal = (driver: Driver) => {
     if (!driver.id) return;
     const stats = calculateMonthlyStats(driver.id);
     const dailyRate = driver.monthlySalary / 30;
-    const salary = Math.round(stats.totalDays * dailyRate);
-    
-    if (salary <= 0) {
+    const grossSalary = Math.round(stats.totalDays * dailyRate);
+
+    if (grossSalary <= 0) {
       alert("No work recorded for this driver this month.");
       return;
     }
 
-    if (!confirm(`Post ₹${salary.toLocaleString()} as Salary Expense for ${driver.name}?`)) return;
+     // Find advance account for driver (using driverId or clean name lookup)
+    const advAcc = accounts.find(a => 
+      (a.driverId === driver.id || a.name.toLowerCase().includes(driver.name.toLowerCase())) && 
+      (
+        a.name.toLowerCase().includes('advance') || 
+        a.name.toLowerCase().includes('udhar') || 
+        a.name.toLowerCase().includes('उधार') || 
+        a.group?.toLowerCase().includes('advance')
+      )
+    );
+    const outstandingAdvance = advAcc ? (advAcc.currentBalance || 0) : 0;
 
+    // Set states
+    setPayoutDriver(driver);
+    setPayoutGrossSalary(grossSalary);
+    // Auto-calculate advance deduction: bounded between 0, gross salary, and outstanding advance!
+    const autoDeduct = Math.min(grossSalary, outstandingAdvance);
+    setPayoutDeducedAdvance(autoDeduct);
+    
+    // Default to Cash account or first active asset account
+    const defaultAcc = accounts.find(a => a.name === 'Cash') || accounts.find(a => a.name.toLowerCase().includes('bank')) || accounts[0];
+    setPayoutSelectedAccountId(defaultAcc ? defaultAcc.id : '');
+    
+    setPayoutNarration(`Salary payout for ${driver.name} - ${format(selectedDate, 'MMM yyyy')} (${stats.totalDays} days), Gross: ₹${grossSalary.toLocaleString()}, Adv Ded: ₹${autoDeduct.toLocaleString()}`);
+  };
+
+  const handlePostSalaryPayment = async () => {
+    if (!payoutDriver || !payoutSelectedAccountId) return;
+    
     setSaving(true);
     try {
-      // Find Salary Account
+      const gross = payoutGrossSalary;
+      const deduction = payoutDeducedAdvance;
+      const net = Math.max(0, gross - deduction);
+
+      // 1. Find Salary Payable account
       let qPay = query(collection(db, 'accounts'), where('name', '==', 'Salary Payable'));
-      let qCash = query(collection(db, 'accounts'), where('name', '==', 'Cash'));
       if (!isSuperAdmin && franchiseId) {
         qPay = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId), where('name', '==', 'Salary Payable'));
-        qCash = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId), where('name', '==', 'Cash'));
       }
-      const accSnap = await getDocs(qPay);
-      const payId = accSnap.docs[0]?.id;
+      const paySnap = await getDocs(qPay);
+      let payAccId = paySnap.docs[0]?.id;
 
-      const cashSnap = await getDocs(qCash);
-      const cashAccId = cashSnap.docs[0]?.id;
-
-      if (!payId || !cashAccId) {
-        alert("Accounting accounts (Salary Payable/Cash) not found. Check Setup.");
-        return;
+      if (!payAccId) {
+        // Create Salary Payable if not found
+        let qGrpLiab = query(collection(db, 'accountGroups'), where('name', '==', 'Current Liabilities'));
+        if (!isSuperAdmin && franchiseId) {
+          qGrpLiab = query(collection(db, 'accountGroups'), where('franchiseId', '==', franchiseId), where('name', '==', 'Current Liabilities'));
+        }
+        const groupSnap = await getDocs(qGrpLiab);
+        let groupId = groupSnap.docs[0]?.id;
+        if (!groupId) {
+          const newGroup = await addDoc(collection(db, 'accountGroups'), { 
+            name: 'Current Liabilities', 
+            type: 'Liability',
+            franchiseId: franchiseId || null 
+          });
+          groupId = newGroup.id;
+        }
+        const newAcc = await addDoc(collection(db, 'accounts'), {
+          name: 'Salary Payable',
+          franchiseId: franchiseId || null,
+          groupId: groupId, openingBalance: 0, balanceType: 'Cr', currentBalance: 0,
+          createdAt: serverTimestamp()
+        });
+        payAccId = newAcc.id;
       }
 
-      await addDoc(collection(db, 'vouchers'), {
-        date: new Date(),
-        franchiseId: franchiseId || null,
-        type: 'Payment',
-        voucherNumber: `SLY-${format(new Date(), 'HHmm')}`,
-        items: [
-          { accountId: payId, accountName: 'Salary Payable', amount: salary, type: 'Dr' },
-          { accountId: cashAccId, accountName: 'Cash', amount: salary, type: 'Cr' }
-        ],
-        narration: `Salary payout for ${driver.name} - ${format(selectedDate, 'MMM yyyy')} (${stats.totalDays} days)`,
-        totalAmount: salary,
-        createdAt: serverTimestamp()
+      // 2. Find Advance Account if deduction > 0
+      let advAccId = '';
+      if (deduction > 0) {
+        const advAcc = accounts.find(a => 
+          a.name.toLowerCase().includes(payoutDriver.name.toLowerCase()) && 
+          a.name.toLowerCase().includes('advance')
+        );
+        if (advAcc) {
+          advAccId = advAcc.id;
+        }
+      }
+
+      // 3. Post double entry voucher
+      await runTransaction(db, async (transaction) => {
+        const payRef = doc(db, 'accounts', payAccId!);
+        const cashRef = doc(db, 'accounts', payoutSelectedAccountId);
+        const advRef = advAccId ? doc(db, 'accounts', advAccId) : null;
+
+        const payDoc = await transaction.get(payRef);
+        const cashDoc = await transaction.get(cashRef);
+        const advDoc = advRef ? await transaction.get(advRef) : null;
+
+        const itemsList: any[] = [
+          { accountId: payAccId!, accountName: 'Salary Payable', amount: gross, type: 'Dr' }
+        ];
+
+        if (net > 0) {
+          itemsList.push({ 
+            accountId: payoutSelectedAccountId, 
+            accountName: cashDoc.data()?.name || 'Cash', 
+            amount: net, 
+            type: 'Cr' 
+          });
+        }
+
+        if (deduction > 0 && advRef) {
+          itemsList.push({ 
+            accountId: advAccId, 
+            accountName: advDoc?.data()?.name || 'Driver Advance', 
+            amount: deduction, 
+            type: 'Cr' 
+          });
+        }
+
+        const vchRef = doc(collection(db, 'vouchers'));
+        transaction.set(vchRef, {
+          date: new Date(),
+          franchiseId: franchiseId || null,
+          type: 'Payment',
+          voucherNumber: `SLY-${format(new Date(), 'yyyyMMdd-HHmmss')}`,
+          items: itemsList,
+          narration: payoutNarration,
+          totalAmount: gross,
+          createdAt: serverTimestamp()
+        });
+
+        // Dr Salary Payable (decreases Credit liability ledger)
+        const payBal = payDoc.data()?.currentBalance || 0;
+        transaction.update(payRef, { currentBalance: payBal - gross });
+
+        // Cr Cash/Bank (decreases Debit asset ledger)
+        const cashBal = cashDoc.data()?.currentBalance || 0;
+        transaction.update(cashRef, { currentBalance: cashBal - net });
+
+        // Cr Advance (decreases Debit asset ledger)
+        if (deduction > 0 && advRef && advDoc) {
+          const advBal = advDoc.data()?.currentBalance || 0;
+          transaction.update(advRef, { currentBalance: advBal - deduction });
+        }
       });
-      
-      alert("Salary posted to ledger successfully!");
+
+      alert("Salary payout and advance deduction posted successfully inside dual double-entry lines!");
+      setPayoutDriver(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'vouchers');
     } finally {
@@ -510,12 +622,22 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
                       </div>
                       <div className="flex items-center justify-between text-[10px] font-bold text-slate-500">
                         <span>Work: {stats.totalDays} Days</span>
-                        <button 
-                          onClick={() => postSalaryToLedger(driver)}
-                          className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 transition-colors"
-                        >
-                          Post Ledger <ArrowRight size={10} />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => postMonthlyAccrualToLedger(driver)}
+                            className="bg-blue-600/10 text-blue-400 px-2 py-1 rounded-md hover:bg-blue-600/20 transition-all cursor-pointer"
+                            title="Accrue Monthly Salary (Journal Entry)"
+                          >
+                            Accrue
+                          </button>
+                          <button 
+                            onClick={() => handleOpenPayoutModal(driver)}
+                            className="bg-emerald-600/10 text-emerald-400 px-2 py-1 rounded-md hover:bg-emerald-600/20 transition-all cursor-pointer"
+                            title="Payout Net Salary (with Advance Deduction)"
+                          >
+                            Pay Net
+                          </button>
+                        </div>
                       </div>
                       <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
                         <motion.div 
@@ -540,9 +662,151 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
                <br />
                <code className="bg-white/50 px-1 rounded">(Full Days + 0.5 * Half) * Daily Rate</code>
              </p>
-           </div>
-        </div>
+            </div>
+         </div>
       </div>
+
+      <AnimatePresence>
+        {payoutDriver && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4">
+            <motion.div
+              initial={{ y: "100%", scale: 0.95 }}
+              animate={{ y: 0, scale: 1 }}
+              exit={{ y: "100%", scale: 0.95 }}
+              className="bg-white w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl relative border border-slate-100 text-slate-800"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-display font-black text-slate-900">Pay Net Driver Salary</h3>
+                  <p className="text-xs text-slate-400 uppercase tracking-widest font-black mt-1">Driver: {payoutDriver.name}</p>
+                </div>
+                <button 
+                  onClick={() => setPayoutDriver(null)} 
+                  className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-all cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-5">
+                {/* Balance & Dues Summary */}
+                <div className="bg-[#f8fafc] border border-slate-100 p-5 rounded-[2rem] space-y-3">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500 font-bold">Gross Salary Accrued</span>
+                    <span className="font-extrabold text-slate-800">{formatCurrency(payoutGrossSalary)}</span>
+                  </div>
+
+                  {(() => {
+                    const advAcc = accounts.find(a => 
+                      (a.driverId === payoutDriver.id || a.name.toLowerCase().includes(payoutDriver.name.toLowerCase())) && 
+                      (
+                        a.name.toLowerCase().includes('advance') || 
+                        a.name.toLowerCase().includes('udhar') || 
+                        a.name.toLowerCase().includes('उधार') || 
+                        a.group?.toLowerCase().includes('advance')
+                      )
+                    );
+                    const outstanding = advAcc ? (advAcc.currentBalance || 0) : 0;
+                    return (
+                      <>
+                        <div className="flex justify-between text-xs border-t border-slate-100 pt-3">
+                          <span className="text-slate-500 font-bold">Outstanding Advance Balance</span>
+                          <span className="font-extrabold text-amber-600">
+                            {formatCurrency(outstanding)} {advAcc ? `(${advAcc.name})` : '(No Advance Account)'}
+                          </span>
+                        </div>
+
+                        {outstanding > 0 && (
+                          <div className="flex flex-col gap-1.5 pt-3">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                Deduct Advance Amount:
+                              </label>
+                              <span className="text-[10px] text-slate-400 font-bold">Max: {formatCurrency(Math.min(payoutGrossSalary, outstanding))}</span>
+                            </div>
+                            <input
+                              type="number"
+                              className="w-full h-11 bg-white border border-slate-200 rounded-xl px-3 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500"
+                              value={payoutDeducedAdvance}
+                              max={Math.min(payoutGrossSalary, outstanding)}
+                              min={0}
+                              onChange={(e) => {
+                                const limit = Math.min(payoutGrossSalary, outstanding);
+                                const val = Math.min(limit, Math.max(0, Number(e.target.value) || 0));
+                                setPayoutDeducedAdvance(val);
+                              }}
+                            />
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  <div className="flex justify-between text-sm border-t border-slate-200/60 pt-3 font-extrabold text-slate-900 bg-white -mx-5 -mb-5 p-5 rounded-b-[2rem]">
+                    <span className="text-emerald-700">Net Payable Amount</span>
+                    <span className="text-lg font-black text-emerald-600">
+                      {formatCurrency(Math.max(0, payoutGrossSalary - payoutDeducedAdvance))}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Cash/Bank Account Selection */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">
+                    Select Source Account (Cash / Bank)
+                  </label>
+                  <select
+                     className="w-full bg-[#f8fafc] text-slate-800 font-bold border border-slate-200 rounded-xl px-3 h-12 text-xs focus:border-indigo-500 focus:outline-none transition-all cursor-pointer"
+                    value={payoutSelectedAccountId}
+                    onChange={(e) => setPayoutSelectedAccountId(e.target.value)}
+                  >
+                    <option value="">-- Choose Account --</option>
+                    {accounts.filter(a => 
+                      a.name === 'Cash' || 
+                      a.name.toLowerCase().includes('bank') || 
+                      a.name.toLowerCase().includes('baroda') ||
+                      a.name.toLowerCase().includes('sbi') ||
+                      a.name.toLowerCase().includes('hdfc')
+                    ).map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.name} (Bal: {formatCurrency(acc.currentBalance || 0)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Narration */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block ml-1">
+                    Narration / Remarks
+                  </label>
+                  <textarea
+                    className="w-full bg-[#f8fafc] text-slate-800 font-medium border border-slate-200 rounded-xl p-3 text-xs focus:border-indigo-500 focus:outline-none transition-all h-16 resize-none"
+                    value={payoutNarration}
+                    onChange={(e) => setPayoutNarration(e.target.value)}
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-3">
+                  <button
+                    onClick={() => setPayoutDriver(null)}
+                    className="flex-1 h-12 bg-slate-100 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-200 cursor-pointer active:scale-95 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    disabled={saving || !payoutSelectedAccountId}
+                    onClick={handlePostSalaryPayment}
+                    className="flex-1 h-12 bg-emerald-600 text-white font-extrabold text-xs rounded-xl hover:bg-emerald-700 cursor-pointer shadow-lg disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all uppercase tracking-widest"
+                  >
+                    {saving ? 'Saving...' : 'Accept & Pay'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

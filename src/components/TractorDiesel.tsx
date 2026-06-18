@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc, getDocs, where, limit, Timestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, runTransaction, orderBy, deleteDoc, getDocs, where, limit, Timestamp, updateDoc } from 'firebase/firestore';
 import { Tractor, DieselLog, MaintenanceLog, Bill, Account } from '../types';
 import { 
   Plus, 
@@ -38,6 +38,7 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
   const [isAddingDiesel, setIsAddingDiesel] = useState(false);
   const [isAddingMaintenance, setIsAddingMaintenance] = useState(false);
   const [showTractorModal, setShowTractorModal] = useState(false);
+  const [editingTractor, setEditingTractor] = useState<any | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'tractor' | 'diesel' | 'maint', id: string, name?: string } | null>(null);
   
@@ -889,6 +890,7 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
   const handleDeleteTractor = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'tractors', id));
+      alert("✅ Tractor deleted successfully!");
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `tractors/${id}`);
     }
@@ -897,8 +899,39 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
   const handleDeleteLog = async (type: 'diesel' | 'maint', id: string) => {
     try {
       await deleteDoc(doc(db, type === 'diesel' ? 'dieselLogs' : 'maintenanceLogs', id));
+      alert(`✅ ${type === 'diesel' ? 'Diesel Log' : 'Maintenance Log'} deleted successfully!`);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `${type === 'diesel' ? 'dieselLogs' : 'maintenanceLogs'}/${id}`);
+    }
+  };
+
+  const handleEditTractorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTractor || !editingTractor.name || !editingTractor.vehicleNumber) return;
+
+    try {
+      const tractorRef = doc(db, 'tractors', editingTractor.id);
+      await updateDoc(tractorRef, {
+        name: editingTractor.name.trim(),
+        vehicleNumber: editingTractor.vehicleNumber.trim().toUpperCase(),
+        insuranceExpiry: editingTractor.insuranceExpiry
+      });
+
+      // Synchronize associated account name in Ledger
+      const qAcc = query(collection(db, 'accounts'), where('tractorId', '==', editingTractor.id));
+      const accSnap = await getDocs(qAcc);
+      if (!accSnap.empty) {
+        const accDoc = accSnap.docs[0];
+        await updateDoc(accDoc.ref, {
+          name: editingTractor.name.trim()
+        });
+      }
+
+      setEditingTractor(null);
+      alert("✅ Tractor details and associated ledger account updated successfully!");
+    } catch (error: any) {
+      console.error(error);
+      alert("Error updating tractor details: " + (error?.message || error));
     }
   };
 
@@ -1064,7 +1097,20 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
                       {tractor.vehicleNumber}
                     </p>
                     <button 
-                      onClick={() => tractor.id && setDeleteConfirm({ type: 'tractor', id: tractor.id, name: tractor.name })}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingTractor(tractor);
+                      }}
+                      className="p-1 text-slate-300 hover:text-blue-500 transition-colors"
+                      title="Edit Tractor"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (tractor.id) setDeleteConfirm({ type: 'tractor', id: tractor.id, name: tractor.name });
+                      }}
                       className="p-1 text-slate-300 hover:text-red-500 transition-colors"
                     >
                       <Trash2 size={14} />
@@ -1567,6 +1613,68 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
                 <button type="submit" className="w-full material-btn material-btn-primary h-14 mt-4 shadow-lg shadow-blue-100">
                   Add Tractor
                 </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {editingTractor && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-slate-900">Edit Tractor Details</h2>
+                <button onClick={() => setEditingTractor(null)} className="text-slate-400 cursor-pointer">
+                  <Plus size={24} className="rotate-45" />
+                </button>
+              </div>
+              <form onSubmit={handleEditTractorSubmit} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Tractor Name</label>
+                  <input
+                    required
+                    className="material-input h-14 bg-slate-50"
+                    placeholder="e.g. Swaraj 744"
+                    value={editingTractor.name}
+                    onChange={e => setEditingTractor({...editingTractor, name: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Vehicle Number</label>
+                  <input
+                    required
+                    className="material-input h-14 bg-slate-50"
+                    placeholder="e.g. RJ-14-GH-1234"
+                    value={editingTractor.vehicleNumber}
+                    onChange={e => setEditingTractor({...editingTractor, vehicleNumber: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Insurance Expiry Date</label>
+                  <input
+                    required
+                    type="date"
+                    className="material-input h-14 bg-slate-50"
+                    value={editingTractor.insuranceExpiry || ''}
+                    onChange={e => setEditingTractor({...editingTractor, insuranceExpiry: e.target.value})}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    type="button" 
+                    onClick={() => setEditingTractor(null)}
+                    className="flex-1 border border-slate-200 text-slate-500 font-bold h-14 rounded-xl text-sm cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="flex-1 material-btn material-btn-primary h-14 shadow-lg shadow-blue-100 cursor-pointer">
+                    Save Changes
+                  </button>
+                </div>
               </form>
             </motion.div>
           </div>

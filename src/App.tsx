@@ -720,29 +720,31 @@ export default function App() {
 
       {/* Desktop Sidebar */}
       <aside
-        className={`md:flex md:w-64 bg-white border-r border-slate-200 flex-col p-6 sticky top-0 h-screen z-50 ${isSidebarOpen ? "flex fixed inset-0 w-full" : "hidden"}`}
+        className={`md:flex md:w-64 bg-white border-r border-slate-200 flex-col px-6 pt-12 pb-6 sticky top-0 h-screen z-50 ${isSidebarOpen ? "flex fixed inset-0 w-full" : "hidden"}`}
       >
-        <div className="flex items-center justify-between mb-10">
-          <div className="flex flex-col items-center gap-3 group px-2 text-center pb-4 border-b border-slate-100 mb-6 w-full">
-            <div className="text-slate-900 transition-all group-hover:scale-110 drop-shadow-sm">
-              <Logo size={56} />
+        <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100/80">
+          <div className="flex items-center gap-2.5 group">
+            <div className="text-slate-900 transition-all group-hover:scale-105 drop-shadow-sm shrink-0">
+              <Logo size={36} />
             </div>
-            <h1 className="font-display font-black text-xl tracking-tight text-slate-900 flex flex-col">
-              Tanker
-              <span className="relative text-blue-600 text-2xl -mt-1">
-                Wala
-                <span className="absolute top-[90%] left-0 text-[8px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">
-                  Powered by Rajhans
+            <div className="flex flex-col min-w-0">
+              <h1 className="font-display font-black text-base text-slate-900 leading-none">
+                Tanker
+                <span className="text-blue-600 ml-0.5 relative inline-block">
+                  Wala
+                  <span className="absolute top-[100%] left-0 text-[6px] text-slate-400 font-bold whitespace-nowrap tracking-normal normal-case leading-none mt-0.5">
+                    by Rajhans
+                  </span>
                 </span>
-              </span>
-            </h1>
+              </h1>
+            </div>
           </div>
-          <button onClick={() => setIsSidebarOpen(false)} className="md:hidden">
-            <X size={24} />
+          <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600">
+            <X size={20} />
           </button>
         </div>
 
-        <nav className="flex flex-col gap-2 flex-1 scrollbar-hide overflow-y-auto">
+        <nav className="flex flex-col gap-1 flex-1 scrollbar-hide overflow-y-auto pr-0.5">
           {(!isSuperAdmin || inspectedFranchiseId) && (
             <>
               <SidebarButton
@@ -926,124 +928,97 @@ export default function App() {
           )}
         </nav>
 
-        <div className="pt-6 border-t border-slate-100 mt-auto">
+        <div className="pt-4 border-t border-slate-100 mt-auto bg-white/50 space-y-3.5">
           {(!isSuperAdmin || inspectedFranchiseId) && (
-            <div className="px-2 mb-4">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                Internal Portals
+            <div className="px-1">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 px-0.5">
+                Quick Portals
               </p>
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2">
-                  <button
-                    onClick={async () => {
-                      const url = getPublicAppUrl();
-                      url.searchParams.set("mode", "booking");
-                      url.searchParams.delete("tab");
-                      if (currentFranchise?.id) {
-                        url.searchParams.set("f", currentFranchise.id);
-                      }
-                      const link = url.toString();
-                      await copyToClipboard(link);
-                      alert(
-                        "Portal Link Copied! You can now share this URL with your customers.",
-                      );
-                    }}
-                    className="flex-1 p-2 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
-                  >
-                    Copy Cust. Link
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const url = getPublicAppUrl();
-                      url.searchParams.set("mode", "driver");
-                      url.searchParams.delete("tab");
-                      if (currentFranchise?.id) {
-                        url.searchParams.set("f", currentFranchise.id);
-                      }
-                      const link = url.toString();
-                      await copyToClipboard(link);
-                      alert(
-                        "Driver App Link Copied! You can now share this URL with your drivers.",
-                      );
-                    }}
-                    className="flex-1 p-2 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
-                  >
-                    Copy Driver Link
-                  </button>
-                </div>
+              <div className="grid grid-cols-2 gap-1.5">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    const url = getPublicAppUrl();
+                    url.searchParams.set("mode", "booking");
+                    url.searchParams.delete("tab");
+                    if (currentFranchise?.id) {
+                      url.searchParams.set("f", currentFranchise.id);
+                    }
+                    const link = url.toString();
+                    await copyToClipboard(link);
+                    alert("Customer Portal link copied!");
+                  }}
+                  className="p-1.5 md:p-2 bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-xl text-center text-[10px] font-bold text-slate-600 hover:text-slate-900 transition-all cursor-pointer flex items-center justify-center gap-1 active:scale-95 duration-150"
+                  title="Copy Customer Self-Booking URL"
+                >
+                  <Users size={12} className="text-slate-400" />
+                  Cust. Link
+                </button>
+                <button
+                  onClick={async () => {
                     const url = getPublicAppUrl();
                     url.searchParams.set("mode", "driver");
                     url.searchParams.delete("tab");
-                    window.open(url.toString(), "_blank");
+                    if (currentFranchise?.id) {
+                      url.searchParams.set("f", currentFranchise.id);
+                    }
+                    const link = url.toString();
+                    await copyToClipboard(link);
+                    alert("Driver App link copied!");
                   }}
-                  className="w-full p-2 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-colors border border-blue-100"
+                  className="p-1.5 md:p-2 bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-xl text-center text-[10px] font-bold text-slate-600 hover:text-slate-900 transition-all cursor-pointer flex items-center justify-center gap-1 active:scale-95 duration-150"
+                  title="Copy Dispatch & Driver App URL"
                 >
-                  Test Driver App View
+                  <Truck size={12} className="text-slate-400" />
+                  Driver Link
                 </button>
               </div>
             </div>
           )}
 
-          {/* Real-time Sync Status Indicator */}
-          <div className={`mx-2 mb-4 p-3.5 rounded-2xl border transition-all ${
-            isOnline 
-              ? 'bg-emerald-50/50 border-emerald-100 text-emerald-800' 
-              : 'bg-amber-50/70 border-amber-200 text-amber-800 animate-pulse'
-          }`}>
-            <div className="flex items-center gap-2.5">
-              <span className={`relative flex h-2 w-2`}>
-                {isOnline && (
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          {/* User Profile & Logout & Connection Status in one sleek horizontal card */}
+          <div className="bg-slate-50/70 p-2 md:p-2.5 rounded-2xl border border-slate-100 flex items-center justify-between gap-2 shadow-sm">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200 relative shrink-0">
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || ""}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-blue-100 text-blue-600 text-xs font-bold font-sans">
+                    {user.displayName ? user.displayName.substring(0, 1) : "A"}
+                  </div>
                 )}
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-              </span>
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-wider leading-none">
-                  {isOnline ? 'Live Cloud Sync' : 'Offline Mode'}
+                {/* Status indicator on top of avatar */}
+                <span className={`absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full ring-2 ring-white ${isOnline ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <p className="text-[11px] md:text-xs font-bold text-slate-900 truncate tracking-tight pr-1 leading-tight">
+                  {user.displayName || "Admin"}
                 </p>
-                <p className="text-[9px] font-medium text-slate-400 mt-1 leading-tight">
-                  {isOnline 
-                    ? 'All actions synced live' 
-                    : 'Writes cached; auto-syncing'}
+                <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider truncate leading-tight">
+                  {isSuperAdmin
+                    ? "Super Admin"
+                    : currentFranchise
+                      ? currentFranchise.name
+                      : "Staff"}
+                </p>
+                <p className="text-[7px] font-bold text-slate-400 -mt-0.5 tracking-tight flex items-center gap-1 leading-none mt-0.5">
+                  <span className={`w-1 h-1 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                  {isOnline ? 'Active Sync' : 'Offline Mode'}
                 </p>
               </div>
             </div>
+            <button
+              onClick={handleLogout}
+              className="w-8 h-8 md:w-9 md:h-9 rounded-xl bg-white border border-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all shadow-sm active:scale-95 flex items-center justify-center cursor-pointer hover:border-red-100 shrink-0"
+              title="Sign Out"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
-
-          <div className="flex items-center gap-3 px-2 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center overflow-hidden border border-slate-100">
-              {user.photoURL ? (
-                <img
-                  src={user.photoURL}
-                  alt={user.displayName || ""}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <Users className="text-blue-500 w-5 h-5" />
-              )}
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <p className="text-sm font-bold text-slate-900 truncate">
-                {user.displayName || "Administrator"}
-              </p>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                {isSuperAdmin
-                  ? "Super Admin"
-                  : currentFranchise
-                    ? `Franchise: ${currentFranchise.name}`
-                    : "Staff"}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
-          >
-            <LogOut size={18} />
-            Logout
-          </button>
         </div>
       </aside>
 
@@ -1182,21 +1157,21 @@ function SidebarButton({
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all duration-200 ${
+      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all duration-200 cursor-pointer ${
         active
-          ? "bg-blue-600 text-white font-bold shadow-lg shadow-blue-100"
+          ? "bg-blue-600 text-white font-bold shadow-md shadow-blue-50/50"
           : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
       }`}
     >
-      <div className="flex items-center gap-3">
-        <div className={`${active ? "text-white" : "text-slate-400"}`}>
-          {icon}
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className={`transition-transform duration-200 shrink-0 ${active ? "text-white scale-105" : "text-slate-400 group-hover:text-slate-600"}`}>
+          {React.cloneElement(icon as React.ReactElement<any>, { size: 18 })}
         </div>
-        <span className="text-sm tracking-tight">{label}</span>
+        <span className="text-xs font-semibold tracking-tight truncate">{label}</span>
       </div>
       {badgeCount && badgeCount > 0 ? (
         <span
-          className={`text-[10px] font-black px-2 py-0.5 rounded-full ${active ? "bg-white text-blue-600" : "bg-red-500 text-white animate-bounce"}`}
+          className={`text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${active ? "bg-white text-blue-600" : "bg-red-500 text-white animate-bounce"}`}
         >
           {badgeCount}
         </span>
