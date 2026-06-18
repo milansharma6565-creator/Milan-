@@ -37,10 +37,13 @@ import {
   FlaskConical as Flask,
   Package,
   HelpCircle,
-  QrCode
+  QrCode,
+  LineChart as LineIcon,
+  BarChart2 as BarIcon,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar, Legend } from 'recharts';
 import { formatCurrency, PAYMENT_MODES, generateBillNumber, getPublicAppUrl, copyToClipboard } from '../constants';
 import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isToday, subMonths, addMonths } from 'date-fns';
 import { generatePDF } from '../lib/pdfUtils';
@@ -335,26 +338,66 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [cashBalance, setCashBalance] = useState(0);
   const [bankBalance, setBankBalance] = useState(0);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [vouchersList, setVouchersList] = useState<any[]>([]);
 
   const stats = useMemo(() => {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
 
     const todayBillsList = bills.filter(b => {
-      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
-      return bDate >= todayStart;
+      if (b.date === todayStr) return true;
+      if (b.createdAt) {
+        try {
+          const cDate = b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt.seconds * 1000);
+          if (format(cDate, 'yyyy-MM-dd') === todayStr) return true;
+        } catch (e) {}
+      }
+      try {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        return format(bDate, 'yyyy-MM-dd') === todayStr;
+      } catch (e) {
+        return false;
+      }
     });
 
     const todayCollection = todayBillsList
       .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
       .reduce((sum, b) => sum + b.grandTotal, 0);
 
+    // Calculate today's manual/quick cash changes from vouchers List (+ for Receipt, - for Payment)
+    let todayCashAdjustment = 0;
+    vouchersList.forEach(vch => {
+      let vchDateStr = '';
+      if (vch.date) {
+        try {
+          const dObj = vch.date.toDate ? vch.date.toDate() : new Date(vch.date);
+          vchDateStr = format(dObj, 'yyyy-MM-dd');
+        } catch (e) {}
+      }
+      
+      if (vchDateStr === todayStr) {
+        // Skip bill-settlement receipt vouchers which are already registered under todayBillsList's collection
+        const isSelfGeneratedBillVch = vch.voucherNumber?.startsWith('REC-') || vch.voucherNumber?.startsWith('TRP-');
+        
+        if (!isSelfGeneratedBillVch && vch.items) {
+          vch.items.forEach((item: any) => {
+            if (item.accountName === 'Cash') {
+              if (item.type === 'Dr') {
+                todayCashAdjustment += item.amount;
+              } else if (item.type === 'Cr') {
+                todayCashAdjustment -= item.amount;
+              }
+            }
+          });
+        }
+      }
+    });
+
     const todayCashCollection = todayBillsList
       .filter(b => b.paymentMode === 'Cash' && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + b.grandTotal, 0);
+      .reduce((sum, b) => sum + b.grandTotal, 0) + todayCashAdjustment;
 
     const todayPendingCollection = todayBillsList
-      .filter(b => b.paymentMode === 'Pending' && b.status !== 'Cancelled')
+      .filter(b => (b.paymentMode === 'Pending' || !b.isSettled) && b.status !== 'Cancelled')
       .reduce((sum, b) => sum + b.grandTotal, 0);
       
     const totalPending = accounts
@@ -487,11 +530,49 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .filter(b => b.status === 'Delivered' && (b.category || '').includes('TANKER'))
       .reduce((sum, b) => sum + (b.quantity || 1), 0);
 
+    const todayTotalSale = todayBillsList
+      .filter(b => b.status !== 'Cancelled')
+      .reduce((sum, b) => sum + b.grandTotal, 0);
+
+    const monthBList = bills.filter(b => {
+      try {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const now = new Date();
+        return bDate.getMonth() === now.getMonth() && bDate.getFullYear() === now.getFullYear() && b.status !== 'Cancelled';
+      } catch (e) {
+        return false;
+      }
+    });
+    const monthTotalSale = monthBList.reduce((sum, b) => sum + b.grandTotal, 0);
+
+    const todayDeliveredSale = todayBillsList
+      .filter(b => b.status === 'Delivered')
+      .reduce((sum, b) => sum + b.grandTotal, 0);
+
+    const monthDeliveredSale = bills.filter(b => {
+      try {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const now = new Date();
+        return bDate.getMonth() === now.getMonth() && bDate.getFullYear() === now.getFullYear() && b.status === 'Delivered';
+      } catch (e) {
+        return false;
+      }
+    }).reduce((sum, b) => sum + b.grandTotal, 0);
+
+    const totalDeliveredSale = bills
+      .filter(b => b.status === 'Delivered')
+      .reduce((sum, b) => sum + b.grandTotal, 0);
+
     return {
       todayCollection,
       todayCashCollection,
       todayPendingCollection,
       totalPending,
+      todayDeliveredSale,
+      monthDeliveredSale,
+      totalDeliveredSale,
+      todayTotalSale,
+      monthTotalSale,
       cashBalance,
       bankBalance,
       deliveredCount,
@@ -521,6 +602,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     customerId?: string;
   } | null>(null);
   const [showInsuranceAlert, setShowInsuranceAlert] = useState(false);
+  const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
+  const [salesChartRange, setSalesChartRange] = useState<'weekly' | 'monthly' | 'half-yearly' | 'yearly'>('weekly');
   const [insuranceAlerts, setInsuranceAlerts] = useState<Tractor[]>([]);
 
   useEffect(() => {
@@ -633,6 +716,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     let driversQ = query(collection(db, 'drivers'));
     let tractorsQ = query(collection(db, 'tractors'));
     let accountsQ = query(collection(db, 'accounts'));
+    let vouchersQ = query(collection(db, 'vouchers'), orderBy('date', 'desc'), limit(500));
 
     // Apply Franchise Filter if present
     const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
@@ -645,6 +729,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       driversQ = query(collection(db, 'drivers'), where('franchiseId', '==', fid));
       tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', fid));
       accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
+      vouchersQ = query(collection(db, 'vouchers'), where('franchiseId', '==', fid), orderBy('date', 'desc'), limit(500));
     } else if (!isSuperAdmin) {
       const none = 'PLACEHOLDER_NONE';
       billsQ = query(collection(db, 'bills'), where('franchiseId', '==', none));
@@ -655,6 +740,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       driversQ = query(collection(db, 'drivers'), where('franchiseId', '==', none));
       tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', none));
       accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', none));
+      vouchersQ = query(collection(db, 'vouchers'), where('franchiseId', '==', none));
     }
 
     const unsubBills = onSnapshot(billsQ, 
@@ -699,14 +785,51 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       (snapshot) => setTractors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tractor))),
       (error) => handleFirestoreError(error, OperationType.LIST, 'tractors-dashboard')
     );
+    const unsubVouchers = onSnapshot(vouchersQ,
+      (snapshot) => setVouchersList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (error) => console.log('Vouchers err:', error?.message || error)
+    );
     const unsubAccounts = onSnapshot(accountsQ, 
       (snapshot) => {
         const accs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account));
-        setAccounts(accs);
+        
+        // Prioritize accounts with non-zero balances
+        const sortedRaw = [...accs].sort((a, b) => {
+          const balA = Math.abs(a.currentBalance || 0) + Math.abs(a.openingBalance || 0);
+          const balB = Math.abs(b.currentBalance || 0) + Math.abs(b.openingBalance || 0);
+          return balB - balA;
+        });
+
+        const deduplicated: Account[] = [];
+        const seenNames = new Set<string>();
+        let bankAccountsCount = 0;
+
+        sortedRaw.forEach(acc => {
+          const normName = acc.name.trim().toLowerCase();
+          const isBank = normName.includes('bank') || normName.includes('bob');
+
+          if (isBank) {
+            if (!seenNames.has(normName) && bankAccountsCount < 3) {
+              deduplicated.push(acc);
+              seenNames.add(normName);
+              bankAccountsCount++;
+            } else if (bankAccountsCount < 3 && !deduplicated.some(x => x.id === acc.id)) {
+              deduplicated.push(acc);
+              bankAccountsCount++;
+            }
+          } else {
+            if (!seenNames.has(normName)) {
+              deduplicated.push(acc);
+              seenNames.add(normName);
+            }
+          }
+        });
+
+        setAccounts(deduplicated);
         
         // Derive Cash & Bank from accounts
-        const cash = accs.find(a => a.name === 'Cash');
-        const bank = accs.find(a => a.name === 'Bank Account');
+        const cash = deduplicated.find(a => a.name === 'Cash');
+        const bank = deduplicated.find(a => a.name === 'Bank Account');
         if (cash) setCashBalance(cash.currentBalance || 0);
         if (bank) setBankBalance(bank.currentBalance || 0);
       },
@@ -721,6 +844,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       unsubCustomers();
       unsubDrivers();
       unsubTractors();
+      unsubVouchers();
       unsubAccounts();
     };
   }, [franchiseId, isSuperAdmin]);
@@ -866,6 +990,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         const vchRef = doc(collection(db, 'vouchers'));
         transaction.set(vchRef, {
           date: entryDate,
+          franchiseId: fid || null,
           type: quickVoucher.type,
           voucherNumber: `QV-${Math.floor(Date.now()/1000)}`,
           items: [
@@ -1752,23 +1877,48 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           }
         }
 
-        await updateDoc(doc(db, 'bills', editingBill.id), { 
+        // AUTO TRACTOR PREDICTION: find which tractor is mostly assigned with this driver from history
+        const driverBills = bills.filter(b => b.driverId === driver.id && b.tractorId);
+        let autoTractorId = editingBill.tractorId || '';
+        if (!autoTractorId && driverBills.length > 0) {
+          const counts: Record<string, number> = {};
+          let maxCount = 0;
+          driverBills.forEach(b => {
+            if (b.tractorId) {
+              counts[b.tractorId] = (counts[b.tractorId] || 0) + 1;
+              if (counts[b.tractorId] > maxCount) {
+                maxCount = counts[b.tractorId];
+                autoTractorId = b.tractorId;
+              }
+            }
+          });
+        }
+
+        const billUpdates: any = { 
           driverName: driver.name,
           driverMobile: driver.mobile,
           driverId: driver.id,
           status: 'Assigned',
           updatedAt: serverTimestamp()
-        });
+        };
+
+        if (autoTractorId) {
+          billUpdates.tractorId = autoTractorId;
+        }
+
+        await updateDoc(doc(db, 'bills', editingBill.id), billUpdates);
 
         // Create or Update Trip Record
         const qExisting = query(collection(db, 'trips'), where('billId', '==', editingBill.id));
         const existingSnap = await getDocs(qExisting);
         
+        const finalTractorId = autoTractorId || editingBill.tractorId || 'T-01';
+        
         if (!existingSnap.empty) {
           await updateDoc(doc(db, 'trips', existingSnap.docs[0].id), {
             driverId: driver.id,
             driverName: driver.name,
-            tractorId: editingBill.tractorId || 'T-01',
+            tractorId: finalTractorId,
             remarks: editingBill.remarks || '',
             status: 'Active',
             updatedAt: serverTimestamp()
@@ -1779,7 +1929,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             billNumber: editingBill.billNumber,
             driverId: driver.id,
             driverName: driver.name,
-            tractorId: editingBill.tractorId || 'T-01',
+            tractorId: finalTractorId,
             customerName: editingBill.customerName,
             customerMobile: editingBill.customerMobile,
             siteLocation: editingBill.customerAddress,
@@ -2260,100 +2410,36 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         )}
       </AnimatePresence>
 
-      {franchiseId && (
-        <div className="mb-8">
-          <CloudPrintGateway franchiseId={franchiseId} userName={auth.currentUser?.displayName || 'Operator'} />
-        </div>
-      )}
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
           whileHover={{ y: -6, scale: 1.02 }}
           transition={{ type: "spring", stiffness: 300, damping: 15 }}
-          className="relative bg-white p-6 rounded-[2.5rem] text-slate-900 border-t border-x border-slate-100 border-b-[8px] border-b-slate-200/90 shadow-[0_20px_40px_rgba(34,197,94,0.08),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden group min-h-[200px]"
+          onClick={() => setQuickVoucher({ type: 'Receipt', paymentMethod: 'Cash' })}
+          className="relative bg-white p-6 rounded-[2.5rem] text-slate-900 border-t border-x border-slate-100 border-b-[8px] border-b-emerald-200 shadow-[0_20px_40px_rgba(16,185,129,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden group min-h-[200px] cursor-pointer"
           style={{
-            background: "linear-gradient(135deg, #ffffff 0%, #f4f6f8 100%)"
+            background: "linear-gradient(135deg, #ffffff 0%, #f7fdfa 100%)"
           }}
         >
           {/* Mirror Shine Effect */}
           <motion.div 
             animate={{ x: ['150%', '-150%'] }}
             transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/80 to-transparent skew-x-20 pointer-events-none z-20"
+            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent skew-x-20 pointer-events-none z-20"
           />
 
-          {/* Dynamic Hourly Cash Animation: Blowing Money */}
-          <div className="absolute inset-0 pointer-events-none opacity-90 overflow-hidden">
-            {(() => {
-              const hour = new Date().getHours();
-              const theme = hour % 4;
-              
-              if (theme === 0) {
-                // Blowing 500/2000 notes style
-                return [...Array(25)].map((_, i) => (
-                  <motion.div
-                    key={`v-wind-${i}`}
-                    initial={{ x: -100, y: Math.random() * 250, rotateZ: Math.random() * 360, opacity: 0 }}
-                    animate={{ x: 500, y: (Math.random() - 0.5) * 150 + (i * 8), rotateZ: [0, 360, 720], opacity: [0, 1, 1, 0] }}
-                    transition={{ duration: 1 + Math.random() * 1.5, repeat: Infinity, delay: Math.random() * 5, ease: "linear" }}
-                    className="absolute"
-                  >
-                    <div className={`w-14 h-7 border-2 rounded-[2px] flex items-center justify-center shadow-lg ${i % 2 === 0 ? 'bg-pink-100 border-pink-200' : 'bg-green-100 border-green-200'}`}>
-                      <div className={`text-[10px] font-black italic ${i % 2 === 0 ? 'text-pink-700' : 'text-green-700'}`}>₹{i % 2 === 0 ? '2000' : '500'}</div>
-                    </div>
-                  </motion.div>
-                ));
-              } else if (theme === 1) {
-                // Falling Coins Rain
-                return [...Array(20)].map((_, i) => (
-                  <motion.div
-                    key={`rain-${i}`}
-                    initial={{ y: -50, x: Math.random() * 350, opacity: 0 }}
-                    animate={{ y: 300, opacity: [0, 1, 1, 0], rotateY: 360 }}
-                    transition={{ duration: 1.5 + Math.random() * 1, repeat: Infinity, delay: Math.random() * 4 }}
-                    className="absolute w-6 h-6 bg-yellow-400 rounded-full border-2 border-yellow-500 flex items-center justify-center shadow-md shadow-yellow-900/20"
-                  >
-                    <Coins size={12} className="text-yellow-700" />
-                  </motion.div>
-                ));
-              } else if (theme === 2) {
-                // Floating Bill Bundles
-                return [...Array(12)].map((_, i) => (
-                  <motion.div
-                    key={`bubble-${i}`}
-                    initial={{ scale: 0, x: Math.random() * 300, y: 220, opacity: 0 }}
-                    animate={{ scale: [1, 1.2, 1], y: -50, x: (Math.random() * 300) + Math.sin(i) * 50, opacity: [0, 0.8, 0] }}
-                    transition={{ duration: 3 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 5 }}
-                    className="absolute w-12 h-6 bg-green-500/10 border border-green-500/20 rounded shadow-sm backdrop-blur-[1px] flex items-center justify-center"
-                  >
-                    <Banknote size={14} className="text-green-600/30" />
-                  </motion.div>
-                ));
-              } else {
-                // Fast Blowing Dollars (User's specific request)
-                return [...Array(30)].map((_, i) => (
-                  <motion.div
-                    key={`dollar-fast-${i}`}
-                    initial={{ x: -100, y: Math.random() * 250, rotateZ: Math.random() * 360, scale: 0.5, opacity: 0 }}
-                    animate={{ x: 500, y: (Math.random() - 0.5) * 100 + (i * 6), rotateX: [0, 720], rotateZ: [0, 1080], opacity: [0, 1, 1, 0] }}
-                    transition={{ duration: 0.5 + Math.random() * 0.5, repeat: Infinity, delay: Math.random() * 3, ease: "linear" }}
-                    className="absolute"
-                  >
-                    <div className="w-12 h-6 bg-green-100 border border-green-300 rounded-[1px] flex items-center justify-center shadow-sm">
-                      <span className="text-xs font-black text-green-700">$</span>
-                    </div>
-                  </motion.div>
-                ));
-              }
-            })()}
+          {/* Background Decorative Graphic */}
+          <div className="absolute inset-x-0 bottom-0 top-[40%] opacity-[0.06] pointer-events-none overflow-hidden select-none">
+            <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <path d="M0,80 Q25,30 50,65 T100,20 L100,100 L0,100 Z" fill="#10b981" />
+            </svg>
           </div>
 
           <div className="relative z-10">
             <div className="flex items-start justify-between mb-4">
-              <div className="bg-slate-900/10 w-12 h-12 rounded-2xl flex items-center justify-center border border-white/40 shadow-inner">
-                <Banknote size={24} className="text-slate-800" />
+              <div className="bg-emerald-50 text-emerald-600 w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm">
+                <Banknote size={24} />
               </div>
               <div className="text-right flex flex-col items-end bg-emerald-50 border border-emerald-100 rounded-2xl p-2 px-3 shadow-sm">
                 <span className="text-[9px] uppercase font-black text-emerald-600 tracking-wider">Today's Cash (आज का कैश)</span>
@@ -2363,33 +2449,23 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 </span>
               </div>
             </div>
+
             <div className="flex items-center gap-3 mb-1 justify-between">
-              <div className="text-[11px] uppercase font-black tracking-widest text-slate-500">Total Cash (कुल कैश)</div>
-              <div className="flex gap-2 relative z-30">
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setQuickVoucher({ type: 'Receipt', paymentMethod: 'Cash' });
-                  }}
-                  className="w-8 h-8 rounded-xl bg-green-600 text-white shadow-lg shadow-green-100 flex items-center justify-center hover:bg-green-700 transition-all active:scale-90"
-                >
-                  <Plus size={18} />
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setQuickVoucher({ type: 'Payment', paymentMethod: 'Cash' });
-                  }}
-                  className="w-8 h-8 rounded-xl bg-red-600 text-white shadow-lg shadow-red-100 flex items-center justify-center hover:bg-red-700 transition-all active:scale-90"
-                >
-                  <Minus size={18} />
-                </button>
-              </div>
+              <div className="text-[11px] uppercase font-black tracking-widest text-slate-500">Cash in Hand (कैश इन हैण्ड)</div>
+              <span className="text-[9px] font-black text-emerald-650 bg-emerald-100 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                + New Entry
+              </span>
             </div>
+
             <div className="text-4xl font-display font-black text-slate-900 tracking-tight flex items-baseline">
-              <span className="text-2xl mr-1 text-slate-400">₹</span>
-              {Number(stats.cashBalance).toLocaleString()}
+              <span className="text-2xl mr-1 text-emerald-500">₹</span>
+              {Number(stats.cashBalance || 0).toLocaleString()}
             </div>
+            
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase flex items-center gap-1">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+              Cash drawer physical ledger balance
+            </p>
           </div>
         </motion.div>
 
@@ -2446,20 +2522,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             <div className="text-4xl font-display font-black text-slate-900 tracking-tight flex items-baseline">
               <span className="text-2xl mr-1 text-orange-400">₹</span>
               <div className="flex">
-                {Math.floor(stats.totalPending).toString().split('').map((digit, i) => (
-                  <motion.span
-                    key={i}
-                    animate={removedDigits.includes(i) ? { 
-                      y: -100, 
-                      opacity: 0, 
-                      scale: 0,
-                      rotate: 45 
-                    } : { y: 0, opacity: 1, scale: 1 }}
-                    className="inline-block"
-                  >
-                    {digit}
-                  </motion.span>
-                ))}
+                {Number(Math.floor(stats.totalPending) || 0).toLocaleString()}
               </div>
             </div>
             <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Updates direct to ledger accounts</p>
@@ -2585,20 +2648,34 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           <h3 className="text-xl font-display font-bold mb-6">Smart Business Insights</h3>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Auto-Accounting Status */}
-            <div className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-sm flex flex-col justify-between">
-              <div>
+            {/* Delivered Sales Card (Smart Business Insights) */}
+            <div className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-sm flex flex-col justify-between relative overflow-hidden group">
+              <div className="absolute -right-4 -bottom-4 opacity-5 text-blue-500 group-hover:scale-110 transition-transform">
+                <TrendingUp size={80} />
+              </div>
+              <div className="relative z-10">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center">
-                    <ShieldCheck size={20} />
+                    <TrendingUp size={20} className="text-blue-400" />
                   </div>
                   <div>
-                    <div className="text-sm font-bold">Auto-Ledger Active</div>
-                    <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Billing & Sync</div>
+                    <div className="text-sm font-bold text-white">Delivered Sales</div>
+                    <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Real-time Performance</div>
                   </div>
                 </div>
-                <div className="text-xs text-slate-400 leading-relaxed">
-                  Tokens are automatically posted to accounting ledger in real-time. No manual entry needed for sales.
+                <div className="space-y-2 mt-4">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-xs text-slate-400">Month's Sales:</span>
+                    <span className="text-base font-black text-blue-400">
+                      ₹{Number(stats.monthDeliveredSale || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between border-t border-white/10 pt-2">
+                    <span className="text-xs text-slate-400">Total Sales:</span>
+                    <span className="text-base font-black text-white">
+                      ₹{Number(stats.totalDeliveredSale || 0).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -4007,6 +4084,24 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           />
         )}
       </AnimatePresence>
+
+      {/* Sales Analytics Dashboard Modal */}
+      <AnimatePresence>
+        {isSalesModalOpen && (
+          <SalesAnalyticsModal 
+            bills={bills} 
+            onClose={() => setIsSalesModalOpen(false)} 
+            salesChartRange={salesChartRange}
+            setSalesChartRange={setSalesChartRange}
+          />
+        )}
+      </AnimatePresence>
+
+      {franchiseId && (
+        <div className="mt-8">
+          <CloudPrintGateway franchiseId={franchiseId} userName={auth.currentUser?.displayName || 'Operator'} />
+        </div>
+      )}
     </div>
   );
 }
@@ -4142,6 +4237,342 @@ function MonthlyCanCalendar({ customer, bills, onClose }: { customer: Customer, 
                   {customerBills.filter(b => isSameMonth(new Date(b.date), currentMonth)).reduce((acc, curr) => acc + (curr.quantity || 0), 0)}
                </div>
             </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function SalesAnalyticsModal({ 
+  bills, 
+  onClose, 
+  salesChartRange, 
+  setSalesChartRange 
+}: { 
+  bills: Bill[], 
+  onClose: () => void, 
+  salesChartRange: 'weekly' | 'monthly' | 'half-yearly' | 'yearly', 
+  setSalesChartRange: (val: 'weekly' | 'monthly' | 'half-yearly' | 'yearly') => void 
+}) {
+  const chartData = useMemo(() => {
+    const today = new Date();
+    
+    if (salesChartRange === 'weekly') {
+      return Array.from({ length: 7 }).map((_, i) => {
+        const d = subDays(today, 6 - i);
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const dayBills = bills.filter(b => {
+          if (b.status === 'Cancelled') return false;
+          const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+          return format(bDate, 'yyyy-MM-dd') === dateStr;
+        });
+        const sales = dayBills.reduce((sum, b) => sum + b.grandTotal, 0);
+        const pending = dayBills.reduce((sum, b) => {
+          if (b.isSettled) return sum;
+          if (b.paymentMode === 'Pending') return sum + b.grandTotal;
+          if (b.paymentMode === 'Split' && b.splitPayments) return sum + (b.splitPayments.pending || 0);
+          return sum + b.grandTotal;
+        }, 0);
+        return {
+          name: format(d, 'EEE (dd)'),
+          sales,
+          pending
+        };
+      });
+    } else if (salesChartRange === 'monthly') {
+      return Array.from({ length: 30 }).map((_, i) => {
+        const d = subDays(today, 29 - i);
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const dayBills = bills.filter(b => {
+          if (b.status === 'Cancelled') return false;
+          const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+          return format(bDate, 'yyyy-MM-dd') === dateStr;
+        });
+        const sales = dayBills.reduce((sum, b) => sum + b.grandTotal, 0);
+        const pending = dayBills.reduce((sum, b) => {
+          if (b.isSettled) return sum;
+          if (b.paymentMode === 'Pending') return sum + b.grandTotal;
+          if (b.paymentMode === 'Split' && b.splitPayments) return sum + (b.splitPayments.pending || 0);
+          return sum + b.grandTotal;
+        }, 0);
+        return {
+          name: format(d, 'dd MMM'),
+          sales,
+          pending
+        };
+      });
+    } else if (salesChartRange === 'half-yearly') {
+      return Array.from({ length: 6 }).map((_, i) => {
+        const d = subMonths(today, 5 - i);
+        const monthStr = format(d, 'yyyy-MM');
+        const monthBills = bills.filter(b => {
+          if (b.status === 'Cancelled') return false;
+          const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+          return format(bDate, 'yyyy-MM') === monthStr;
+        });
+        const sales = monthBills.reduce((sum, b) => sum + b.grandTotal, 0);
+        const pending = monthBills.reduce((sum, b) => {
+          if (b.isSettled) return sum;
+          if (b.paymentMode === 'Pending') return sum + b.grandTotal;
+          if (b.paymentMode === 'Split' && b.splitPayments) return sum + (b.splitPayments.pending || 0);
+          return sum + b.grandTotal;
+        }, 0);
+        return {
+          name: format(d, 'MMM yy'),
+          sales,
+          pending
+        };
+      });
+    } else {
+      return Array.from({ length: 12 }).map((_, i) => {
+        const d = subMonths(today, 11 - i);
+        const monthStr = format(d, 'yyyy-MM');
+        const monthBills = bills.filter(b => {
+          if (b.status === 'Cancelled') return false;
+          const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+          return format(bDate, 'yyyy-MM') === monthStr;
+        });
+        const sales = monthBills.reduce((sum, b) => sum + b.grandTotal, 0);
+        const pending = monthBills.reduce((sum, b) => {
+          if (b.isSettled) return sum;
+          if (b.paymentMode === 'Pending') return sum + b.grandTotal;
+          if (b.paymentMode === 'Split' && b.splitPayments) return sum + (b.splitPayments.pending || 0);
+          return sum + b.grandTotal;
+        }, 0);
+        return {
+          name: format(d, 'MMM yy'),
+          sales,
+          pending
+        };
+      });
+    }
+  }, [bills, salesChartRange]);
+
+  const summary = useMemo(() => {
+    const totalSales = chartData.reduce((acc, curr) => acc + curr.sales, 0);
+    const totalPending = chartData.reduce((acc, curr) => acc + curr.pending, 0);
+    const avgSales = Math.round(totalSales / (chartData.length || 1));
+    return {
+      totalSales,
+      avgSales,
+      totalPending
+    };
+  }, [chartData]);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 sm:p-6 overflow-y-auto"
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95, y: 20 }}
+        className="bg-white w-full max-w-5xl rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+      >
+        {/* Modal Header */}
+        <div className="p-6 md:p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="flex items-center gap-4">
+            <button onClick={onClose} className="p-3 hover:bg-white rounded-2xl text-slate-400 group transition-all">
+              <ArrowLeft className="group-hover:-translate-x-1 transition-transform" />
+            </button>
+            <div>
+              <h3 className="text-xl md:text-2xl font-black text-slate-900">Sales & Analysis Desk</h3>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <LineIcon size={12} /> Live Performance • Analytics
+              </p>
+            </div>
+          </div>
+          
+          <button 
+            onClick={onClose}
+            className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-all text-slate-500"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 scrollbar-thin">
+          {/* Main Range Filters */}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 gap-1 animate-fadeIn">
+              {(['weekly', 'monthly', 'half-yearly', 'yearly'] as const).map((range) => {
+                const labels = {
+                  'weekly': 'Weekly (हफ्तावार)',
+                  'monthly': 'Monthly (मासिक)',
+                  'half-yearly': '6 Months (छमाही)',
+                  'yearly': 'Yearly (सालाना)'
+                };
+                const active = salesChartRange === range;
+                return (
+                  <button
+                    key={range}
+                    onClick={() => setSalesChartRange(range)}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-150 ${
+                      active 
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-100' 
+                        : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'
+                    }`}
+                  >
+                    {labels[range]}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="text-xs font-black text-blue-600 bg-blue-50 border border-blue-100 rounded-xl px-3.5 py-2 uppercase tracking-wide">
+              Selected Period: {salesChartRange === 'weekly' ? 'Last 7 Days' : salesChartRange === 'monthly' ? 'Last 30 Days' : salesChartRange === 'half-yearly' ? 'Last 6 Months' : 'Last 12 Months'}
+            </div>
+          </div>
+
+          {/* Quick Metrics Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="bg-gradient-to-tr from-blue-50 to-blue-100/30 border border-blue-100 p-6 rounded-[2rem] shadow-sm">
+              <div className="text-[10px] uppercase font-black text-blue-600 tracking-wider mb-1">Total Sales (कुल बिक्री)</div>
+              <div className="text-3xl font-display font-black text-slate-900 tracking-tight">₹{summary.totalSales.toLocaleString()}</div>
+              <p className="text-[10px] text-blue-500 font-bold uppercase mt-1">Sum of all bills generated</p>
+            </div>
+
+            <div className="bg-gradient-to-tr from-emerald-50 to-emerald-100/30 border border-emerald-100 p-6 rounded-[2rem] shadow-sm">
+              <div className="text-[10px] uppercase font-black text-emerald-600 tracking-wider mb-1">Average Sales (औसत बिक्री)</div>
+              <div className="text-3xl font-display font-black text-slate-900 tracking-tight">₹{summary.avgSales.toLocaleString()}</div>
+              <p className="text-[10px] text-emerald-500 font-bold uppercase mt-1">Average bill throughput</p>
+            </div>
+
+            <div className="bg-gradient-to-tr from-orange-50 to-orange-100/30 border border-orange-100 p-6 rounded-[2rem] shadow-sm">
+              <div className="text-[10px] uppercase font-black text-orange-600 tracking-wider mb-1">Pending Amount (बकाया राशि)</div>
+              <div className="text-3xl font-display font-black text-slate-900 tracking-tight">₹{summary.totalPending.toLocaleString()}</div>
+              <p className="text-[10px] text-orange-500 font-bold uppercase mt-1">Unreleased dues in period</p>
+            </div>
+          </div>
+
+          {/* Graphs Container */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-4">
+            {/* Graph 1: Sales Trend */}
+            <div className="bg-slate-50/50 border border-slate-100 rounded-[2.5rem] p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h4 className="text-base font-black text-slate-900">Sales Trend Performance</h4>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Timeline track of gross sales</p>
+                </div>
+                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
+                  <LineIcon size={18} />
+                </div>
+              </div>
+
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="105%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="name" 
+                      tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} 
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} 
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => `₹${v}`}
+                    />
+                    <Tooltip 
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          return (
+                            <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-2xl border border-slate-800 shadow-xl text-white">
+                              <p className="text-[10px] font-bold text-slate-400">{payload[0].payload.name}</p>
+                              <p className="text-sm font-black text-blue-450 mt-1">Sales: ₹{payload[0].value?.toLocaleString()}</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Area type="monotone" dataKey="sales" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#salesGrad)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Graph 2: Total Sale vs Pending */}
+            <div className="bg-slate-50/50 border border-slate-100 rounded-[2.5rem] p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h4 className="text-base font-black text-slate-900">Total Sale vs Pending Collections</h4>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Overlay representation of sales vs unpaid dues</p>
+                </div>
+                <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center text-orange-600">
+                  <BarIcon size={18} />
+                </div>
+              </div>
+
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="105%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="name" 
+                      tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} 
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} 
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => `₹${v}`}
+                    />
+                    <Tooltip 
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          return (
+                            <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-2xl border border-slate-800 shadow-xl text-white space-y-1">
+                              <p className="text-[10px] font-bold text-slate-400">{payload[0].payload.name}</p>
+                              <p className="text-xs font-black text-blue-450 mt-1">Total Sale: ₹{payload[0].value?.toLocaleString()}</p>
+                              <p className="text-xs font-black text-orange-450 leading-normal">Pending Amt: ₹{payload[1]?.value?.toLocaleString()}</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Legend 
+                      verticalAlign="top" 
+                      height={36} 
+                      iconType="circle"
+                      formatter={(value) => <span className="text-xs font-black uppercase text-slate-500 tracking-wider pr-4">{value === 'sales' ? 'Total Sale' : 'Pending Amount'}</span>}
+                    />
+                    <Bar dataKey="sales" fill="#2563eb" radius={[6, 6, 0, 0]} name="sales" maxBarSize={30} />
+                    <Bar dataKey="pending" fill="#ea580c" radius={[6, 6, 0, 0]} name="pending" maxBarSize={30} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-6 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+          <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest leading-none">
+            Rajhans Steel & Water Analytics Protocol
+          </p>
+          <button 
+            type="button"
+            onClick={onClose}
+            className="px-6 py-2.5 bg-slate-950 hover:bg-slate-900 rounded-xl text-white font-black text-xs uppercase tracking-widest shadow-sm active:scale-95 transition-transform cursor-pointer"
+          >
+            Close Window
+          </button>
         </div>
       </motion.div>
     </motion.div>

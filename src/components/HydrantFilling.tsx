@@ -222,7 +222,29 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
       accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
     }
     const unsubAcc = onSnapshot(accountsQuery,
-      (snapshot) => setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account))),
+      (snapshot) => {
+        const raw = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account));
+        const deduplicated: Account[] = [];
+        const seenNames = new Set<string>();
+        let bankCount = 0;
+        raw.forEach(acc => {
+          const normName = acc.name.trim().toLowerCase();
+          const isBank = normName.includes('bank') || normName.includes('bob');
+          if (isBank) {
+            if (!seenNames.has(normName) && bankCount < 3) {
+              deduplicated.push(acc);
+              seenNames.add(normName);
+              bankCount++;
+            }
+          } else {
+            if (!seenNames.has(normName)) {
+              deduplicated.push(acc);
+              seenNames.add(normName);
+            }
+          }
+        });
+        setAccounts(deduplicated);
+      },
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts')
     );
 

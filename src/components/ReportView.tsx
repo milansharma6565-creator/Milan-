@@ -36,7 +36,27 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
 
   useEffect(() => {
     return onSnapshot(collection(db, 'accounts'), (snap) => {
-      setAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const raw = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const deduplicated: any[] = [];
+      const seenNames = new Set<string>();
+      let bankCount = 0;
+      raw.forEach((acc: any) => {
+        const normName = (acc.name || '').trim().toLowerCase();
+        const isBank = normName.includes('bank') || normName.includes('bob');
+        if (isBank) {
+          if (!seenNames.has(normName) && bankCount < 3) {
+            deduplicated.push(acc);
+            seenNames.add(normName);
+            bankCount++;
+          }
+        } else {
+          if (!seenNames.has(normName)) {
+            deduplicated.push(acc);
+            seenNames.add(normName);
+          }
+        }
+      });
+      setAccounts(deduplicated);
     });
   }, []);
 

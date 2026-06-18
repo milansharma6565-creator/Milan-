@@ -47,7 +47,9 @@ import {
   RotateCcw,
   Check,
   Brain,
-  HelpCircle
+  HelpCircle,
+  Edit2,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
@@ -119,7 +121,41 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     }
     const accountsUnsub = onSnapshot(accountsQuery, 
       (snapshot) => {
-        setAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account)));
+        const raw = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account));
+        
+        // Prioritize accounts with non-zero balances
+        const sortedRaw = [...raw].sort((a, b) => {
+          const balA = Math.abs(a.currentBalance || 0) + Math.abs(a.openingBalance || 0);
+          const balB = Math.abs(b.currentBalance || 0) + Math.abs(b.openingBalance || 0);
+          return balB - balA;
+        });
+
+        const deduplicated: Account[] = [];
+        const seenNames = new Set<string>();
+        let bankAccountsCount = 0;
+
+        sortedRaw.forEach(acc => {
+          const normName = acc.name.trim().toLowerCase();
+          const isBank = normName.includes('bank') || normName.includes('bob');
+
+          if (isBank) {
+            if (!seenNames.has(normName) && bankAccountsCount < 3) {
+              deduplicated.push(acc);
+              seenNames.add(normName);
+              bankAccountsCount++;
+            } else if (bankAccountsCount < 3 && !deduplicated.some(x => x.id === acc.id)) {
+              deduplicated.push(acc);
+              bankAccountsCount++;
+            }
+          } else {
+            if (!seenNames.has(normName)) {
+              deduplicated.push(acc);
+              seenNames.add(normName);
+            }
+          }
+        });
+
+        setAccounts(deduplicated);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'accounts')
     );
@@ -1710,7 +1746,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         {activeTab === 'vouchers' && <VoucherManager vouchers={vouchers} onAdd={() => setIsAddingVoucher(true)} />}
         {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} onDeleteVoucher={handleDeleteVoucher} />}
         {activeTab === 'reports' && <FinancialReports accounts={accounts} vouchers={vouchers} groups={groups} />}
-        {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} onAddAccount={() => setIsAddingAccount(true)} />}
+        {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} vouchers={vouchers} onAddAccount={() => setIsAddingAccount(true)} />}
       </div>
 
       {/* Modals */}
@@ -2656,21 +2692,61 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
 }
 
 /** Account Management View */
-function AccountSetup({ accounts, groups, onAddAccount }: { accounts: Account[], groups: AccountGroup[], onAddAccount: () => void }) {
+function AccountSetup({ 
+  accounts, 
+  groups, 
+  vouchers, 
+  onAddAccount 
+}: { 
+  accounts: Account[], 
+  groups: AccountGroup[], 
+  vouchers: Voucher[], 
+  onAddAccount: () => void 
+}) {
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState<Account | null>(null);
+
+  // Filter out duplicate or empty account groups dynamically
+  const filteredGroups = useMemo(() => {
+    const uniqueGroups: AccountGroup[] = [];
+    const seenNames = new Set<string>();
+
+    // Prioritize groups that have active matches
+    const sorted = [...groups].sort((a, b) => {
+      const countA = accounts.filter(acc => acc.groupId === a.id).length;
+      const countB = accounts.filter(acc => acc.groupId === b.id).length;
+      return countB - countA;
+    });
+
+    sorted.forEach(g => {
+      const normName = g.name.trim().toLowerCase();
+      const hasAccounts = accounts.some(a => a.groupId === g.id);
+      if (hasAccounts && !seenNames.has(normName)) {
+        uniqueGroups.push(g);
+        seenNames.add(normName);
+      }
+    });
+
+    return uniqueGroups.sort((a, b) => a.name.localeCompare(b.name));
+  }, [groups, accounts]);
+
   return (
     <div className="space-y-6">
        <div className="flex items-center justify-between">
-         <h3 className="text-lg font-display font-bold text-slate-900">Chart of Accounts</h3>
+         <div>
+           <h3 className="text-lg font-display font-black text-slate-900">Chart of Accounts</h3>
+           <p className="text-xs text-slate-500 font-sans">Hover or tap on any account card to edit name, group, or delete.</p>
+         </div>
          <button 
            onClick={onAddAccount}
-           className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-bold flex items-center gap-2 shadow-lg active:scale-95 transition-all text-sm"
+           className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black flex items-center gap-2 shadow-lg active:scale-95 transition-all text-sm cursor-pointer"
          >
            <Plus size={18} /> New Ledger
          </button>
        </div>
 
        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-         {groups.map(g => {
+         {filteredGroups.map(g => {
            const groupAccounts = accounts.filter(a => a.groupId === g.id).sort((a,b) => a.name.localeCompare(b.name));
            return (
              <div key={g.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
@@ -2678,19 +2754,281 @@ function AccountSetup({ accounts, groups, onAddAccount }: { accounts: Account[],
                   <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">{g.name}</h4>
                   <span className="text-[10px] font-bold text-slate-400 px-2 py-0.5 bg-slate-50 rounded-full">{g.type}</span>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1">
                   {groupAccounts.map(a => (
-                    <div key={a.id} className="flex justify-between items-center text-sm">
-                      <span className="font-bold text-slate-600">{a.name}</span>
-                      <span className="text-slate-400 font-mono text-xs">{formatCurrency(a.currentBalance || 0)}</span>
+                    <div key={a.id} className="flex justify-between items-center text-sm p-2 rounded-xl hover:bg-slate-50 transition-all group/item">
+                      <div className="flex flex-col min-w-0 pr-2">
+                        <span className="font-bold text-slate-700 truncate max-w-[150px]">{a.name}</span>
+                        {a.openingBalance > 0 && (
+                          <span className="text-[9px] font-bold text-slate-400 uppercase">
+                            Op: {formatCurrency(a.openingBalance)} ({a.balanceType})
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 ml-auto">
+                        <span className="text-slate-500 font-mono text-xs font-bold group-hover/item:hidden">
+                          {formatCurrency(a.currentBalance || 0)}
+                        </span>
+                        
+                        {/* Interactive edit, change group & delete options */}
+                        <div className="hidden group-hover/item:flex items-center gap-1">
+                          <button 
+                            title="Edit Ledger Settings (खाता संपादित करें)"
+                            onClick={() => setEditingAccount(a)}
+                            className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-all cursor-pointer"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                          <button 
+                            title="Delete Ledger (खाता हटाएं)"
+                            onClick={() => setDeletingAccount(a)}
+                            className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-all cursor-pointer"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ))}
-                  {groupAccounts.length === 0 && <p className="text-xs text-slate-300 italic">No accounts yet</p>}
+                  {groupAccounts.length === 0 && <p className="text-xs text-slate-300 italic p-2">No accounts yet</p>}
                 </div>
              </div>
            );
          })}
        </div>
+
+       {/* Sub-modals for editing name / group, or deleting */}
+       <AnimatePresence>
+         {editingAccount && (
+           <AccountEditModal 
+             account={editingAccount} 
+             groups={groups} 
+             onClose={() => setEditingAccount(null)} 
+           />
+         )}
+         {deletingAccount && (
+           <AccountDeleteConfirmationModal 
+             account={deletingAccount} 
+             vouchers={vouchers} 
+             onClose={() => setDeletingAccount(null)} 
+             onDeleteSuccess={() => setDeletingAccount(null)} 
+           />
+         )}
+       </AnimatePresence>
+    </div>
+  );
+}
+
+/** Account Modifying Modal (Changes Name / Group / Opening Value) */
+function AccountEditModal({ 
+  account, 
+  groups, 
+  onClose 
+}: { 
+  account: Account, 
+  groups: AccountGroup[], 
+  onClose: () => void 
+}) {
+  const [name, setName] = useState(account.name);
+  const [groupId, setGroupId] = useState(account.groupId);
+  const [opening, setOpening] = useState(account.openingBalance || 0);
+  const [type, setType] = useState<'Dr' | 'Cr'>(account.balanceType || 'Dr');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !groupId) return;
+
+    setSubmitting(true);
+    try {
+      // Calculate adjusted current balance back based on difference of opening balance edits
+      const balanceDifference = opening - (account.openingBalance || 0);
+      const newCurrentBalance = (account.currentBalance || 0) + (type === account.balanceType ? balanceDifference : (type === 'Dr' ? balanceDifference : -balanceDifference));
+
+      await updateDoc(doc(db, 'accounts', account.id!), {
+        name: name.trim(),
+        groupId,
+        openingBalance: opening,
+        balanceType: type,
+        currentBalance: newCurrentBalance,
+        updatedAt: serverTimestamp()
+      });
+      alert("✅ Ledger parameters successfully synced!");
+      onClose();
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, 'accounts');
+      alert("Error: " + error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden p-8"
+      >
+        <div className="flex justify-between items-center mb-8">
+           <div>
+             <h2 className="text-2xl font-display font-black text-slate-900">Modify Account</h2>
+             <p className="text-xs text-slate-400 font-semibold tracking-wide uppercase mt-0.5">Edit Name, Group, or Balances</p>
+           </div>
+           <button onClick={onClose} className="p-2 text-slate-300 hover:text-slate-900 cursor-pointer"><X /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-1.5">
+            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Account Name (खाता बही का नाम)</label>
+            <input 
+              required
+              className="w-full h-14 px-5 bg-slate-50 focus:bg-slate-100 rounded-2xl text-base font-bold border-none transition-colors focus:ring-2 focus:ring-blue-500/10 focus:outline-none"
+              placeholder="e.g. Sales A/c, Petrol Expenses"
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Under Group (श्रेणी / ग्रुप)</label>
+            <select 
+              required
+              className="w-full h-14 px-5 bg-slate-50 focus:bg-slate-100 rounded-2xl text-base font-bold border-none focus:outline-none focus:ring-2 focus:ring-blue-500/10"
+              value={groupId}
+              onChange={e => setGroupId(e.target.value)}
+            >
+              <option value="">Select Group...</option>
+              {groups.map(g => (
+                <option key={g.id} value={g.id}>{g.name} ({g.type})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Opening Bal (शुरुआती बैलेंस)</label>
+              <input 
+                type="number"
+                className="w-full h-14 px-5 bg-slate-50 focus:bg-slate-100 rounded-2xl text-base font-bold border-none focus:outline-none"
+                value={opening || ''}
+                onChange={e => setOpening(parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Type (प्रकार)</label>
+              <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-2xl h-14">
+                <button 
+                  type="button"
+                  onClick={() => setType('Dr')}
+                  className={`flex-1 rounded-xl text-xs font-black uppercase transition-all ${type === 'Dr' ? 'bg-white shadow-sm text-indigo-600 font-extrabold' : 'text-slate-500'}`}
+                >
+                  Debit
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setType('Cr')}
+                  className={`flex-1 rounded-xl text-xs font-black uppercase transition-all ${type === 'Cr' ? 'bg-white shadow-sm text-amber-600 font-extrabold' : 'text-slate-500'}`}
+                >
+                  Credit
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <button 
+            type="submit"
+            disabled={submitting}
+            className="w-full h-16 bg-slate-950 hover:bg-slate-900 text-white rounded-2xl font-display font-black text-lg shadow-xl shadow-slate-100 active:scale-[0.98] transition-all cursor-pointer mt-4"
+          >
+            {submitting ? 'Saving Changes...' : 'Save Parameters'}
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
+/** Account Deletion Safeguard Validation Dialogue */
+function AccountDeleteConfirmationModal({
+  account,
+  vouchers,
+  onClose,
+  onDeleteSuccess
+}: {
+  account: Account,
+  vouchers: Voucher[],
+  onClose: () => void,
+  onDeleteSuccess: () => void
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const count = vouchers.filter(v => 
+    v.items?.some(item => item.accountId === account.id)
+  ).length;
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'accounts', account.id!));
+      alert("Ledger deleted successfully!");
+      onDeleteSuccess();
+    } catch (e: any) {
+      console.error(e);
+      alert("Error deleting ledger: " + e.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden p-8"
+      >
+        <div className="flex flex-col items-center text-center space-y-4 mb-6">
+          <div className="w-16 h-16 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-500 shadow-sm animate-pulse">
+            <AlertTriangle size={32} />
+          </div>
+          <div>
+            <h2 className="text-2xl font-display font-black text-rose-600">Delete Account?</h2>
+            <p className="text-sm text-slate-500 mt-1">This will permanently remove the ledger from your Chart of Accounts.</p>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-6 space-y-2 text-left">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selected Ledger</p>
+          <div className="flex justify-between items-center text-sm">
+            <span className="font-bold text-slate-800">{account.name}</span>
+            <span className="text-slate-500 font-mono font-bold">{formatCurrency(account.currentBalance || 0)}</span>
+          </div>
+          {count > 0 && (
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-800 leading-normal space-y-1 font-bold">
+              <p className="font-extrabold text-amber-900">⚠️ ACTIVE VOUCHERS FOUND</p>
+              <p>This ledger is linked with {count} posted vouchers/bills in Daybook. Deleting it will cause double-entry data discrepancies!</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-4">
+          <button
+            onClick={onClose}
+            className="flex-1 h-14 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold transition-all cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex-1 h-14 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-bold transition-all cursor-pointer shadow-lg shadow-rose-100"
+          >
+            {deleting ? 'Deleting...' : 'Yes, Delete'}
+          </button>
+        </div>
+      </motion.div>
     </div>
   );
 }
