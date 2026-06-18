@@ -256,7 +256,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
   // Retro Tally ERP 9 Software State Variables
   const [tallyMode, setTallyMode] = useState(false);
-  const [tallyScreen, setTallyScreen] = useState<'gateway' | 'accounts-info' | 'ledger-list' | 'ledger-create' | 'voucher-entry' | 'daybook' | 'balance-sheet' | 'profit-loss' | 'trial-balance' | 'bank-feed' | 'tally-sync'>('gateway');
+  const [tallyScreen, setTallyScreen] = useState<'gateway' | 'accounts-info' | 'ledger-list' | 'ledger-create' | 'ledger-edit' | 'voucher-entry' | 'daybook' | 'balance-sheet' | 'profit-loss' | 'trial-balance' | 'bank-feed' | 'tally-sync'>('gateway');
   const [tallySelectedIdx, setTallySelectedIdx] = useState(0);
   const [tallyVchType, setTallyVchType] = useState<VoucherType>('Payment');
   const [tallyQuitPrompt, setTallyQuitPrompt] = useState(false);
@@ -269,6 +269,15 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
   const [newLedgerBalType, setNewLedgerBalType] = useState<'Dr' | 'Cr'>('Dr');
   const [tallySavingLedger, setTallySavingLedger] = useState(false);
   const [ledgerAcceptPrompt, setLedgerAcceptPrompt] = useState(false);
+
+  // Retro Tally Ledger editing state
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [editLedgerName, setEditLedgerName] = useState('');
+  const [editLedgerGroupId, setEditLedgerGroupId] = useState('');
+  const [editLedgerOpening, setEditLedgerOpening] = useState(0);
+  const [editLedgerBalType, setEditLedgerBalType] = useState<'Dr' | 'Cr'>('Dr');
+  const [tallyEditingLedger, setTallyEditingLedger] = useState(false);
+  const [ledgerEditAcceptPrompt, setLedgerEditAcceptPrompt] = useState(false);
 
   // Retro Voucher Input state
   const [retroDebitAcc, setRetroDebitAcc] = useState('');
@@ -322,6 +331,66 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       alert("Error creating ledger: " + e.message);
     } finally {
       setTallySavingLedger(false);
+    }
+  };
+
+  const handleStartEditLedger = (acc: Account) => {
+    setEditingAccountId(acc.id || null);
+    setEditLedgerName(acc.name);
+    setEditLedgerGroupId(acc.groupId);
+    setEditLedgerOpening(acc.openingBalance);
+    setEditLedgerBalType(acc.balanceType || 'Dr');
+    setTallyScreen('ledger-edit');
+  };
+
+  const handleUpdateRetroLedger = async () => {
+    if (!editingAccountId) return;
+    if (!editLedgerName.trim() || !editLedgerGroupId) {
+      alert("Ledger Name and Group are required!");
+      return;
+    }
+    setTallyEditingLedger(true);
+    try {
+      await updateDoc(doc(db, 'accounts', editingAccountId), {
+        name: editLedgerName.trim(),
+        groupId: editLedgerGroupId,
+        openingBalance: editLedgerOpening,
+        balanceType: editLedgerBalType,
+        updatedAt: serverTimestamp()
+      });
+
+      setEditingAccountId(null);
+      setEditLedgerName('');
+      setEditLedgerOpening(0);
+      setLedgerEditAcceptPrompt(false);
+      setTallyScreen('ledger-list');
+    } catch (e: any) {
+      console.error(e);
+      alert("Error updating ledger: " + e.message);
+    } finally {
+      setTallyEditingLedger(false);
+    }
+  };
+
+  const handleDeleteLedger = async (id: string, name: string) => {
+    // Check if there are vouchers using this ledger
+    const count = vouchers.filter(v => 
+      v.items.some(item => item.accountId === id)
+    ).length;
+
+    let confirmMsg = `Are you sure you want to delete the ledger "${name}"?`;
+    if (count > 0) {
+      confirmMsg = `⚠️ ALERT: The ledger "${name}" has ${count} associated transactions (vouchers).\nDeleting this ledger will corrupt your financial transaction records!\n\nAre you absolutely sure you want to proceed and DELETE this ledger? This cannot be undone.`;
+    }
+
+    if (window.confirm(confirmMsg)) {
+      try {
+        await deleteDoc(doc(db, 'accounts', id));
+        alert("Ledger deleted successfully!");
+      } catch (e: any) {
+        console.error(e);
+        alert("Error deleting ledger: " + e.message);
+      }
     }
   };
 
@@ -476,7 +545,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
       if (e.key === 'Escape') {
         e.preventDefault();
-        if (tallyScreen === 'ledger-create') {
+        if (tallyScreen === 'ledger-create' || tallyScreen === 'ledger-edit') {
           setTallyScreen('ledger-list');
         } else if (tallyScreen === 'ledger-list') {
           setTallyScreen('accounts-info');
@@ -822,6 +891,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                         <th className="p-2 border border-[#146067]">Group Name</th>
                         <th className="p-2 border border-[#146067] text-right">Opening Bal (₹)</th>
                         <th className="p-2 border border-[#146067] text-right">Current Bal (₹)</th>
+                        <th className="p-2 border border-[#146067] text-center w-28">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -833,6 +903,26 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                             <td className="p-2 text-teal-200">{gp?.name || 'Assets'}</td>
                             <td className="p-2 text-right">{acc.openingBalance.toLocaleString('en-IN')} {acc.balanceType}</td>
                             <td className="p-2 text-right text-yellow-300 font-bold">{getAccountBalance(acc.id!).toLocaleString('en-IN')} {acc.balanceType}</td>
+                            <td className="p-2 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditLedger(acc)}
+                                  className="px-2 py-0.5 bg-yellow-400 text-black font-semibold rounded-[2px] border border-yellow-500 hover:bg-yellow-300 transition text-[10px]"
+                                  title="Edit Ledger Name & Opening Balance"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteLedger(acc.id!, acc.name)}
+                                  className="px-2 py-0.5 bg-red-600 text-white font-bold rounded-[2px] border border-red-700 hover:bg-red-500 transition text-[10px]"
+                                  title="Delete Account Ledger"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
@@ -936,6 +1026,106 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                         </button>
                         <button 
                           onClick={() => setLedgerAcceptPrompt(false)}
+                          className="bg-[#1a5b62] text-white px-6 py-1 cursor-pointer border border-teal-500 rounded uppercase"
+                        >
+                          No
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SCREEN: LEDGER EDIT */}
+            {tallyScreen === 'ledger-edit' && (
+              <div className="max-w-lg mx-auto w-full bg-[#032326] border-2 border-[#5bc0be] p-4 text-xs rounded text-teal-100 relative">
+                <div className="bg-[#115b62] text-yellow-400 p-2 font-bold text-center border-b-2 border-[#5bc0be] mb-4 uppercase tracking-wider">
+                  Ledger Modification (Alter)
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center">
+                    <label className="text-teal-300 w-32 font-bold select-none text-right pr-4">Name:</label>
+                    <input 
+                      type="text"
+                      className="bg-[#001d21] border border-[#146067] text-[#0dffd2] px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 flex-1 font-bold"
+                      value={editLedgerName}
+                      onChange={e => setEditLedgerName(e.target.value)}
+                      placeholder="Enter Ledger Name"
+                      required
+                    />
+                  </div>
+
+                  <div className="flex items-center">
+                    <label className="text-teal-300 w-32 font-bold select-none text-right pr-4">Under (Group):</label>
+                    <select 
+                      className="bg-[#001d21] border border-[#146067] text-[#0dffd2] px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 flex-1 font-bold"
+                      value={editLedgerGroupId}
+                      onChange={e => setEditLedgerGroupId(e.target.value)}
+                      required
+                    >
+                      <option value="">-- Choose Category --</option>
+                      {groups.map(g => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center">
+                    <label className="text-teal-300 w-32 font-bold select-none text-right pr-4">Opening Bal:</label>
+                    <div className="flex flex-1 gap-2">
+                      <input 
+                        type="number"
+                        className="bg-[#001d21] border border-[#146067] text-[#0dffd2] px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 flex-1 text-right font-bold"
+                        value={editLedgerOpening || ''}
+                        onChange={e => setEditLedgerOpening(parseFloat(e.target.value) || 0)}
+                        placeholder="0.00"
+                      />
+                      <select 
+                        className="bg-[#001d21] border border-[#146067] text-[#0dffd2] px-2 py-1"
+                        value={editLedgerBalType}
+                        onChange={e => setEditLedgerBalType(e.target.value as 'Dr' | 'Cr')}
+                      >
+                        <option value="Dr">Dr</option>
+                        <option value="Cr">Cr</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-[#115b62] flex justify-end gap-3 actions-list">
+                    <button 
+                      type="button" 
+                      onClick={() => setTallyScreen('ledger-list')}
+                      className="bg-[#146067] border border-teal-500 text-teal-200 px-4 py-1.5 hover:text-white cursor-pointer"
+                    >
+                      [-] Cancel
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => setLedgerEditAcceptPrompt(true)}
+                      className="bg-yellow-400 text-black px-5 py-1.5 font-bold hover:bg-yellow-300 border border-yellow-500 shadow cursor-pointer"
+                    >
+                      Accept? (Y/N/Enter)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Accept confirm prompt overlay for edit */}
+                {ledgerEditAcceptPrompt && (
+                  <div className="absolute inset-0 bg-black/60 z-[110] flex items-center justify-center p-4">
+                    <div className="bg-[#04282c] border-2 border-yellow-300 p-6 text-center max-w-xs w-full shadow-2xl rounded text-teal-100 space-y-4">
+                      <div className="text-yellow-400 text-sm font-bold tracking-widest uppercase">Modify Ledger?</div>
+                      <div className="text-xs font-semibold">Do you want to update this ledger in bahi-khata registers?</div>
+                      <div className="flex justify-center gap-4 text-xs">
+                        <button 
+                          onClick={handleUpdateRetroLedger}
+                          className="bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold px-6 py-1 cursor-pointer border border-yellow-500 rounded uppercase"
+                        >
+                          Yes
+                        </button>
+                        <button 
+                          onClick={() => setLedgerEditAcceptPrompt(false)}
                           className="bg-[#1a5b62] text-white px-6 py-1 cursor-pointer border border-teal-500 rounded uppercase"
                         >
                           No

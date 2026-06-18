@@ -322,6 +322,23 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["pattern", "accountId", "accountName", "type"]
+    },
+    "PrintJob": {
+      "title": "Print Job",
+      "description": "Remote print jobs queued for desktop thermal printing",
+      "type": "object",
+      "properties": {
+        "billId": { "type": "string" },
+        "billNumber": { "type": "string" },
+        "customerName": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "completed", "cancelled"] },
+        "franchiseId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "printedAt": { "type": "string", "format": "date-time" },
+        "printedBy": { "type": "string" },
+        "billData": { "type": "object" }
+      },
+      "required": ["billNumber", "customerName", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -342,6 +359,7 @@
     "trips": { "schema": "Trip", "description": "Collection of active trips" },
     "dieselRequests": { "schema": "DieselRequest", "description": "Fuel requests from drivers" },
     "franchises": { "schema": "Franchise", "description": "Collection of franchise partners" },
-    "bankStatementRules": { "schema": "BankStatementRule", "description": "Machine learning rules for bank statement mapping" }
+    "bankStatementRules": { "schema": "BankStatementRule", "description": "Machine learning rules for bank statement mapping" },
+    "print_jobs": { "schema": "PrintJob", "description": "Remote print jobs queued for desktop thermal printing" }
   }
 }

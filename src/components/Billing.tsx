@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc, runTransaction, orderBy, limit } from 'firebase/firestore';
 import { Customer, Driver, Bill } from '../types';
-import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare } from 'lucide-react';
+import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare, CloudLightning } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES, getPublicAppUrl } from '../constants';
 import { ThermalInvoice } from './ThermalInvoice';
@@ -349,8 +349,15 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   const [deliveryLocation, setDeliveryLocation] = useState<{lat: number, lng: number, address: string} | null>(null);
 
   const shareBillImage = async (bill: any) => {
-    if (!selectedCustomer || !thermalRef.current) return;
+    if (!bill || !thermalRef.current) return;
     
+    const franchiseNameText = currentFranchise?.printName || currentFranchise?.name || "Rajhans Steel Water";
+    const cleanMobile = bill.customerMobile ? bill.customerMobile.replace(/\D/g, '') : '';
+    const phone = cleanMobile.startsWith('91') ? cleanMobile : `91${cleanMobile}`;
+    
+    const orderUrl = `${window.location.origin}/?o=${bill.id}`;
+    const message = `🙏 *Namaste from ${franchiseNameText}* 💧\n\nThank you for choosing us for pure and quality drinking water! Here is your thermal bill #${bill.billNumber} for amount *₹${bill.grandTotal}*.\n\n*🌐 LIVE BILL & TRACKING LINK:*\n👉 ${orderUrl}\n\nHave a wonderful and healthy day! 🙏🌸\n\nनमस्ते! ${franchiseNameText} की ओर से आपका बिल #${bill.billNumber} राशि ₹${bill.grandTotal} यहाँ है। शुद्ध और गुणवत्तापूर्ण पेयजल के लिए हमें चुनने के लिए धन्यवाद! आपका दिन शुभ हो! 🙏`;
+
     try {
       // Capture the thermal receipt as JPEG
       const dataUrl = await toJpeg(thermalRef.current, { 
@@ -393,7 +400,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           await navigator.share({
             files: [file],
             title: `Bill #${bill.billNumber}`,
-            text: `Trip Token from TankerWala Powered by Rajhans for amount ₹${bill.grandTotal}`
+            text: message
           });
           return;
         } catch (shareErr: any) {
@@ -411,20 +418,40 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       link.download = fileName;
       link.click();
 
-      // Open WhatsApp link as fallback
-      sendWhatsApp(bill);
-      alert('Token Image Downloaded. You can now share it manually on WhatsApp.');
+      const waUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+      window.open(waUrl, '_blank');
+      alert(`Bill Image Downloaded! 📸 & WhatsApp opened!\n\n(थर्मल बिल इमेज डाउनलोड हो गई है! कृपया इसे व्हाट्सएप चैट में पेस्ट (Ctrl+V) करें।)`);
     } catch (err: any) {
       console.error('Error sharing image:', err?.message || String(err));
-      // Fallback to text WhatsApp
-      sendWhatsApp(bill);
+      const waUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+      window.open(waUrl, '_blank');
     }
   };
 
   const sendWhatsApp = (bill: any) => {
-    if (!selectedCustomer) return;
-    const url = getWhatsAppBillLink(bill, currentFranchise);
-    window.open(url, '_blank');
+    shareBillImage(bill);
+  };
+
+  const handleRemotePrintQueue = async (bill: any) => {
+    if (!bill) return;
+    try {
+      await addDoc(collection(db, 'print_jobs'), {
+        franchiseId: bill.franchiseId || franchiseId || 'legacy-rajhans',
+        billId: bill.id || '',
+        billNumber: bill.billNumber || '',
+        customerName: bill.customerName || '',
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        billData: {
+          ...bill,
+          date: bill.date instanceof Date ? bill.date.toISOString() : (bill.date?.seconds ? new Date(bill.date.seconds * 1000).toISOString() : String(bill.date))
+        }
+      });
+      alert("Print command sent to desktop! ☁️\n\n(डेस्कटॉप प्रिंटर पर रिमोट प्रिंट कमांड सफलतापूर्वक भेज दी गई है)");
+    } catch (e: any) {
+      console.error("Failed to queue remote print:", e);
+      alert("Error sending remote print job: " + e.message);
+    }
   };
 
   const sendDriverWhatsApp = (bill: any, driver: Driver) => {
@@ -1157,6 +1184,13 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 >
                   <MessageSquare size={24} />
                   Send on WhatsApp
+                </button>
+                <button 
+                  onClick={() => handleRemotePrintQueue(bookedBill)}
+                  className="h-16 font-extrabold text-blue-700 bg-blue-50 border border-blue-200 rounded-2xl hover:bg-blue-100 transition-all flex items-center justify-center gap-3 active:scale-95"
+                >
+                  <CloudLightning size={24} className="animate-bounce" />
+                  Remote Desktop Print ☁️ (रिमोट प्रिंट)
                 </button>
                 <div className="grid grid-cols-2 gap-3">
                   <button 

@@ -48,6 +48,7 @@ import { printThermalReceipt } from '../lib/printUtils';
 import { openWhatsAppDirect } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
+import CloudPrintGateway from './CloudPrintGateway';
 import { QRCodeSVG } from 'qrcode.react';
 import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -58,27 +59,24 @@ import { ledgerAutomation } from '../services/ledgerAutomation';
 function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void }) {
    const [text, setText] = useState('');
    const [chatData, setChatData] = useState<any>(null);
+   const textRef = React.useRef(text);
+   textRef.current = text;
 
    useEffect(() => {
      if (!bill.id) return;
      const unsubscribe = onSnapshot(doc(db, 'chats', bill.id), snap => {
        if (snap.exists()) {
            setChatData(snap.data());
-           if (snap.data().adminDraft === '' && text !== '') {
+           if (snap.data().adminDraft === '' && textRef.current !== '') {
                setText('');
            }
        }
      }, (error: any) => console.error("Admin Chat Error:", error?.message || error));
      return () => unsubscribe();
-   }, [bill.id, text]);
+   }, [bill.id]);
 
-   const handleChange = async (e: any) => {
-     const val = e.target.value;
-     setText(val);
-     await setDoc(doc(db, 'chats', bill.id!), { 
-       adminDraft: val, 
-       updatedAt: serverTimestamp()
-     }, { merge: true });
+   const handleChange = (e: any) => {
+     setText(e.target.value);
    }
 
    const handleSend = async () => {
@@ -350,6 +348,14 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const todayCollection = todayBillsList
       .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
       .reduce((sum, b) => sum + b.grandTotal, 0);
+
+    const todayCashCollection = todayBillsList
+      .filter(b => b.paymentMode === 'Cash' && b.status !== 'Cancelled')
+      .reduce((sum, b) => sum + b.grandTotal, 0);
+
+    const todayPendingCollection = todayBillsList
+      .filter(b => b.paymentMode === 'Pending' && b.status !== 'Cancelled')
+      .reduce((sum, b) => sum + b.grandTotal, 0);
       
     const totalPending = accounts
       .filter(acc => acc.group === 'Sundry Debtors' || acc.group === 'Duty Assignment' || customers.some(c => c.id === acc.customerId || c.name === acc.name))
@@ -483,6 +489,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
     return {
       todayCollection,
+      todayCashCollection,
+      todayPendingCollection,
       totalPending,
       cashBalance,
       bankBalance,
@@ -2251,6 +2259,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           </motion.div>
         )}
       </AnimatePresence>
+
+      {franchiseId && (
+        <div className="mb-8">
+          <CloudPrintGateway franchiseId={franchiseId} userName={auth.currentUser?.displayName || 'Operator'} />
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
@@ -2336,11 +2351,20 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           </div>
 
           <div className="relative z-10">
-            <div className="bg-slate-900/10 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 border border-white/40 shadow-inner">
-              <Banknote size={24} className="text-slate-800" />
+            <div className="flex items-start justify-between mb-4">
+              <div className="bg-slate-900/10 w-12 h-12 rounded-2xl flex items-center justify-center border border-white/40 shadow-inner">
+                <Banknote size={24} className="text-slate-800" />
+              </div>
+              <div className="text-right flex flex-col items-end bg-emerald-50 border border-emerald-100 rounded-2xl p-2 px-3 shadow-sm">
+                <span className="text-[9px] uppercase font-black text-emerald-600 tracking-wider">Today's Cash (आज का कैश)</span>
+                <span className="text-base font-black text-emerald-700 flex items-center gap-0.5 mt-0.5">
+                  <span className="text-xs font-bold">₹</span>
+                  {Number(stats.todayCashCollection || 0).toLocaleString()}
+                </span>
+              </div>
             </div>
             <div className="flex items-center gap-3 mb-1 justify-between">
-              <div className="text-[11px] uppercase font-black tracking-widest text-slate-500">Cash in Hand</div>
+              <div className="text-[11px] uppercase font-black tracking-widest text-slate-500">Total Cash (कुल कैश)</div>
               <div className="flex gap-2 relative z-30">
                 <button 
                   onClick={(e) => {
@@ -2395,11 +2419,20 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           </div>
 
           <div className="relative z-10">
-            <div className="bg-orange-50 text-orange-600 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
-              <Users size={24} />
+            <div className="flex items-start justify-between mb-4">
+              <div className="bg-orange-50 text-orange-600 w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm">
+                <Users size={24} />
+              </div>
+              <div className="text-right flex flex-col items-end bg-orange-50 border border-orange-100 rounded-2xl p-2 px-3 shadow-sm">
+                <span className="text-[9px] uppercase font-black text-orange-600 tracking-wider">Today's Pending (आज का बाकी)</span>
+                <span className="text-base font-black text-orange-700 flex items-center gap-0.5 mt-0.5">
+                  <span className="text-xs font-bold">₹</span>
+                  {Number(stats.todayPendingCollection || 0).toLocaleString()}
+                </span>
+              </div>
             </div>
             <div className="flex items-center justify-between mb-1">
-              <div className="text-[11px] uppercase font-black tracking-widest text-slate-400">Total Pending (Ledger)</div>
+              <div className="text-[11px] uppercase font-black tracking-widest text-slate-400">Total Pending (कुल बाकी)</div>
               <button 
                 onClick={(e) => {
                   e.stopPropagation();

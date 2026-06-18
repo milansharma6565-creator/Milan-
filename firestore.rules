@@ -203,6 +203,14 @@ service cloud.firestore {
              (data.get('createdAt', request.time) == request.time);
     }
 
+    function isValidPrintJob(data) {
+      return data.keys().hasAll(['billNumber', 'customerName', 'status']) &&
+             data.billNumber is string &&
+             data.customerName is string &&
+             data.status in ['pending', 'completed', 'cancelled'] &&
+             (data.get('createdAt', request.time) == request.time);
+    }
+
     // ---------------------------------------------------------
     // COLLECTIONS
     // ---------------------------------------------------------
@@ -363,6 +371,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && isValidBankStatementRule(incoming()) && (incoming().get('franchiseId', null) == null || isFranchiseAuthorized(incoming().get('franchiseId', null)));
       allow delete: if isSignedIn() && (existing().get('franchiseId', null) == null || isFranchiseAuthorized(existing().get('franchiseId', null)));
+    }
+
+    match /print_jobs/{jobId} {
+      allow read, write: if true;
     }
   }
 }
