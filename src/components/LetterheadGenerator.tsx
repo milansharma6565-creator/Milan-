@@ -84,7 +84,14 @@ export function LetterheadGenerator({ currentFranchise }: LetterheadGeneratorPro
         })
       });
       if (!res.ok) {
-        throw new Error('Failed to generate');
+        let errMsg = 'Failed to generate';
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) {
+            errMsg = errData.error;
+          }
+        } catch (_) {}
+        throw new Error(errMsg);
       }
       const data = await res.json();
       setContent(data.text);

@@ -1,23 +1,22 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+export const app = express();
+const PORT = 3000;
 
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // API Sample routes
-  app.get("/api/health", (req, res) => {
-    res.status(200).json({ status: "ok", message: "TankerWala Server is running" });
-  });
+// API Sample routes
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok", message: "TankerWala Server is running" });
+});
 
   // Direct APK Download endpoints
   app.get("/api/download/driver-apk", (req, res) => {
     const realApkPath = path.join(process.cwd(), "public", "releases", "DriverApp_v1.2.4.apk");
-    const fs = require("fs");
     if (fs.existsSync(realApkPath)) {
       res.setHeader("Content-Disposition", "attachment; filename=TankerWala_Driver_v1.2.4.apk");
       res.setHeader("Content-Type", "application/vnd.android.package-archive");
@@ -38,7 +37,6 @@ async function startServer() {
 
   app.get("/api/download/customer-apk", (req, res) => {
     const realApkPath = path.join(process.cwd(), "public", "releases", "CustomerApp_v1.0.1.apk");
-    const fs = require("fs");
     if (fs.existsSync(realApkPath)) {
       res.setHeader("Content-Disposition", "attachment; filename=TankerWala_Customer_v1.0.1.apk");
       res.setHeader("Content-Type", "application/vnd.android.package-archive");
@@ -782,32 +780,35 @@ Provide real, informative, and detailed fields. Ensure source URLs are real Goog
     }
   });
 
-  console.log("NODE ENV is", process.env.NODE_ENV);
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*all", (req, res) => {
-      try {
-        res.sendFile(path.join(distPath, "index.html"));
-      } catch (err) {
-        console.error("Error serving index.html:", err);
-        res.status(500).send("Internal Server Error");
-      }
+  async function startServer() {
+    console.log("NODE ENV is", process.env.NODE_ENV);
+    // Vite middleware for development
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*all", (req, res) => {
+        try {
+          res.sendFile(path.join(distPath, "index.html"));
+        } catch (err) {
+          console.error("Error serving index.html:", err);
+          res.status(500).send("Internal Server Error");
+        }
+      });
+    }
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-startServer().catch((err) => {
-  console.error("Failed to start server:", err);
-});
+  if (!process.env.VERCEL) {
+    startServer().catch((err) => {
+      console.error("Failed to start server:", err);
+    });
+  }
