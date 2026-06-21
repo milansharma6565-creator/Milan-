@@ -19,7 +19,9 @@ import {
   History,
   Smartphone,
   Banknote,
-  Stamp
+  Stamp,
+  Truck,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
@@ -312,11 +314,21 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
         
         const mode = formData.paymentMode;
         let paymentAccName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : formData.partyName;
-        const paymentAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', franchiseId || null)));
+        let paymentAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', franchiseId || null)));
+        if (paymentAccSnap.empty && franchiseId) {
+          paymentAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', null)));
+        }
         let paymentAccId = paymentAccSnap.docs[0]?.id;
+        let isNewPaymentAcc = false;
+
+        if (!paymentAccId) {
+          isNewPaymentAcc = true;
+          const tempDocRef = doc(collection(db, 'accounts'));
+          paymentAccId = tempDocRef.id;
+        }
 
         // Perform all TRANSACTIONAL READS first
-        const paymentAccRef = paymentAccId ? doc(db, 'accounts', paymentAccId) : null;
+        const paymentAccRef = isNewPaymentAcc ? null : doc(db, 'accounts', paymentAccId);
         const incAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
         const expAccRef = expenseAccId ? doc(db, 'accounts', expenseAccId) : null;
 
@@ -327,6 +339,8 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
         ]);
 
         // NOW PERFORM ALL WRITES
+        
+        let assetsGrpId = assetsGrpSnap.docs[0]?.id;
         
         // Auto-create category accounts if missing
         if (!incomeAccId) {
@@ -346,7 +360,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
             groupId: incGrpId, 
             openingBalance: 0, 
             balanceType: 'Cr', 
-            currentBalance: incomeAccId ? (incAccDoc?.data()?.currentBalance || 0) : 0, 
+            currentBalance: amount, 
             franchiseId: franchiseId || null,
             createdAt: serverTimestamp() 
           });
@@ -370,38 +384,61 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
             groupId: expGrpId, 
             openingBalance: 0, 
             balanceType: 'Dr', 
-            currentBalance: expenseAccId ? (expAccDoc?.data()?.currentBalance || 0) : 0, 
+            currentBalance: amount, 
             franchiseId: franchiseId || null,
             createdAt: serverTimestamp() 
           });
           expenseAccId = newAcc.id;
         }
 
-        if (!paymentAccId && mode === 'Udhaar') {
-           const grpName = formData.type === 'Inward' ? 'Sundry Debtors' : 'Sundry Creditors';
-           const grpSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', grpName), where('franchiseId', '==', franchiseId || null)));
-           let grpId = grpSnap.docs[0]?.id;
-           if (!grpId) {
-             const newG = doc(collection(db, 'accountGroups'));
-             transaction.set(newG, { 
-               name: grpName, 
-               type: formData.type === 'Inward' ? 'Asset' : 'Liability',
-               franchiseId: franchiseId || null,
-               createdAt: serverTimestamp()
-             });
-             grpId = newG.id;
-           }
-           const newA = doc(collection(db, 'accounts'));
-           transaction.set(newA, { 
-             name: paymentAccName, 
-             groupId: grpId, 
-             openingBalance: 0, 
-             balanceType: formData.type === 'Inward' ? 'Dr' : 'Cr', 
-             currentBalance: 0, 
-             franchiseId: franchiseId || null,
-             createdAt: serverTimestamp() 
-           });
-           paymentAccId = newA.id;
+        if (isNewPaymentAcc) {
+          if (mode === 'Cash' || mode === 'Bank') {
+            if (!assetsGrpId) {
+              const newGrp = doc(collection(db, 'accountGroups'));
+              transaction.set(newGrp, { 
+                name: 'Current Assets', 
+                type: 'Asset',
+                franchiseId: franchiseId || null,
+                createdAt: serverTimestamp()
+              });
+              assetsGrpId = newGrp.id;
+            }
+            const newAcc = doc(db, 'accounts', paymentAccId);
+            const initialBal = formData.type === 'Inward' ? amount : -amount;
+            transaction.set(newAcc, {
+              name: paymentAccName,
+              groupId: assetsGrpId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: initialBal,
+              franchiseId: franchiseId || null,
+              createdAt: serverTimestamp()
+            });
+          } else if (mode === 'Udhaar') {
+            const grpName = formData.type === 'Inward' ? 'Sundry Debtors' : 'Sundry Creditors';
+            const grpSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', grpName), where('franchiseId', '==', franchiseId || null)));
+            let grpId = grpSnap.docs[0]?.id;
+            if (!grpId) {
+              const newG = doc(collection(db, 'accountGroups'));
+              transaction.set(newG, { 
+                name: grpName, 
+                type: formData.type === 'Inward' ? 'Asset' : 'Liability',
+                franchiseId: franchiseId || null,
+                createdAt: serverTimestamp()
+              });
+              grpId = newG.id;
+            }
+            const newAcc = doc(db, 'accounts', paymentAccId);
+            transaction.set(newAcc, { 
+              name: paymentAccName, 
+              groupId: grpId, 
+              openingBalance: 0, 
+              balanceType: formData.type === 'Inward' ? 'Dr' : 'Cr', 
+              currentBalance: amount, 
+              franchiseId: franchiseId || null,
+              createdAt: serverTimestamp() 
+            });
+          }
         }
 
         const fillingData: any = {
@@ -414,7 +451,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
           quantity: Number(formData.quantity),
           totalAmount: amount,
           paymentMode: mode,
-          paymentAccountId: paymentAccId || 'CASH_FALLBACK',
+          paymentAccountId: paymentAccId,
           status: 'Completed',
           remarks: formData.remarks,
           franchiseId: franchiseId || null,
@@ -429,7 +466,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
             date: new Date(),
             type: mode === 'Udhaar' ? 'Sales' : 'Receipt',
             items: [
-              { accountId: paymentAccId || 'CASH_FALLBACK', accountName: paymentAccName, amount: amount, type: 'Dr' },
+              { accountId: paymentAccId, accountName: paymentAccName, amount: amount, type: 'Dr' },
               { accountId: incomeAccId, accountName: incomeAccName, amount: amount, type: 'Cr' }
             ],
             narration: `Hydrant filling for ${formData.partyName} (${formData.vehicleNumber}) [Token: ${tokenNumber}]`,
@@ -438,7 +475,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
             createdAt: serverTimestamp()
           });
           
-          if (paymentAccId && paymentAccRef) {
+          if (paymentAccId && paymentAccRef && !isNewPaymentAcc) {
             const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
             transaction.update(paymentAccRef, { 
               currentBalance: (paymentAccDoc?.exists() && paymentAccDoc.data().balanceType === 'Cr') ? currentBal - amount : currentBal + amount 
@@ -455,7 +492,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
             type: mode === 'Udhaar' ? 'Purchase' : 'Payment',
             items: [
               { accountId: expenseAccId, accountName: expenseAccName, amount: amount, type: 'Dr' },
-              { accountId: paymentAccId || 'CASH_FALLBACK', accountName: paymentAccName, amount: amount, type: 'Cr' }
+              { accountId: paymentAccId, accountName: paymentAccName, amount: amount, type: 'Cr' }
             ],
             narration: `Self tanker filling @ ${formData.partyName} (${formData.vehicleNumber}) [Token: ${tokenNumber}]`,
             totalAmount: amount,
@@ -463,7 +500,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
             createdAt: serverTimestamp()
           });
 
-          if (paymentAccId && paymentAccRef) {
+          if (paymentAccId && paymentAccRef && !isNewPaymentAcc) {
             const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
             transaction.update(paymentAccRef, { 
               currentBalance: (paymentAccDoc?.exists() && paymentAccDoc.data().balanceType === 'Dr') ? currentBal - amount : currentBal + amount 
@@ -525,6 +562,36 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
     return matchesSearch && matchesType && matchesTime;
   });
 
+  const now = new Date();
+  const startOfThisMonth = startOfMonth(now);
+  const endOfThisMonth = endOfMonth(now);
+  const startOfThisYear = startOfYear(now);
+  const endOfThisYear = endOfYear(now);
+
+  const monthlySelfCount = fillings.filter(f => {
+    if (f.type !== 'Outward') return false;
+    const d = new Date(f.date);
+    return isWithinInterval(d, { start: startOfThisMonth, end: endOfThisMonth });
+  }).length;
+
+  const monthlyOthersCount = fillings.filter(f => {
+    if (f.type !== 'Inward') return false;
+    const d = new Date(f.date);
+    return isWithinInterval(d, { start: startOfThisMonth, end: endOfThisMonth });
+  }).length;
+
+  const yearlySelfCount = fillings.filter(f => {
+    if (f.type !== 'Outward') return false;
+    const d = new Date(f.date);
+    return isWithinInterval(d, { start: startOfThisYear, end: endOfThisYear });
+  }).length;
+
+  const yearlyOthersCount = fillings.filter(f => {
+    if (f.type !== 'Inward') return false;
+    const d = new Date(f.date);
+    return isWithinInterval(d, { start: startOfThisYear, end: endOfThisYear });
+  }).length;
+
   const stats = {
     totalInward: filteredFillings.filter(f => f.type === 'Inward').reduce((sum, f) => sum + f.totalAmount, 0),
     totalOutward: filteredFillings.filter(f => f.type === 'Outward').reduce((sum, f) => sum + f.totalAmount, 0),
@@ -569,13 +636,38 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
           <div className="text-xs font-bold text-red-600 mt-1">{stats.countOutward} Outward Fillings</div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm lg:col-span-2">
-          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
-            <Droplets size={24} />
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-4">
+            <Truck size={24} />
           </div>
-          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Total Throughput</div>
-          <div className="text-3xl font-display font-black text-slate-900">{stats.countInward + stats.countOutward} Tankers</div>
-          <p className="text-xs text-slate-400 font-bold mt-1 uppercase">Tracking {timeFilter.toLowerCase()} activity</p>
+          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Self Filling (हमारा)</div>
+          <div className="mt-2 space-y-2">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">This Month</span>
+              <span className="text-xl font-display font-black text-slate-900">{monthlySelfCount} <span className="text-[10px] font-bold text-slate-400">Tankers</span></span>
+            </div>
+            <div className="flex items-baseline justify-between border-t border-slate-50 pt-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">This Year</span>
+              <span className="text-sm font-display font-bold text-indigo-600">{yearlySelfCount} <span className="text-[9px] font-bold text-slate-400">Tankers</span></span>
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-4">
+            <Users size={24} />
+          </div>
+          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Other Filling (बाहर)</div>
+          <div className="mt-2 space-y-2">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">This Month</span>
+              <span className="text-xl font-display font-black text-slate-900">{monthlyOthersCount} <span className="text-[10px] font-bold text-slate-400">Tankers</span></span>
+            </div>
+            <div className="flex items-baseline justify-between border-t border-slate-50 pt-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">This Year</span>
+              <span className="text-sm font-display font-bold text-amber-600">{yearlyOthersCount} <span className="text-[9px] font-bold text-slate-400">Tankers</span></span>
+            </div>
+          </div>
         </motion.div>
       </div>
 

@@ -9,6 +9,7 @@ import {
   MessageSquare, 
   Trash2, 
   AlertCircle, 
+  Edit3,
   Printer, 
   Clock, 
   CheckCircle2, 
@@ -1029,6 +1030,14 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   };
 
   const [editingBill, setEditingBill] = React.useState<any>(null);
+  const [isEditingDetails, setIsEditingDetails] = React.useState(false);
+  const [editRate, setEditRate] = React.useState(0);
+  const [editQuantity, setEditQuantity] = React.useState(0);
+  const [editExtraCharges, setEditExtraCharges] = React.useState(0);
+  const [editDiscount, setEditDiscount] = React.useState(0);
+  const [editRemarks, setEditRemarks] = React.useState('');
+  const [editCustomAddress, setEditCustomAddress] = React.useState('');
+  const [isSavingEdit, setIsSavingEdit] = React.useState(false);
   const [chatBill, setChatBill] = React.useState<any>(null);
   const [showPaymentSelection, setShowPaymentSelection] = React.useState(false);
   const [promptSettleMode, setPromptSettleMode] = React.useState<'UPI' | 'Bank' | null>(null);
@@ -1042,6 +1051,270 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     (isMilan || currentFranchise?.email === 'rajhanssikar@gmail.com') &&
     (franchiseDetail?.allowSystemMaintenance !== false && currentFranchise?.allowSystemMaintenance !== false)
   );
+
+  const handleSaveBillEdits = async () => {
+    if (!editingBill?.id || isSavingEdit) return;
+    setIsSavingEdit(true);
+
+    try {
+      const franchiseIdForBill = editingBill.franchiseId || 'legacy-rajhans';
+      const parsedRate = Number(editRate);
+      const parsedQty = Number(editQuantity);
+      const parsedExtra = Number(editExtraCharges);
+      const parsedDisc = Number(editDiscount);
+
+      const newTotalAmount = parsedQty * parsedRate;
+      const newGrandTotal = newTotalAmount + parsedExtra - parsedDisc;
+
+      // Recalculate commission if franchise & commissionPercentage is set
+      let newCommissionAmount = editingBill.commissionAmount || 0;
+      if (franchiseIdForBill && commissionPercentage) {
+        newCommissionAmount = (newGrandTotal * commissionPercentage) / 100;
+      }
+
+      const isDelivered = editingBill.status === 'Delivered';
+      const wasLedgerPosted = !!editingBill.ledgerPosted;
+
+      if (isDelivered && wasLedgerPosted) {
+        // Fetch all accounts and groups needed to perform reverse and re-apply of entries
+        const [
+          incomeSnap,
+          cashSnap,
+          bankSnap,
+          customerSnap,
+          franchiseDoc,
+          loyaltyExpenseAccSnap,
+          tripSnapToSync
+        ] = await Promise.all([
+          getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', franchiseIdForBill))),
+          getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
+          getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
+          getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
+          getDoc(doc(db, 'franchises', franchiseIdForBill)),
+          getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense'), where('franchiseId', 'in', [franchiseIdForBill, null]))),
+          getDocs(query(collection(db, 'trips'), where('billId', '==', editingBill.id)))
+        ]);
+
+        let incomeAccId = incomeSnap.docs[0]?.id;
+        let cashAccId = cashSnap.docs[0]?.id;
+        let bankAccId = bankSnap.docs[0]?.id;
+        let customerAccId = customerSnap.docs[0]?.id;
+        let loyaltyExpenseAccId = loyaltyExpenseAccSnap.docs.find(d => d.data().franchiseId === franchiseIdForBill || d.data().franchiseId === null)?.id;
+
+        await runTransaction(db, async (transaction) => {
+          const billRef = doc(db, 'bills', editingBill.id);
+          const customerRef = doc(db, 'customers', editingBill.customerId);
+          
+          const incomeAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
+          const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
+          const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
+          const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
+          const loyaltyExpenseAccRef = loyaltyExpenseAccId ? doc(db, 'accounts', loyaltyExpenseAccId) : null;
+
+          const [
+            billDoc,
+            custDoc,
+            incomeAccDoc,
+            cashAccDoc,
+            bankAccDoc,
+            customerAccDoc,
+            loyaltyExpenseAccDoc
+          ] = await Promise.all([
+            transaction.get(billRef),
+            transaction.get(customerRef),
+            incomeAccRef ? transaction.get(incomeAccRef) : Promise.resolve(null),
+            cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
+            bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
+            customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null),
+            loyaltyExpenseAccRef ? transaction.get(loyaltyExpenseAccRef) : Promise.resolve(null)
+          ]);
+
+          if (!billDoc.exists()) throw new Error("Bill not found");
+          const oldBill = billDoc.data();
+          const oldAmount = oldBill.grandTotal;
+          const oldPaymentMode = oldBill.paymentMode;
+
+          // --- STEP 1: REVERSE OLD LEDGER ENTRIES ---
+          const prevEarned = oldBill.loyaltyPointsEarned || 0;
+          const prevRedeemed = oldBill.loyaltyPointsRedeemed || 0;
+          const netLoyaltyChange = prevEarned - prevRedeemed;
+          
+          let currentLoyaltyCoins = custDoc.exists() ? (custDoc.data().loyaltyCoins || 0) : 0;
+          let currentCustomerPending = custDoc.exists() ? (custDoc.data().pendingAmount || 0) : 0;
+          
+          // Reverted states in transaction
+          let reversedCoins = Math.max(0, currentLoyaltyCoins - netLoyaltyChange);
+          let reversedCustomerPending = (oldPaymentMode === 'Pending') ? Math.max(0, currentCustomerPending - oldAmount) : currentCustomerPending;
+
+          // Reverse loyalty expense account
+          let reversedLoyaltyExpenseAccBalance = 0;
+          if (prevRedeemed > 0 && loyaltyExpenseAccDoc?.exists() && loyaltyExpenseAccRef) {
+            reversedLoyaltyExpenseAccBalance = Math.max(0, (loyaltyExpenseAccDoc.data().currentBalance || 0) - prevRedeemed);
+          }
+
+          // Reverse Service Income
+          const prevSalesTotal = oldAmount + prevRedeemed;
+          let reversedIncomeAccBalance = (incomeAccDoc?.exists() && incomeAccRef) ? (incomeAccDoc.data().currentBalance || 0) - prevSalesTotal : 0;
+
+          // Reverse Payment / Customer Account
+          let reversedCashAccBalance = (cashAccDoc?.exists() && cashAccRef) ? (cashAccDoc.data().currentBalance || 0) - oldAmount : 0;
+          let reversedBankAccBalance = (bankAccDoc?.exists() && bankAccRef) ? (bankAccDoc.data().currentBalance || 0) - oldAmount : 0;
+          let reversedCustomerAccBalance = (customerAccDoc?.exists() && customerAccRef) ? (customerAccDoc.data().currentBalance || 0) - oldAmount : 0;
+
+          // --- STEP 2: CALCULATE NEW VALUES ---
+          let newLoyaltyPointsEarned = 0;
+          if (custDoc.exists() && custDoc.data().loyaltyProgramEligible !== false) {
+            newLoyaltyPointsEarned = Math.floor(newGrandTotal / 100) * 2;
+          }
+          const finalLoyaltyPointsEarned = newLoyaltyPointsEarned;
+          const netLoyaltyNewChange = finalLoyaltyPointsEarned - prevRedeemed;
+
+          let finalCoins = reversedCoins + netLoyaltyNewChange;
+          let finalCustomerPending = reversedCustomerPending + (oldPaymentMode === 'Pending' ? newGrandTotal : 0);
+
+          // Update Customer
+          transaction.update(customerRef, {
+            loyaltyCoins: finalCoins,
+            pendingAmount: finalCustomerPending,
+            updatedAt: serverTimestamp()
+          });
+
+          // Update Bill Doc
+          transaction.update(billRef, {
+            rate: parsedRate,
+            quantity: parsedQty,
+            extraCharges: parsedExtra,
+            discount: parsedDisc,
+            totalAmount: newTotalAmount,
+            grandTotal: newGrandTotal,
+            commissionAmount: newCommissionAmount,
+            remarks: editRemarks.trim(),
+            customerAddress: editCustomAddress.trim(),
+            loyaltyPointsEarned: finalLoyaltyPointsEarned,
+            updatedAt: serverTimestamp()
+          });
+
+          // Sync trips
+          if (tripSnapToSync && !tripSnapToSync.empty) {
+            tripSnapToSync.forEach(tDoc => {
+              transaction.update(doc(db, 'trips', tDoc.id), {
+                quantity: parsedQty,
+                remarks: editRemarks.trim(),
+                siteLocation: editCustomAddress.trim(),
+                updatedAt: serverTimestamp()
+              });
+            });
+          }
+
+          // Update Accounts balances with new values
+          if (loyaltyExpenseAccRef && loyaltyExpenseAccDoc?.exists() && prevRedeemed > 0) {
+            transaction.update(loyaltyExpenseAccRef, {
+              currentBalance: reversedLoyaltyExpenseAccBalance + prevRedeemed
+            });
+          }
+
+          // Service Income updates (including prevRedeemed)
+          if (incomeAccRef && incomeAccDoc?.exists()) {
+            transaction.update(incomeAccRef, {
+              currentBalance: reversedIncomeAccBalance + (newGrandTotal + prevRedeemed)
+            });
+          }
+
+          if (oldPaymentMode === 'Cash' && cashAccRef && cashAccDoc?.exists()) {
+            transaction.update(cashAccRef, {
+              currentBalance: reversedCashAccBalance + newGrandTotal
+            });
+          } else if ((oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') && bankAccRef && bankAccDoc?.exists()) {
+            transaction.update(bankAccRef, {
+              currentBalance: reversedBankAccBalance + newGrandTotal
+            });
+          } else if (oldPaymentMode === 'Pending' && customerAccRef && customerAccDoc?.exists()) {
+            transaction.update(customerAccRef, {
+              currentBalance: reversedCustomerAccBalance + newGrandTotal
+            });
+          }
+
+          // --- STEP 3: REWRITE VOUCHER ---
+          const salesVchId = `VCH-${editingBill.id}-SALE`;
+          const salesItems = [];
+          
+          if (oldPaymentMode === 'Pending') {
+            if (customerAccId) {
+              salesItems.push({ accountId: customerAccId, accountName: oldBill.customerName, amount: newGrandTotal, type: 'Dr' });
+            }
+          } else {
+            const debitAccId = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank') ? bankAccId : cashAccId;
+            const debitAccName = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank') ? 'Bank Account' : 'Cash';
+            if (debitAccId) {
+              salesItems.push({ accountId: debitAccId, accountName: debitAccName, amount: newGrandTotal, type: 'Dr' });
+            }
+          }
+
+          if (prevRedeemed > 0 && loyaltyExpenseAccId) {
+            salesItems.push({ accountId: loyaltyExpenseAccId, accountName: 'Franchise Loyalty Expense', amount: prevRedeemed, type: 'Dr' });
+          }
+          
+          const newSalesTotalAmount = newGrandTotal + prevRedeemed;
+          if (incomeAccId) {
+            salesItems.push({ accountId: incomeAccId, accountName: 'Service Income', amount: newSalesTotalAmount, type: 'Cr' });
+          }
+
+          transaction.set(doc(db, 'vouchers', salesVchId), {
+            date: oldBill.date ? new Date(oldBill.date) : new Date(),
+            type: 'Sales',
+            voucherNumber: `TRP-${oldBill.billNumber}`,
+            items: salesItems,
+            narration: `Trip #${oldBill.billNumber} - ${oldBill.customerName} (${oldBill.tankerSize || 'Water Can'}) ${prevRedeemed > 0 ? `| Cashback Coins Redeemed: ₹${prevRedeemed}` : ''} [EDITED]`,
+            totalAmount: newSalesTotalAmount,
+            franchiseId: oldBill.franchiseId || franchiseId || null,
+            createdAt: oldBill.createdAt || serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+
+        });
+      } else {
+        // Not delivered or ledger not posted yet, update the Bill document directly!
+        await updateDoc(doc(db, 'bills', editingBill.id), {
+          rate: parsedRate,
+          quantity: parsedQty,
+          extraCharges: parsedExtra,
+          discount: parsedDisc,
+          totalAmount: newTotalAmount,
+          grandTotal: newGrandTotal,
+          commissionAmount: newCommissionAmount,
+          remarks: editRemarks.trim(),
+          customerAddress: editCustomAddress.trim(),
+          updatedAt: serverTimestamp()
+        });
+
+        // Sync with trips under that bill
+        const qTrips = query(collection(db, 'trips'), where('billId', '==', editingBill.id));
+        const tripSnap = await getDocs(qTrips);
+        if (!tripSnap.empty) {
+          await runTransaction(db, async (trans) => {
+            tripSnap.forEach(tDoc => {
+              trans.update(doc(db, 'trips', tDoc.id), {
+                quantity: parsedQty,
+                siteLocation: editCustomAddress.trim(),
+                remarks: editRemarks.trim(),
+                updatedAt: serverTimestamp()
+              });
+            });
+          });
+        }
+      }
+
+      const freshSnap = await getDoc(doc(db, 'bills', editingBill.id));
+      setEditingBill({ id: freshSnap.id, ...freshSnap.data() });
+      setIsEditingDetails(false);
+      alert('Bill updated successfully!');
+    } catch (err: any) {
+      console.error(err);
+      alert(`Failed to save edits: ${err.message || String(err)}`);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
 
   const handleMasterReset = async () => {
     if (!isSystemAdmin) {
@@ -1570,21 +1843,29 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             transaction.update(bankAccRef!, { currentBalance: adjusted + ((mode === 'UPI' || mode === 'Bank') ? amount : 0) });
         }
 
-        if (!debtorsGroupId) {
-          const newGrp = doc(collection(db, 'accountGroups'));
-          transaction.set(newGrp, { name: 'Sundry Debtors', parentGroupId: assetsGroupId, type: 'Asset', franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
-          debtorsGroupId = newGrp.id;
-        }
-        
         let finalCustomerAccId = customerAccId;
-        if (!customerAccId) {
-          const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { name: oldBill.customerName, groupId: debtorsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: isCredit ? amount : 0, franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
-          finalCustomerAccId = newAcc.id;
-        } else if (customerAccDoc?.exists()) {
+        if (isCredit) {
+          if (!debtorsGroupId) {
+            const newGrp = doc(collection(db, 'accountGroups'));
+            transaction.set(newGrp, { name: 'Sundry Debtors', parentGroupId: assetsGroupId, type: 'Asset', franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
+            debtorsGroupId = newGrp.id;
+          }
+          
+          if (!customerAccId) {
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, { name: oldBill.customerName, groupId: debtorsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: amount, franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
+            finalCustomerAccId = newAcc.id;
+          } else if (customerAccDoc?.exists()) {
+              const base = customerAccDoc.data().currentBalance || 0;
+              const adjusted = (wasDelivered && oldBill.ledgerPosted && oldPaymentMode === 'Pending') ? base - amount : base;
+              transaction.update(customerAccRef!, { currentBalance: adjusted + amount });
+          }
+        } else {
+          // Bypassing customer ledger entirely if oldBill was Credit and is now Cash/UPI, or is a fresh Cash/UPI delivery
+          if (wasDelivered && oldBill.ledgerPosted && oldPaymentMode === 'Pending' && customerAccRef && customerAccDoc?.exists()) {
             const base = customerAccDoc.data().currentBalance || 0;
-            const adjusted = (wasDelivered && oldBill.ledgerPosted && oldPaymentMode === 'Pending') ? base - amount : base;
-            transaction.update(customerAccRef!, { currentBalance: adjusted + (isCredit ? amount : 0) });
+            transaction.update(customerAccRef, { currentBalance: Math.max(0, base - amount) });
+          }
         }
 
         // Update customer's loyalty balance in the database atomically inside transaction
@@ -1635,9 +1916,17 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         // --- 3. UPSERT VOUCHERS ---
         // Sales Voucher
         const salesVchId = `VCH-${editingBill.id}-SALE`;
-        const salesItems = [
-          { accountId: finalCustomerAccId, accountName: oldBill.customerName, amount: amount, type: 'Dr' }
-        ];
+        const salesItems = [];
+        
+        if (isCredit) {
+          const finalDrCustId = customerAccId || finalCustomerAccId;
+          salesItems.push({ accountId: finalDrCustId, accountName: oldBill.customerName, amount: amount, type: 'Dr' });
+        } else {
+          const debitAccId = (mode === 'UPI' || mode === 'Bank') ? finalBankAccId! : finalCashAccId!;
+          const debitAccName = (mode === 'UPI' || mode === 'Bank') ? 'Bank Account' : 'Cash';
+          salesItems.push({ accountId: debitAccId, accountName: debitAccName, amount: amount, type: 'Dr' });
+        }
+
         if (redeemed > 0 && finalLoyaltyExpenseAccId) {
           salesItems.push({ accountId: finalLoyaltyExpenseAccId, accountName: 'Franchise Loyalty Expense', amount: redeemed, type: 'Dr' });
         }
@@ -1655,29 +1944,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           updatedAt: serverTimestamp()
         });
 
-        // Receipt Voucher (if not credit)
+        // Delete Receipt Voucher since we debit Cash/Bank directly in Sales Voucher for immediately paid sales
         const receiptVchId = `VCH-${editingBill.id}-RECPT`;
-        if (!isCredit) {
-          const debitAccId = (mode === 'UPI' || mode === 'Bank') ? finalBankAccId : finalCashAccId;
-          const debitAccName = (mode === 'UPI' || mode === 'Bank') ? 'Bank Account' : 'Cash';
-          
-          transaction.set(doc(db, 'vouchers', receiptVchId), {
-            date: new Date(),
-            type: 'Receipt',
-            voucherNumber: `REC-${oldBill.billNumber}`,
-            items: [
-              { accountId: debitAccId, accountName: debitAccName, amount: amount, type: 'Dr' },
-              { accountId: finalCustomerAccId, accountName: oldBill.customerName, amount: amount, type: 'Cr' }
-            ],
-            narration: `Payment for Bill #${oldBill.billNumber} via ${mode}`,
-            totalAmount: amount,
-            franchiseId: oldBill.franchiseId || franchiseId || null,
-            createdAt: serverTimestamp()
-          });
-        } else {
-          // If it was previously receipted but now changed to credit, delete receipt voucher
-          transaction.delete(doc(db, 'vouchers', receiptVchId));
-        }
+        transaction.delete(doc(db, 'vouchers', receiptVchId));
       });
 
       // Show "Done" state for 1 second
@@ -2452,9 +2721,28 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
             <div className="flex items-center gap-3 mb-1 justify-between">
               <div className="text-[11px] uppercase font-black tracking-widest text-slate-500">Cash in Hand (कैश इन हैण्ड)</div>
-              <span className="text-[9px] font-black text-emerald-650 bg-emerald-100 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                + New Entry
-              </span>
+              <div className="flex gap-1.5">
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setQuickVoucher({ type: 'Receipt', paymentMethod: 'Cash' });
+                  }}
+                  className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-600 hover:text-white transition-all shadow-sm"
+                  title="Quick Receipt"
+                >
+                  <Plus size={16} />
+                </button>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setQuickVoucher({ type: 'Payment', paymentMethod: 'Cash' });
+                  }}
+                  className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                  title="Quick Payment"
+                >
+                  <Minus size={16} />
+                </button>
+              </div>
             </div>
 
             <div className="text-4xl font-display font-black text-slate-900 tracking-tight flex items-baseline">
@@ -3217,7 +3505,16 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                   }
                 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => setEditingBill(bill)}
+                onClick={() => {
+                  setEditingBill(bill);
+                  setIsEditingDetails(false);
+                  setEditRate(bill.rate || 0);
+                  setEditQuantity(bill.quantity || 1);
+                  setEditExtraCharges(bill.extraCharges || 0);
+                  setEditDiscount(bill.discount || 0);
+                  setEditRemarks(bill.remarks || '');
+                  setEditCustomAddress(bill.customerAddress || '');
+                }}
                 className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-50 shadow-sm relative overflow-hidden text-left cursor-pointer hover:border-slate-200 transition-all duration-200"
               >
               <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${
@@ -3595,6 +3892,15 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 </div>
                 <div className="flex gap-2">
                   <button 
+                    onClick={() => setIsEditingDetails(!isEditingDetails)}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                      isEditingDetails ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                    }`}
+                    title="Edit Rate & Details"
+                  >
+                    <Edit3 size={18} />
+                  </button>
+                  <button 
                     onClick={() => editingBill && setDeleteConfirm({ id: editingBill.id, number: editingBill.billNumber })}
                     className="w-10 h-10 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-colors"
                     title="Delete Bill"
@@ -3611,266 +3917,371 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               </div>
 
               <div className="space-y-6">
-                {/* Workflow Management and Payment Finalization */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Workflow Management</label>
-                  
-                  {editingBill.status === 'Delivered' && !editingBill.isSettled ? (
-                    <div className="bg-green-50 border-2 border-green-200 rounded-[2rem] p-6">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center text-white">
-                          <CheckCircle2 size={20} />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-green-900 leading-tight">Trip Delivered</h4>
-                          <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider">Finalize Payment - Bill #{editingBill.billNumber}</p>
-                        </div>
+                {isEditingDetails ? (
+                  <div className="space-y-4 bg-slate-50/80 p-5 rounded-[2rem] border border-slate-100">
+                    <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100">
+                      <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">Edit Bill Metrics</h4>
+                    </div>
+                    
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Rate (दर - ₹)</label>
+                      <input 
+                        type="number"
+                        value={editRate === 0 ? '' : editRate}
+                        onChange={(e) => setEditRate(Number(e.target.value) || 0)}
+                        className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 shadow-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Quantity (मात्रा)</label>
+                      <input 
+                        type="number"
+                        value={editQuantity === 0 ? '' : editQuantity}
+                        onChange={(e) => setEditQuantity(Number(e.target.value) || 0)}
+                        className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 shadow-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Extra Charges (अतिरिक्त शुल्क - ₹)</label>
+                      <input 
+                        type="number"
+                        value={editExtraCharges === 0 ? '' : editExtraCharges}
+                        onChange={(e) => setEditExtraCharges(Number(e.target.value) || 0)}
+                        className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 shadow-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Discount (छूट - ₹)</label>
+                      <input 
+                        type="number"
+                        value={editDiscount === 0 ? '' : editDiscount}
+                        onChange={(e) => setEditDiscount(Number(e.target.value) || 0)}
+                        className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 shadow-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Site Location (ग्राहक का पता)</label>
+                      <input 
+                        type="text"
+                        value={editCustomAddress}
+                        onChange={(e) => setEditCustomAddress(e.target.value)}
+                        className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 shadow-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Remarks (टिप्पणी)</label>
+                      <textarea 
+                        value={editRemarks}
+                        onChange={(e) => setEditRemarks(e.target.value)}
+                        className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-2 text-xs font-medium text-slate-700 outline-none focus:border-blue-500 h-16 resize-none shadow-sm"
+                      />
+                    </div>
+
+                    <div className="pt-3 border-t-2 border-dashed border-slate-200/60 mt-3">
+                      <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
+                        <span>Total Amount (दर × मात्रा)</span>
+                        <span className="font-mono">₹{(editQuantity * editRate).toLocaleString()}</span>
                       </div>
+                      <div className="flex justify-between items-center text-xs font-black text-slate-800 uppercase tracking-wider">
+                        <span>Grand Total (कुल योग)</span>
+                        <span className="text-blue-600 font-black font-mono">₹{(editQuantity * editRate + Number(editExtraCharges) - Number(editDiscount)).toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    {editingBill.status === 'Delivered' && (
+                      <div className="p-3 bg-amber-50 rounded-2xl border border-amber-100 text-[9px] text-amber-700 font-bold leading-normal">
+                        ⚠️ Note: This bill is DELIVERED. Saving edits will automatically reverse old ledger postings, apply new figures, and update accounts and customer ledger safely.
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3 pt-3">
+                      <button 
+                        type="button"
+                        onClick={() => setIsEditingDetails(false)}
+                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 p-3 rounded-xl font-bold text-[10px] uppercase tracking-wider"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={handleSaveBillEdits}
+                        disabled={isSavingEdit}
+                        className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white p-3 rounded-xl font-bold text-[10px] uppercase tracking-wider shadow-md shadow-blue-100"
+                      >
+                        {isSavingEdit ? 'Saving...' : 'Save Edits'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Workflow Management and Payment Finalization */}
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Workflow Management</label>
                       
-                      <div className="grid grid-cols-2 gap-3 mb-3">
-                        <button 
-                          onClick={() => handleSettleOrder('Cash')}
-                          disabled={isSettling !== null}
-                          className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-green-500 hover:text-green-600 transition-all shadow-sm"
-                        >
-                          <Coins size={20} />
-                          <span className="text-[10px] uppercase">Cash</span>
-                        </button>
-                        <button 
-                          onClick={() => triggerSettleSettleButton('UPI')}
-                          disabled={isSettling !== null}
-                          className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-blue-500 hover:text-blue-600 transition-all shadow-sm"
-                        >
-                          <Smartphone size={20} />
-                          <span className="text-[10px] uppercase">UPI</span>
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <button 
-                          onClick={() => triggerSettleSettleButton('Bank')}
-                          disabled={isSettling !== null}
-                          className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-indigo-500 hover:text-indigo-600 transition-all shadow-sm"
-                        >
-                          <Banknote size={20} />
-                          <span className="text-[10px] uppercase">Bank / TB</span>
-                        </button>
-                        <button 
-                          onClick={() => handleSettleOrder('Credit')}
-                          disabled={isSettling !== null}
-                          className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-orange-500 hover:text-orange-600 transition-all shadow-sm"
-                        >
-                          <Plus size={20} />
-                          <span className="text-[10px] uppercase">Debit udhar</span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-4 gap-2">
-                      <button 
-                        onClick={() => handleStatusUpdate('Delivered')}
-                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Delivered' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-100 text-slate-500'}`}
-                      >
-                        <CheckCircle2 size={24} />
-                        <span className="text-[10px] font-bold">Delivered</span>
-                      </button>
-                      <button 
-                        onClick={() => handleStatusUpdate('Filling')}
-                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Filling' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
-                      >
-                        <Truck size={24} />
-                        <span className="text-[10px] font-bold">Filling</span>
-                      </button>
-                      <button 
-                        onClick={() => handleStatusUpdate('Pending')}
-                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Pending' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-100 text-slate-500'}`}
-                      >
-                        <Clock size={24} />
-                        <span className="text-[10px] font-bold">Pending</span>
-                      </button>
-                      <button 
-                        onClick={() => handleStatusUpdate('Cancelled')}
-                        className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Cancelled' ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-100 text-slate-500'}`}
-                      >
-                        <AlertCircle size={24} />
-                        <span className="text-[10px] font-bold">Cancel</span>
-                      </button>
-                      </div>
+                      {editingBill.status === 'Delivered' && !editingBill.isSettled ? (
+                        <div className="bg-green-50 border-2 border-green-200 rounded-[2rem] p-6">
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center text-white">
+                              <CheckCircle2 size={20} />
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-green-900 leading-tight">Trip Delivered</h4>
+                              <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider">Finalize Payment - Bill #{editingBill.billNumber}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-3 mb-3">
+                            <button 
+                              onClick={() => handleSettleOrder('Cash')}
+                              disabled={isSettling !== null}
+                              className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-green-500 hover:text-green-600 transition-all shadow-sm"
+                            >
+                              <Coins size={20} />
+                              <span className="text-[10px] uppercase">Cash</span>
+                            </button>
+                            <button 
+                              onClick={() => triggerSettleSettleButton('UPI')}
+                              disabled={isSettling !== null}
+                              className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-blue-500 hover:text-blue-600 transition-all shadow-sm"
+                            >
+                              <Smartphone size={20} />
+                              <span className="text-[10px] uppercase">UPI</span>
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button 
+                              onClick={() => triggerSettleSettleButton('Bank')}
+                              disabled={isSettling !== null}
+                              className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-indigo-500 hover:text-indigo-600 transition-all shadow-sm"
+                            >
+                              <Banknote size={20} />
+                              <span className="text-[10px] uppercase">Bank / TB</span>
+                            </button>
+                            <button 
+                              onClick={() => handleSettleOrder('Credit')}
+                              disabled={isSettling !== null}
+                              className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-orange-500 hover:text-orange-600 transition-all shadow-sm"
+                            >
+                              <Plus size={20} />
+                              <span className="text-[10px] uppercase">Debit udhar</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-4 gap-2">
+                          <button 
+                            onClick={() => handleStatusUpdate('Delivered')}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Delivered' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-100 text-slate-500'}`}
+                          >
+                            <CheckCircle2 size={24} />
+                            <span className="text-[10px] font-bold">Delivered</span>
+                          </button>
+                          <button 
+                            onClick={() => handleStatusUpdate('Filling')}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Filling' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
+                          >
+                            <Truck size={24} />
+                            <span className="text-[10px] font-bold">Filling</span>
+                          </button>
+                          <button 
+                            onClick={() => handleStatusUpdate('Pending')}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Pending' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-100 text-slate-500'}`}
+                          >
+                            <Clock size={24} />
+                            <span className="text-[10px] font-bold">Pending</span>
+                          </button>
+                          <button 
+                            onClick={() => handleStatusUpdate('Cancelled')}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Cancelled' ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-100 text-slate-500'}`}
+                          >
+                            <AlertCircle size={24} />
+                            <span className="text-[10px] font-bold">Cancel</span>
+                          </button>
+                          </div>
 
-                      {(!editingBill.driverId || !editingBill.tractorId) && (
-                        <div className="p-3 bg-red-50 rounded-2xl border border-red-100 text-center animate-pulse">
-                          <p className="text-[11px] font-black uppercase tracking-wider text-red-600">
-                            ⚠️ First select driver and tractor then click Delivered
-                          </p>
-                          <p className="text-[9px] text-red-400 font-extrabold mt-0.5">
-                            (पहले ड्राइवर और ट्रैक्टर चुनें, उसके बाद ही Delivered चुनें)
-                          </p>
+                          {(!editingBill.driverId || !editingBill.tractorId) && (
+                            <div className="p-3 bg-red-50 rounded-2xl border border-red-100 text-center animate-pulse">
+                              <p className="text-[11px] font-black uppercase tracking-wider text-red-600">
+                                ⚠️ First select driver and tractor then click Delivered
+                              </p>
+                              <p className="text-[9px] text-red-400 font-extrabold mt-0.5">
+                                (पहले ड्राइवर और ट्रैक्टर चुनें, उसके बाद ही Delivered चुनें)
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
 
-                {/* Show payment status but not editable here */}
-                {editingBill.status === 'Delivered' && (
-                  <div className="space-y-3">
-                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-                      <div>
-                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Payment Mode</div>
-                        <div className="font-bold text-slate-900">{editingBill.paymentMode}</div>
-                      </div>
-                      {editingBill.paymentMode === 'Pending' ? (
-                        <div className="bg-orange-100 text-orange-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Balance Due</div>
-                      ) : (
-                        <div className="bg-green-100 text-green-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Paid</div>
-                      )}
-                    </div>
+                    {/* Show payment status but not editable here */}
+                    {editingBill.status === 'Delivered' && (
+                      <div className="space-y-3">
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                          <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Payment Mode</div>
+                            <div className="font-bold text-slate-900">{editingBill.paymentMode}</div>
+                          </div>
+                          {editingBill.paymentMode === 'Pending' ? (
+                            <div className="bg-orange-100 text-orange-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Balance Due</div>
+                          ) : (
+                            <div className="bg-green-100 text-green-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase">Paid</div>
+                          )}
+                        </div>
 
-                    {editingBill.paymentMode === 'Pending' && (
-                      <div className="grid grid-cols-2 gap-2 relative">
-                        <button 
-                          onClick={() => handlePaymentUpdate('Cash')}
-                          disabled={isSettling !== null}
-                          className="flex items-center justify-center gap-2 py-3 bg-green-50 text-green-600 rounded-xl font-bold border border-green-100 hover:bg-green-600 hover:text-white transition-all disabled:opacity-50"
-                        >
-                          <Banknote size={16} /> Cash
-                        </button>
-                        <button 
-                          onClick={() => handlePaymentUpdate('UPI')}
-                          disabled={isSettling !== null}
-                          className="flex items-center justify-center gap-2 py-3 bg-blue-50 text-blue-600 rounded-xl font-bold border border-blue-100 hover:bg-blue-600 hover:text-white transition-all disabled:opacity-50"
-                        >
-                          <Smartphone size={16} /> UPI
-                        </button>
+                        {editingBill.paymentMode === 'Pending' && (
+                          <div className="grid grid-cols-2 gap-2 relative">
+                            <button 
+                              onClick={() => handlePaymentUpdate('Cash')}
+                              disabled={isSettling !== null}
+                              className="flex items-center justify-center gap-2 py-3 bg-green-50 text-green-600 rounded-xl font-bold border border-green-100 hover:bg-green-600 hover:text-white transition-all disabled:opacity-50"
+                            >
+                              <Banknote size={16} /> Cash
+                            </button>
+                            <button 
+                              onClick={() => handlePaymentUpdate('UPI')}
+                              disabled={isSettling !== null}
+                              className="flex items-center justify-center gap-2 py-3 bg-blue-50 text-blue-600 rounded-xl font-bold border border-blue-100 hover:bg-blue-600 hover:text-white transition-all disabled:opacity-50"
+                            >
+                              <Smartphone size={16} /> UPI
+                            </button>
 
-                        {isSettling === 'DONE' && (
-                          <motion.div 
-                            initial={{ opacity: 0, scale: 0.9 }} 
-                            animate={{ opacity: 1, scale: 1 }} 
-                            className="absolute inset-0 bg-white flex items-center justify-center gap-2 z-50 rounded-xl border-2 border-green-500"
-                          >
-                            <CheckCircle2 size={20} className="text-green-500" />
-                            <span className="font-bold text-green-600">Done!</span>
-                          </motion.div>
+                            {isSettling === 'DONE' && (
+                              <motion.div 
+                                initial={{ opacity: 0, scale: 0.9 }} 
+                                animate={{ opacity: 1, scale: 1 }} 
+                                className="absolute inset-0 bg-white flex items-center justify-center gap-2 z-50 rounded-xl border-2 border-green-500"
+                              >
+                                <CheckCircle2 size={20} className="text-green-500" />
+                                <span className="font-bold text-green-600">Done!</span>
+                              </motion.div>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
-                  </div>
+
+                    {/* Driver Assignment */}
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Assign Driver</label>
+                      <div className="flex flex-wrap gap-2">
+                        {stats.drivers.map(d => {
+                          const isBusy = stats.busyDrivers.has(d.id);
+                          const isSelected = editingBill.driverName === d.name;
+                          return (
+                            <button 
+                              key={d.id}
+                              onClick={() => {
+                                if (isBusy && !isSelected) {
+                                   alert('Driver Busy: Currently on an active trip.');
+                                   return;
+                                }
+                                handleDriverUpdate(d);
+                              }}
+                              className={`relative px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
+                                isSelected 
+                                  ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                                  : isBusy 
+                                    ? 'border-amber-100 bg-amber-50 text-amber-600 opacity-60' 
+                                    : 'border-slate-100 text-slate-500 hover:border-blue-200'
+                              }`}
+                            >
+                              {d.name}
+                              {isBusy && !isSelected && (
+                                <span className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">BUSY</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                        {stats.drivers.length === 0 && (
+                          <div className="text-xs text-slate-400 italic">No drivers found. Add in settings.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Tractor Assignment */}
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Assign Tractor</label>
+                      <div className="flex flex-wrap gap-2">
+                        {stats.tractors.map(t => {
+                          const isBusy = stats.busyTractors.has(t.id);
+                          const isSelected = editingBill.tractorId === t.id;
+                          return (
+                            <button 
+                              key={t.id}
+                              onClick={() => {
+                                if (isBusy && !isSelected) {
+                                   alert('Tractor Busy: Currently on an active trip.');
+                                   return;
+                                }
+                                handleTractorUpdate(t.id!);
+                              }}
+                              className={`relative px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
+                                isSelected 
+                                  ? 'border-blue-500 bg-blue-50 text-blue-700' 
+                                  : isBusy 
+                                    ? 'border-amber-100 bg-amber-50 text-amber-600 opacity-60' 
+                                    : 'border-slate-100 text-slate-500 hover:border-blue-200'
+                              }`}
+                            >
+                              {t.name}
+                              {isBusy && !isSelected && (
+                                <span className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">BUSY</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                        {stats.tractors.length === 0 && (
+                          <div className="text-xs text-slate-400 italic">No tractors found. Add in Tractors tab.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-3">
+                      <button 
+                        onClick={() => { setEditingBill(null); setChatBill(editingBill); }}
+                        className="col-span-2 bg-blue-50 text-blue-600 border border-blue-200 flex flex-row items-center justify-center gap-2 p-4 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all text-sm mb-2"
+                      >
+                        <MessageSquare size={18} />
+                        <span>Customer Feedback</span>
+                      </button>
+                      <button 
+                        onClick={() => shareBillImage(editingBill, 'customer')}
+                        className="bg-[#25D366] text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all"
+                      >
+                        <MessageSquare size={16} />
+                        <span className="text-[9px] uppercase">Customer Copy</span>
+                      </button>
+                      <button 
+                        onClick={() => shareBillImage(editingBill, 'driver')}
+                        className="bg-slate-800 text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all"
+                      >
+                        <Share2 size={16} />
+                        <span className="text-[9px] uppercase">Driver Copy</span>
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          try {
+                            await handlePrint();
+                          } catch (err) {
+                            console.warn("Direct Printing failed, falling back to window.print:", err);
+                          }
+                          // Auto-send direct preloaded WhatsApp to customer
+                          openWhatsAppDirect(editingBill, franchiseDetail || currentFranchise);
+                        }}
+                        className="col-span-2 material-btn bg-blue-600 text-white flex items-center justify-center gap-2 py-4 shadow-md font-extrabold hover:bg-blue-700 transition-all border border-blue-500"
+                      >
+                        <Printer size={20} /> Print & Auto-Send WhatsApp 🚛
+                      </button>
+                    </div>
+                  </>
                 )}
-
-                {/* Driver Assignment */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Assign Driver</label>
-                  <div className="flex flex-wrap gap-2">
-                    {stats.drivers.map(d => {
-                      const isBusy = stats.busyDrivers.has(d.id);
-                      const isSelected = editingBill.driverName === d.name;
-                      return (
-                        <button 
-                          key={d.id}
-                          onClick={() => {
-                            if (isBusy && !isSelected) {
-                               alert('Driver Busy: Currently on an active trip.');
-                               return;
-                            }
-                            handleDriverUpdate(d);
-                          }}
-                          className={`relative px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
-                            isSelected 
-                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
-                              : isBusy 
-                                ? 'border-amber-100 bg-amber-50 text-amber-600 opacity-60' 
-                                : 'border-slate-100 text-slate-500 hover:border-blue-200'
-                          }`}
-                        >
-                          {d.name}
-                          {isBusy && !isSelected && (
-                            <span className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">BUSY</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                    {stats.drivers.length === 0 && (
-                      <div className="text-xs text-slate-400 italic">No drivers found. Add in settings.</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Tractor Assignment */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 block">Assign Tractor</label>
-                  <div className="flex flex-wrap gap-2">
-                    {stats.tractors.map(t => {
-                      const isBusy = stats.busyTractors.has(t.id);
-                      const isSelected = editingBill.tractorId === t.id;
-                      return (
-                        <button 
-                          key={t.id}
-                          onClick={() => {
-                            if (isBusy && !isSelected) {
-                               alert('Tractor Busy: Currently on an active trip.');
-                               return;
-                            }
-                            handleTractorUpdate(t.id!);
-                          }}
-                          className={`relative px-4 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
-                            isSelected 
-                              ? 'border-blue-500 bg-blue-50 text-blue-700' 
-                              : isBusy 
-                                ? 'border-amber-100 bg-amber-50 text-amber-600 opacity-60' 
-                                : 'border-slate-100 text-slate-500 hover:border-blue-200'
-                          }`}
-                        >
-                          {t.name}
-                          {isBusy && !isSelected && (
-                            <span className="absolute -top-2 -right-1 bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">BUSY</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                    {stats.tractors.length === 0 && (
-                      <div className="text-xs text-slate-400 italic">No tractors found. Add in Tractors tab.</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => { setEditingBill(null); setChatBill(editingBill); }}
-                    className="col-span-2 bg-blue-50 text-blue-600 border border-blue-200 flex flex-row items-center justify-center gap-2 p-4 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all text-sm mb-2"
-                  >
-                    <MessageSquare size={18} />
-                    <span>Customer Feedback</span>
-                  </button>
-                  <button 
-                    onClick={() => shareBillImage(editingBill, 'customer')}
-                    className="bg-[#25D366] text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all"
-                  >
-                    <MessageSquare size={16} />
-                    <span className="text-[9px] uppercase">Customer Copy</span>
-                  </button>
-                  <button 
-                    onClick={() => shareBillImage(editingBill, 'driver')}
-                    className="bg-slate-800 text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all"
-                  >
-                    <Share2 size={16} />
-                    <span className="text-[9px] uppercase">Driver Copy</span>
-                  </button>
-                  <button 
-                    onClick={async () => {
-                      try {
-                        await handlePrint();
-                      } catch (err) {
-                        console.warn("Direct Printing failed, falling back to window.print:", err);
-                      }
-                      // Auto-send direct preloaded WhatsApp to customer
-                      openWhatsAppDirect(editingBill, franchiseDetail || currentFranchise);
-                    }}
-                    className="col-span-2 material-btn bg-blue-600 text-white flex items-center justify-center gap-2 py-4 shadow-md font-extrabold hover:bg-blue-700 transition-all border border-blue-500"
-                  >
-                    <Printer size={20} /> Print & Auto-Send WhatsApp 🚛
-                  </button>
-                </div>
               </div>
             </motion.div>
           </div>

@@ -139,14 +139,62 @@ export const ledgerAutomation = {
         }
       }
 
-      // 1. Ensure customer ledger account exists and is linked
-      const customerAccId = await ledgerAutomation.ensureCustomerAccount(bill.customerId, bill.customerName, bill.franchiseId);
+      const isDirectPayment = bill.paymentMode === 'Cash' || bill.paymentMode === 'UPI' || bill.paymentMode === 'Bank' || bill.paymentMode === 'Bank Transfer' || bill.paymentMethod === 'Cash' || bill.paymentMethod === 'Bank';
 
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       const accounts = accountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Account));
 
-      const customerAcc = accounts.find(a => a.id === customerAccId) || 
-                          accounts.find(a => a.name.toLowerCase() === bill.customerName.toLowerCase());
+      let debitAcc: Account | undefined;
+      let customerAccId: string | null = null;
+      let customerAcc: Account | undefined;
+
+      if (isDirectPayment) {
+        const isCash = bill.paymentMode === 'Cash' || bill.paymentMethod === 'Cash';
+        const debitAccName = isCash ? 'Cash' : 'Bank Account';
+        debitAcc = accounts.find(a => a.name.toLowerCase() === debitAccName.toLowerCase());
+
+        if (!debitAcc) {
+          try {
+            const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+            let assetsGroup = groupsSnap.docs.find(d => d.data().name === 'Current Assets');
+            let assetsGroupId = assetsGroup?.id;
+            if (!assetsGroupId) {
+              const newGrp = await addDoc(collection(db, 'accountGroups'), {
+                name: 'Current Assets',
+                type: 'Asset',
+                franchiseId: bill.franchiseId || null,
+                createdAt: serverTimestamp()
+              });
+              assetsGroupId = newGrp.id;
+            }
+            const newAccRef = await addDoc(collection(db, 'accounts'), {
+              name: debitAccName,
+              groupId: assetsGroupId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: 0,
+              franchiseId: bill.franchiseId || null,
+              createdAt: serverTimestamp()
+            });
+            debitAcc = {
+              id: newAccRef.id,
+              name: debitAccName,
+              groupId: assetsGroupId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: 0,
+              franchiseId: bill.franchiseId || null
+            } as Account;
+          } catch (e) {
+            console.error("Failed to auto-create Direct Payment account in ledgerAutomation:", e);
+          }
+        }
+      } else {
+        // 1. Ensure customer ledger account exists and is linked
+        customerAccId = await ledgerAutomation.ensureCustomerAccount(bill.customerId, bill.customerName, bill.franchiseId);
+        customerAcc = accounts.find(a => a.id === customerAccId) || 
+                      accounts.find(a => a.name.toLowerCase() === bill.customerName.toLowerCase());
+      }
 
       let salesAcc = accounts.find(a => a.name.toLowerCase() === 'service income') ||
                      accounts.find(a => a.name.toLowerCase() === 'water sales') || 
@@ -233,20 +281,35 @@ export const ledgerAutomation = {
         }
       }
 
-      if (!customerAcc || !salesAcc) {
-        console.warn('Could not auto-post to ledger: Customer or Sales account not found.');
-        return;
+      if (isDirectPayment) {
+        if (!debitAcc || !salesAcc) {
+          console.warn('Could not auto-post direct bill to ledger: Debit or Sales account not found.');
+          return;
+        }
+      } else {
+        if (!customerAcc || !salesAcc) {
+          console.warn('Could not auto-post credit bill to ledger: Customer or Sales account not found.');
+          return;
+        }
       }
 
       const items: VoucherItem[] = [];
       
-      // Debit remaining customer balance payable
-      items.push({
-        accountId: customerAcc.id!,
-        accountName: customerAcc.name,
-        type: 'Dr',
-        amount: bill.grandTotal
-      });
+      if (isDirectPayment) {
+        items.push({
+          accountId: debitAcc.id!,
+          accountName: debitAcc.name,
+          type: 'Dr',
+          amount: bill.grandTotal
+        });
+      } else {
+        items.push({
+          accountId: customerAcc!.id!,
+          accountName: customerAcc!.name,
+          type: 'Dr',
+          amount: bill.grandTotal
+        });
+      }
 
       // Debit redeemed amount from Franchise Loyalty Expense account
       if (redeemed > 0 && loyaltyExpenseAcc) {
@@ -283,9 +346,16 @@ export const ledgerAutomation = {
       });
 
       // Update balances in ledger accounts
-      await updateDoc(doc(db, 'accounts', customerAcc.id!), {
-        currentBalance: (customerAcc.currentBalance || 0) + bill.grandTotal
-      });
+      if (isDirectPayment) {
+        await updateDoc(doc(db, 'accounts', debitAcc.id!), {
+          currentBalance: (debitAcc.currentBalance || 0) + bill.grandTotal
+        });
+      } else {
+        await updateDoc(doc(db, 'accounts', customerAcc!.id!), {
+          currentBalance: (customerAcc!.currentBalance || 0) + bill.grandTotal
+        });
+      }
+
       await updateDoc(doc(db, 'accounts', salesAcc.id!), {
         currentBalance: (salesAcc.currentBalance || 0) + salesTotalAmount
       });
@@ -303,6 +373,7 @@ export const ledgerAutomation = {
       // Mark bill as posted
       await updateDoc(doc(db, 'bills', bill.id), { 
         ledgerPosted: true,
+        paymentLedgerPosted: isDirectPayment, // Mark payment ledger as posted too for direct paid sales
         loyaltyPointsEarned: calculatedLoyaltyPointsEarned,
         commissionAmount: finalCommissionAmount
       });
