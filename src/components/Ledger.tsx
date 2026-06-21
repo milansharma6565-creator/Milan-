@@ -1788,6 +1788,25 @@ function AccountingTabButton({ active, onClick, icon, label }: { active: boolean
 
 // --- SUB COMPONENTS ---
 
+/** Dynamic payment mode helper */
+function getVoucherPaymentMode(v: Voucher): 'Cash' | 'UPI' | 'Debit' {
+  const hasCash = v.items.some(item => 
+    item.accountName.toLowerCase() === 'cash' || 
+    item.accountName.toLowerCase().includes('cash')
+  );
+  if (hasCash) return 'Cash';
+
+  const hasBank = v.items.some(item => 
+    item.accountName.toLowerCase() === 'bank account' || 
+    item.accountName.toLowerCase() === 'bank' || 
+    item.accountName.toLowerCase().includes('bank') || 
+    item.accountName.toLowerCase().includes('upi')
+  );
+  if (hasBank) return 'UPI';
+
+  return 'Debit';
+}
+
 /** Daybook View */
 function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Voucher[], onAddVoucher: () => void, onDeleteVoucher: (id: string) => Promise<void> }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -1803,9 +1822,12 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
         dateMatch = format(v.date, 'yyyy-MM-dd') === customDate;
       }
       
+      const vMode = getVoucherPaymentMode(v).toLowerCase();
       const searchMatch = v.narration.toLowerCase().includes(searchTerm.toLowerCase()) ||
         v.voucherNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        v.type.toLowerCase().includes(searchTerm.toLowerCase());
+        v.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        vMode.includes(searchTerm.toLowerCase()) ||
+        (vMode === 'debit' && 'udhar'.includes(searchTerm.toLowerCase()));
         
       return dateMatch && searchMatch;
     }).sort((a, b) => b.date.getTime() - a.date.getTime());
@@ -1824,27 +1846,59 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
     doc.setFontSize(20);
     doc.text('TankerWala Powered by Rajhans', 14, 20);
     doc.setFontSize(10);
-    doc.text('Daybook / Journal', 14, 28);
+    doc.text('Daybook - Grouped Transactions Report', 14, 28);
     doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 34);
 
-    const tableData = filtered.map(v => [
-      format(v.date, 'dd/MM/yyyy'),
-      v.voucherNumber,
-      v.type,
-      v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName,
-      v.totalAmount.toLocaleString('en-IN')
-    ]);
+    const cashVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'Cash');
+    const bankVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'UPI');
+    const debitVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'Debit');
 
-    autoTable(doc, {
-      head: [['Date', 'Vch No.', 'Type', 'Particulars', 'Amount']],
-      body: tableData,
-      startY: 40,
-      theme: 'grid',
-      headStyles: { fillColor: [15, 23, 42] },
-      columnStyles: {
-        4: { halign: 'right' }
+    let currentY = 42;
+
+    const addSectionTable = (title: string, vchList: Voucher[], rgbColor: [number, number, number]) => {
+      // If we are getting too low, add a page
+      if (currentY > 240) {
+        doc.addPage();
+        currentY = 20;
       }
-    });
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(rgbColor[0], rgbColor[1], rgbColor[2]);
+      doc.text(title, 14, currentY);
+      currentY += 4;
+
+      const data = vchList.map(v => [
+        format(v.date, 'dd/MM/yyyy'),
+        v.voucherNumber,
+        v.type,
+        v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName,
+        v.totalAmount.toLocaleString('en-IN')
+      ]);
+
+      autoTable(doc, {
+        head: [['Date', 'Vch No.', 'Type', 'Particulars', 'Amount']],
+        body: data.length > 0 ? data : [['-', '-', 'No entries in this category', '-', '-']],
+        startY: currentY,
+        theme: 'grid',
+        headStyles: { fillColor: rgbColor },
+        columnStyles: {
+          4: { halign: 'right' }
+        },
+        margin: { left: 14, right: 14 }
+      });
+
+      currentY = (doc as any).lastAutoTable.finalY + 12;
+    };
+
+    // 1. Cash Table (Green)
+    addSectionTable('💰 Cash Entries (नकद)', cashVouchers, [16, 185, 129]);
+
+    // 2. Bank / UPI Table (Blue)
+    addSectionTable('📱 Bank / UPI Entries (बैंक/UPI)', bankVouchers, [37, 99, 235]);
+
+    // 3. Debit / Udhar Table (Orange/Red)
+    addSectionTable('📁 Debit / Udhar Entries (उधार/खाता)', debitVouchers, [249, 115, 22]);
 
     doc.save(`Daybook_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
   };
@@ -1916,7 +1970,7 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
             <tr className="bg-slate-50/50">
               <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-8">Date</th>
               <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vch No.</th>
-              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type</th>
+              <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type • Mode</th>
               <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Particulars</th>
               <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Amount</th>
               <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest pr-8 text-center print:hidden">Actions</th>
@@ -1933,17 +1987,27 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
                   <p className="text-xs font-mono font-bold text-slate-400">{v.voucherNumber}</p>
                 </td>
                 <td className="p-4">
-                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
-                    v.type === 'Payment' ? 'bg-red-50 text-red-600' :
-                    v.type === 'Receipt' ? 'bg-green-50 text-green-600' :
-                    v.type === 'Contra' ? 'bg-blue-50 text-blue-600' :
-                    v.type === 'Sales' ? 'bg-indigo-50 text-indigo-600' :
-                    v.type === 'Purchase' ? 'bg-orange-50 text-orange-600' :
-                    v.type === 'Journal' ? 'bg-purple-50 text-purple-600' :
-                    'bg-slate-100 text-slate-600'
-                  }`}>
-                    {v.type}
-                  </span>
+                  <div className="flex flex-col gap-1 items-start">
+                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                      v.type === 'Payment' ? 'bg-red-50 text-red-600' :
+                      v.type === 'Receipt' ? 'bg-green-50 text-green-600' :
+                      v.type === 'Contra' ? 'bg-blue-50 text-blue-600' :
+                      v.type === 'Sales' ? 'bg-indigo-50 text-indigo-600' :
+                      v.type === 'Purchase' ? 'bg-orange-50 text-orange-600' :
+                      v.type === 'Journal' ? 'bg-purple-50 text-purple-600' :
+                      'bg-slate-100 text-slate-600'
+                    }`}>
+                      {v.type}
+                    </span>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                      getVoucherPaymentMode(v) === 'Cash' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                      getVoucherPaymentMode(v) === 'UPI' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
+                      'bg-orange-50 text-orange-700 border border-orange-100'
+                    }`}>
+                      {getVoucherPaymentMode(v) === 'Cash' ? '💵 Cash' :
+                       getVoucherPaymentMode(v) === 'UPI' ? '📱 UPI' : '📁 Debit'}
+                    </span>
+                  </div>
                 </td>
                 <td className="p-4">
                   <div className="max-w-md">

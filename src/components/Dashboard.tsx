@@ -853,11 +853,24 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const filteredTokenBills = useMemo(() => {
     let baseBills = [...bills];
     
-    // Sort logic: Pending on top, then time descending safely with fallbacks
+    // Sort logic: 
+    // Weight 1: Pending (upr hi upr)
+    // Weight 2: Tractor filling (Active statuses like Assigned, Filling, On the way, Reached)
+    // Weight 3: Delivered but unsettled (outstanding credit/udhar)
+    // Weight 4: Delivered and settled (cash, upi, credit fully settled) or Cancelled (last/bottom)
+    // Within same weights: sort by time descending safely
     baseBills.sort((a, b) => {
-      if (a.status === 'Pending' && b.status !== 'Pending') return -1;
-      if (a.status !== 'Pending' && b.status === 'Pending') return 1;
-      
+      const getWeight = (bill: any): number => {
+        if (bill.status === 'Pending') return 1;
+        if (['Filling', 'Assigned', 'On the way', 'Reached'].includes(bill.status || '')) return 2;
+        if (bill.status === 'Delivered' && !bill.isSettled) return 3;
+        return 4;
+      };
+
+      const wA = getWeight(a);
+      const wB = getWeight(b);
+      if (wA !== wB) return wA - wB;
+
       const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : (a.date ? new Date(a.date).getTime() : Date.now()));
       const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : (b.date ? new Date(b.date).getTime() : Date.now()));
       return timeB - timeA;
@@ -1066,17 +1079,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       const newTotalAmount = parsedQty * parsedRate;
       const newGrandTotal = newTotalAmount + parsedExtra - parsedDisc;
 
-      // Recalculate commission if franchise & commissionPercentage is set
-      let newCommissionAmount = editingBill.commissionAmount || 0;
-      if (franchiseIdForBill && commissionPercentage) {
-        newCommissionAmount = (newGrandTotal * commissionPercentage) / 100;
-      }
-
       const isDelivered = editingBill.status === 'Delivered';
       const wasLedgerPosted = !!editingBill.ledgerPosted;
 
       if (isDelivered && wasLedgerPosted) {
-        // Fetch all accounts and groups needed to perform reverse and re-apply of entries
+        // Fetch all accounts, groups, trips and old vouchers to perform clean reverse and rewrite
         const [
           incomeSnap,
           cashSnap,
@@ -1084,7 +1091,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           customerSnap,
           franchiseDoc,
           loyaltyExpenseAccSnap,
-          tripSnapToSync
+          tripSnapToSync,
+          vouchersByBillIdSnap,
+          vouchersByTrpNoSnap
         ] = await Promise.all([
           getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', franchiseIdForBill))),
           getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
@@ -1092,7 +1101,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
           getDoc(doc(db, 'franchises', franchiseIdForBill)),
           getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense'), where('franchiseId', 'in', [franchiseIdForBill, null]))),
-          getDocs(query(collection(db, 'trips'), where('billId', '==', editingBill.id)))
+          getDocs(query(collection(db, 'trips'), where('billId', '==', editingBill.id))),
+          getDocs(query(collection(db, 'vouchers'), where('billId', '==', editingBill.id))),
+          getDocs(query(collection(db, 'vouchers'), where('voucherNumber', '==', 'TRP-' + editingBill.billNumber)))
         ]);
 
         let incomeAccId = incomeSnap.docs[0]?.id;
@@ -1100,6 +1111,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         let bankAccId = bankSnap.docs[0]?.id;
         let customerAccId = customerSnap.docs[0]?.id;
         let loyaltyExpenseAccId = loyaltyExpenseAccSnap.docs.find(d => d.data().franchiseId === franchiseIdForBill || d.data().franchiseId === null)?.id;
+
+        // Collect all previous voucher doc IDs to ensure absolute clean deletion
+        const oldVoucherIds = new Set<string>();
+        vouchersByBillIdSnap.docs.forEach(d => oldVoucherIds.add(d.id));
+        vouchersByTrpNoSnap.docs.forEach(d => oldVoucherIds.add(d.id));
+        oldVoucherIds.add(`VCH-${editingBill.id}-SALE`);
+        oldVoucherIds.add(`VCH-${editingBill.id}-RECPT`);
 
         await runTransaction(db, async (transaction) => {
           const billRef = doc(db, 'bills', editingBill.id);
@@ -1134,41 +1152,61 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           const oldAmount = oldBill.grandTotal;
           const oldPaymentMode = oldBill.paymentMode;
 
-          // --- STEP 1: REVERSE OLD LEDGER ENTRIES ---
+          // --- STEP 1: REVERSE OLD LEDGER ENTRIES EXCLUSIVELY ---
           const prevEarned = oldBill.loyaltyPointsEarned || 0;
           const prevRedeemed = oldBill.loyaltyPointsRedeemed || 0;
-          const netLoyaltyChange = prevEarned - prevRedeemed;
+          const netLoyaltyOldChange = prevEarned - prevRedeemed;
           
           let currentLoyaltyCoins = custDoc.exists() ? (custDoc.data().loyaltyCoins || 0) : 0;
           let currentCustomerPending = custDoc.exists() ? (custDoc.data().pendingAmount || 0) : 0;
           
-          // Reverted states in transaction
-          let reversedCoins = Math.max(0, currentLoyaltyCoins - netLoyaltyChange);
+          let reversedCoins = Math.max(0, currentLoyaltyCoins - netLoyaltyOldChange);
           let reversedCustomerPending = (oldPaymentMode === 'Pending') ? Math.max(0, currentCustomerPending - oldAmount) : currentCustomerPending;
 
           // Reverse loyalty expense account
-          let reversedLoyaltyExpenseAccBalance = 0;
-          if (prevRedeemed > 0 && loyaltyExpenseAccDoc?.exists() && loyaltyExpenseAccRef) {
-            reversedLoyaltyExpenseAccBalance = Math.max(0, (loyaltyExpenseAccDoc.data().currentBalance || 0) - prevRedeemed);
+          let reversedLoyaltyExpenseAccBalance = loyaltyExpenseAccDoc?.exists() ? loyaltyExpenseAccDoc.data().currentBalance || 0 : 0;
+          if (prevRedeemed > 0) {
+            reversedLoyaltyExpenseAccBalance = Math.max(0, reversedLoyaltyExpenseAccBalance - prevRedeemed);
           }
 
-          // Reverse Service Income
+          // Reverse Service Income (Cr account, so we subtract)
           const prevSalesTotal = oldAmount + prevRedeemed;
           let reversedIncomeAccBalance = (incomeAccDoc?.exists() && incomeAccRef) ? (incomeAccDoc.data().currentBalance || 0) - prevSalesTotal : 0;
 
-          // Reverse Payment / Customer Account
-          let reversedCashAccBalance = (cashAccDoc?.exists() && cashAccRef) ? (cashAccDoc.data().currentBalance || 0) - oldAmount : 0;
-          let reversedBankAccBalance = (bankAccDoc?.exists() && bankAccRef) ? (bankAccDoc.data().currentBalance || 0) - oldAmount : 0;
-          let reversedCustomerAccBalance = (customerAccDoc?.exists() && customerAccRef) ? (customerAccDoc.data().currentBalance || 0) - oldAmount : 0;
-
-          // --- STEP 2: CALCULATE NEW VALUES ---
-          let newLoyaltyPointsEarned = 0;
-          if (custDoc.exists() && custDoc.data().loyaltyProgramEligible !== false) {
-            newLoyaltyPointsEarned = Math.floor(newGrandTotal / 100) * 2;
+          // Reverse Payment / Customer Account (Dr accounts, so we subtract only if they matched old payment status)
+          let reversedCashAccBalance = cashAccDoc?.exists() ? cashAccDoc.data().currentBalance || 0 : 0;
+          if (oldPaymentMode === 'Cash') {
+            reversedCashAccBalance = Math.max(0, reversedCashAccBalance - oldAmount);
           }
-          const finalLoyaltyPointsEarned = newLoyaltyPointsEarned;
-          const netLoyaltyNewChange = finalLoyaltyPointsEarned - prevRedeemed;
 
+          let reversedBankAccBalance = bankAccDoc?.exists() ? bankAccDoc.data().currentBalance || 0 : 0;
+          if (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') {
+            reversedBankAccBalance = Math.max(0, reversedBankAccBalance - oldAmount);
+          }
+
+          let reversedCustomerAccBalance = customerAccDoc?.exists() ? customerAccDoc.data().currentBalance || 0 : 0;
+          if (oldPaymentMode === 'Pending') {
+            reversedCustomerAccBalance = Math.max(0, reversedCustomerAccBalance - oldAmount);
+          }
+
+          // --- STEP 2: CALCULATE NEW FRANCHISE LOYALTY AND COMMISSION ---
+          let commPct = commissionPercentage || 5;
+          let loyaltyProgramEnabled = false;
+          if (franchiseDoc.exists()) {
+            const fData = franchiseDoc.data();
+            loyaltyProgramEnabled = !!fData.loyaltyProgramEnabled;
+            commPct = fData.commissionPercentage || commPct;
+          }
+
+          const calculatedComm = (newTotalAmount * commPct) / 100;
+          const finalCommissionValue = Math.max(0, calculatedComm - (prevRedeemed > 0 ? prevRedeemed : 0));
+
+          let calculatedLoyaltyPointsEarned = 0;
+          if (loyaltyProgramEnabled && (!custDoc.exists() || custDoc.data().loyaltyProgramEligible !== false)) {
+            calculatedLoyaltyPointsEarned = Math.round(calculatedComm * 0.70);
+          }
+
+          const netLoyaltyNewChange = calculatedLoyaltyPointsEarned - prevRedeemed;
           let finalCoins = reversedCoins + netLoyaltyNewChange;
           let finalCustomerPending = reversedCustomerPending + (oldPaymentMode === 'Pending' ? newGrandTotal : 0);
 
@@ -1187,10 +1225,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             discount: parsedDisc,
             totalAmount: newTotalAmount,
             grandTotal: newGrandTotal,
-            commissionAmount: newCommissionAmount,
+            commissionAmount: finalCommissionValue,
             remarks: editRemarks.trim(),
             customerAddress: editCustomAddress.trim(),
-            loyaltyPointsEarned: finalLoyaltyPointsEarned,
+            loyaltyPointsEarned: calculatedLoyaltyPointsEarned,
             updatedAt: serverTimestamp()
           });
 
@@ -1234,7 +1272,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             });
           }
 
-          // --- STEP 3: REWRITE VOUCHER ---
+          // --- STEP 3: DELETE ALL ASSOCIATED OLD VOUCHERS ---
+          oldVoucherIds.forEach(vid => {
+            transaction.delete(doc(db, 'vouchers', vid));
+          });
+
+          // --- STEP 4: REWRITE CENTRALIZED VOUCHER ---
           const salesVchId = `VCH-${editingBill.id}-SALE`;
           const salesItems = [];
           
@@ -1243,8 +1286,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               salesItems.push({ accountId: customerAccId, accountName: oldBill.customerName, amount: newGrandTotal, type: 'Dr' });
             }
           } else {
-            const debitAccId = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank') ? bankAccId : cashAccId;
-            const debitAccName = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank') ? 'Bank Account' : 'Cash';
+            const debitAccId = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') ? bankAccId : cashAccId;
+            const debitAccName = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') ? 'Bank Account' : 'Cash';
             if (debitAccId) {
               salesItems.push({ accountId: debitAccId, accountName: debitAccName, amount: newGrandTotal, type: 'Dr' });
             }
@@ -1266,6 +1309,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             items: salesItems,
             narration: `Trip #${oldBill.billNumber} - ${oldBill.customerName} (${oldBill.tankerSize || 'Water Can'}) ${prevRedeemed > 0 ? `| Cashback Coins Redeemed: ₹${prevRedeemed}` : ''} [EDITED]`,
             totalAmount: newSalesTotalAmount,
+            billId: editingBill.id,
             franchiseId: oldBill.franchiseId || franchiseId || null,
             createdAt: oldBill.createdAt || serverTimestamp(),
             updatedAt: serverTimestamp()
@@ -1281,7 +1325,6 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           discount: parsedDisc,
           totalAmount: newTotalAmount,
           grandTotal: newGrandTotal,
-          commissionAmount: newCommissionAmount,
           remarks: editRemarks.trim(),
           customerAddress: editCustomAddress.trim(),
           updatedAt: serverTimestamp()
@@ -3555,6 +3598,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 bg-slate-900 border border-slate-800 text-white font-mono text-[9px] font-black rounded shadow-sm leading-none">
+                      #{bill.billNumber || 'N/A'}
+                    </span>
                     <span className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
                       {bill.customerName}
                     </span>
