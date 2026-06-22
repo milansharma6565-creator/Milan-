@@ -32,6 +32,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ShieldCheck,
   BellRing,
   Star,
@@ -159,6 +160,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [editUpiId, setEditUpiId] = useState('');
   
   const [hidePrintPanel, setHidePrintPanel] = useState(() => localStorage.getItem('hideDashboardPrintSettings') === 'true');
+  const [showTodaySalesBreakdown, setShowTodaySalesBreakdown] = useState(false);
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -559,6 +561,27 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .filter(b => b.status === 'Delivered')
       .reduce((sum, b) => sum + b.grandTotal, 0);
 
+    const todayDeliveredBills = todayBillsList.filter(b => b.status === 'Delivered');
+    let todayDeliveredCash = 0;
+    let todayDeliveredBank = 0;
+    let todayDeliveredPending = 0;
+
+    todayDeliveredBills.forEach(b => {
+      if (b.paymentMode === 'Cash') {
+        todayDeliveredCash += b.grandTotal;
+      } else if (b.paymentMode === 'UPI' || b.paymentMode === 'Bank Transfer') {
+        todayDeliveredBank += b.grandTotal;
+      } else if (b.paymentMode === 'Pending') {
+        todayDeliveredPending += b.grandTotal;
+      } else if (b.paymentMode === 'Split' && b.splitPayments) {
+        todayDeliveredCash += b.splitPayments.cash || 0;
+        todayDeliveredBank += (b.splitPayments.upi || 0) + (b.splitPayments.bank || 0);
+        todayDeliveredPending += b.splitPayments.pending || 0;
+      } else {
+        todayDeliveredPending += b.grandTotal;
+      }
+    });
+
     const monthDeliveredSale = bills.filter(b => {
       try {
         const bDate = b.date instanceof Date ? b.date : new Date(b.date);
@@ -579,6 +602,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       todayPendingCollection,
       totalPending,
       todayDeliveredSale,
+      todayDeliveredCash,
+      todayDeliveredBank,
+      todayDeliveredPending,
       monthDeliveredSale,
       totalDeliveredSale,
       todayTotalSale,
@@ -2425,7 +2451,27 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       } catch (e) {}
 
       const nextNum = Math.max(highestBillNum, counterNum) + 1;
-      const newBillNumber = generateBillNumber(nextNum);
+      let newBillNumber = generateBillNumber(nextNum);
+      const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
+
+      let isDuplicate = true;
+      let checkAttempts = 0;
+      while (isDuplicate && checkAttempts < 10) {
+        const qDup = query(
+          collection(db, 'bills'),
+          where('franchiseId', '==', fId),
+          where('billNumber', '==', newBillNumber)
+        );
+        const dupSnap = await getDocs(qDup);
+        if (dupSnap.empty) {
+          isDuplicate = false;
+        } else {
+          const currentSeq = parseInt(newBillNumber.replace(/\D/g, ''), 10);
+          const nextSeq = (isNaN(currentSeq) ? 1001 : currentSeq) + 1;
+          newBillNumber = generateBillNumber(nextSeq);
+          checkAttempts++;
+        }
+      }
 
       // 3. Create new bill based on original but with current time
       const newBillData = {
@@ -2438,7 +2484,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         paymentMode: 'Pending',
         remarks: request.remarks || originalData.remarks || '',
         createdAt: serverTimestamp(),
-        franchiseId: request.franchiseId || originalData.franchiseId || franchiseId || null,
+        franchiseId: fId,
         loyaltyPointsRedeemed: request.loyaltyPointsRedeemed || 0,
         discount: (originalData.discount || 0) + (request.loyaltyPointsRedeemed || 0),
         grandTotal: Math.max(0, (originalData.grandTotal || request.totalEstimate || 0) - (request.loyaltyPointsRedeemed || 0))
@@ -3094,7 +3140,39 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                   </div>
                 </div>
                 <div className="space-y-2 mt-4">
-                  <div className="flex items-baseline justify-between">
+                  {/* Today's Sales Selector with Dropdown */}
+                  <div 
+                    className="border border-white/5 rounded-2xl p-3 bg-white/5 hover:bg-white/10 cursor-pointer transition-colors select-none" 
+                    onClick={() => setShowTodaySalesBreakdown(!showTodaySalesBreakdown)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-medium text-slate-300">Today's Sales:</span>
+                        <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 ${showTodaySalesBreakdown ? 'rotate-180' : ''}`} />
+                      </div>
+                      <span className="text-base font-black text-emerald-400">
+                        ₹{Number(stats.todayDeliveredSale || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    {showTodaySalesBreakdown && (
+                      <div className="mt-3 pt-2 border-t border-white/10 space-y-1.5 text-xs text-slate-400">
+                        <div className="flex justify-between items-center">
+                          <span>Cash Sale:</span>
+                          <span className="font-bold text-white">₹{Number(stats.todayDeliveredCash || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span>Bank/UPI Sale:</span>
+                          <span className="font-bold text-white">₹{Number(stats.todayDeliveredBank || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-orange-450 font-medium">
+                          <span>Udhari (Credit):</span>
+                          <span className="font-bold text-orange-400">₹{Number(stats.todayDeliveredPending || 0).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-baseline justify-between pt-1">
                     <span className="text-xs text-slate-400">Month's Sales:</span>
                     <span className="text-base font-black text-blue-400">
                       ₹{Number(stats.monthDeliveredSale || 0).toLocaleString()}

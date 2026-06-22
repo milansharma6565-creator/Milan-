@@ -68,16 +68,6 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           const remaining: any[] = [];
           for (const billData of arr) {
             try {
-              // Prepare actual Firestore server timestamps
-              const finalBillData = {
-                ...billData,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-              };
-              // Remove our temporary offline indicators to store cleanly
-              delete finalBillData.isOffline;
-              delete finalBillData.id;
-
               // Save sticky rate to customer
               try {
                 await updateDoc(doc(db, 'customers', billData.customerId), { 
@@ -87,6 +77,38 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
               } catch (custErr) {
                 console.error("Failed to update customer sticky rate under sync:", custErr);
               }
+
+              // Save bill with duplicate check
+              let finalSyncedBillNumber = billData.billNumber;
+              let isDupSync = true;
+              let dupSyncAttempts = 0;
+              while (isDupSync && dupSyncAttempts < 10) {
+                const qDup = query(
+                  collection(db, 'bills'),
+                  where('franchiseId', '==', (franchiseId || billData.franchiseId || null)),
+                  where('billNumber', '==', finalSyncedBillNumber)
+                );
+                const dupSnap = await getDocs(qDup);
+                if (dupSnap.empty) {
+                  isDupSync = false;
+                } else {
+                  const currentSeq = parseInt(finalSyncedBillNumber.replace(/\D/g, ''), 10);
+                  const nextSeq = (isNaN(currentSeq) ? 1001 : currentSeq) + 1;
+                  finalSyncedBillNumber = generateBillNumber(nextSeq);
+                  dupSyncAttempts++;
+                }
+              }
+
+              // Prepare actual Firestore server timestamps
+              const finalBillData = {
+                ...billData,
+                billNumber: finalSyncedBillNumber,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+              };
+              // Remove our temporary offline indicators to store cleanly
+              delete finalBillData.isOffline;
+              delete finalBillData.id;
 
               // Save bill
               const docRef = await addDoc(collection(db, 'bills'), finalBillData);
@@ -601,8 +623,30 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           console.warn("Soft fail updating customer rate:", cE);
         }
 
+        let finalBillNumber = form.billNumber;
+        let isDuplicate = true;
+        let checkAttempts = 0;
+        
+        while (isDuplicate && checkAttempts < 10) {
+          const qDup = query(
+            collection(db, 'bills'),
+            where('franchiseId', '==', (franchiseId || null)),
+            where('billNumber', '==', finalBillNumber)
+          );
+          const dupSnap = await getDocs(qDup);
+          if (dupSnap.empty) {
+            isDuplicate = false;
+          } else {
+            const currentSeq = parseInt(finalBillNumber.replace(/\D/g, ''), 10);
+            const nextSeq = (isNaN(currentSeq) ? 1001 : currentSeq) + 1;
+            finalBillNumber = generateBillNumber(nextSeq);
+            checkAttempts++;
+          }
+        }
+
         const storeData = {
           ...billData,
+          billNumber: finalBillNumber,
           createdAt: serverTimestamp()
         };
 
@@ -625,8 +669,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
             franchiseName: currentFranchise?.name || 'Franchise',
             userEmail: '',
             actionType: 'NEW_BILL',
-            description: `Generated invoice #${form.billNumber} for Customer "${selectedCustomer.name}" with total ₹${grandTotal}`,
-            details: { billId: docRef.id, billNumber: form.billNumber, total: grandTotal }
+            description: `Generated invoice #${storeData.billNumber} for Customer "${selectedCustomer.name}" with total ₹${grandTotal}`,
+            details: { billId: docRef.id, billNumber: storeData.billNumber, total: grandTotal }
           });
         } catch (logErr) {
           console.error("Failed to log activity:", logErr);
@@ -641,7 +685,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           await addDoc(collection(db, 'trips'), {
             billId: docRef.id,
             franchiseId: franchiseId || null,
-            billNumber: form.billNumber,
+            billNumber: storeData.billNumber,
             driverId: form.driverId,
             driverName: form.driverName,
             customerName: selectedCustomer.name,
