@@ -34,6 +34,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
   const [offlinePendingCount, setOfflinePendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Sync state loader
   const updatePendingCount = () => {
@@ -130,8 +131,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                   franchiseName: currentFranchise?.name || 'Franchise',
                   userEmail: '',
                   actionType: 'NEW_BILL',
-                  description: `[Offline Sync] Generated invoice #${billData.billNumber} for Customer "${billData.customerName}" with total ₹${billData.grandTotal}`,
-                  details: { billId: docRef.id, billNumber: billData.billNumber, total: billData.grandTotal }
+                  description: `[Offline Sync] Generated invoice #${finalSyncedBillNumber} for Customer "${billData.customerName}" with total ₹${billData.grandTotal}`,
+                  details: { billId: docRef.id, billNumber: finalSyncedBillNumber, total: billData.grandTotal }
                 });
               } catch (logErr) {
                 console.error("Failed to log synced activity:", logErr);
@@ -147,7 +148,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 await addDoc(collection(db, 'trips'), {
                   billId: docRef.id,
                   franchiseId: franchiseId || null,
-                  billNumber: billData.billNumber,
+                  billNumber: finalSyncedBillNumber,
                   driverId: billData.driverId,
                   driverName: billData.driverName,
                   customerName: billData.customerName,
@@ -525,11 +526,13 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!selectedCustomer) {
       alert('Please select a customer');
       return;
     }
 
+    setIsSubmitting(true);
     const subtotal = form.quantity * form.rate;
     const grandTotal = subtotal + form.extraCharges - form.discount;
     
@@ -605,6 +608,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       }));
       setDeliveryLocation(null);
       setShowMap(false);
+      setIsSubmitting(false);
     };
 
     if (!navigator.onLine) {
@@ -765,6 +769,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
         console.error("Database write throw, switching to offline fallback:", error);
         useOfflineWorkflow();
       }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1210,8 +1216,26 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           </div>
         </div>
 
-        <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white h-16 rounded-2xl font-black text-lg transition-all shadow-xl shadow-blue-100 flex items-center justify-center gap-3 active:scale-[0.98]">
-           Commit Bill
+        <button 
+          type="submit" 
+          disabled={isSubmitting}
+          className={`w-full text-white h-16 rounded-2xl font-black text-lg transition-all shadow-xl flex items-center justify-center gap-3 active:scale-[0.98] ${
+            isSubmitting 
+              ? 'bg-slate-400 cursor-not-allowed shadow-none' 
+              : 'bg-blue-600 hover:bg-blue-700 shadow-blue-100'
+          }`}
+        >
+          {isSubmitting ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Saving Invoice...
+            </>
+          ) : (
+            'Commit Bill'
+          )}
         </button>
       </form>
 
