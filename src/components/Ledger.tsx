@@ -346,10 +346,16 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       alert("Ledger Name and Group are required!");
       return;
     }
+    const cleanName = newLedgerName.trim();
+    const isDuplicate = accounts.some(a => a.name.toLowerCase().trim() === cleanName.toLowerCase());
+    if (isDuplicate) {
+      alert(`Error: A ledger account with the name "${cleanName}" already exists (case-insensitive duplicate)!`);
+      return;
+    }
     setTallySavingLedger(true);
     try {
       await addDoc(collection(db, 'accounts'), {
-        name: newLedgerName.trim(),
+        name: cleanName,
         groupId: newLedgerGroupId,
         openingBalance: newLedgerOpening,
         balanceType: newLedgerBalType,
@@ -385,10 +391,16 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       alert("Ledger Name and Group are required!");
       return;
     }
+    const cleanName = editLedgerName.trim();
+    const isDuplicate = accounts.some(a => a.id !== editingAccountId && a.name.toLowerCase().trim() === cleanName.toLowerCase());
+    if (isDuplicate) {
+      alert(`Error: Another ledger account with the name "${cleanName}" already exists (case-insensitive duplicate)!`);
+      return;
+    }
     setTallyEditingLedger(true);
     try {
       await updateDoc(doc(db, 'accounts', editingAccountId), {
-        name: editLedgerName.trim(),
+        name: cleanName,
         groupId: editLedgerGroupId,
         openingBalance: editLedgerOpening,
         balanceType: editLedgerBalType,
@@ -1762,6 +1774,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
           <AccountEntryModal 
             onClose={() => setIsAddingAccount(false)} 
             groups={groups} 
+            accounts={accounts}
             franchiseId={franchiseId}
           />
         )}
@@ -2376,7 +2389,7 @@ function VoucherEntryModal({ onClose, accounts, franchiseId }: { onClose: () => 
 }
 
 /** Account Entry Modal */
-function AccountEntryModal({ onClose, groups, franchiseId }: { onClose: () => void, groups: AccountGroup[], franchiseId?: string }) {
+function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose: () => void, groups: AccountGroup[], accounts: Account[], franchiseId?: string }) {
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState('');
   const [opening, setOpening] = useState(0);
@@ -2387,10 +2400,17 @@ function AccountEntryModal({ onClose, groups, franchiseId }: { onClose: () => vo
     e.preventDefault();
     if (!name || !groupId) return;
 
+    const cleanName = name.trim();
+    const isDuplicate = accounts.some(a => a.name.toLowerCase().trim() === cleanName.toLowerCase());
+    if (isDuplicate) {
+      alert(`Error: A ledger account with the name "${cleanName}" already exists (case-insensitive duplicate)!`);
+      return;
+    }
+
     setSubmitting(true);
     try {
       await addDoc(collection(db, 'accounts'), {
-        name,
+        name: cleanName,
         groupId,
         openingBalance: opening,
         balanceType: type,

@@ -14,12 +14,13 @@ export const ledgerAutomation = {
       
       let customerAccDoc = !custSnap.empty ? custSnap.docs[0] : null;
 
-      // 2. If not found, try querying by customer name
+      // 2. If not found, try querying by customer name case-insensitively
       if (!customerAccDoc) {
-        const qName = query(collection(db, 'accounts'), where('name', '==', customerName));
-        const nameSnap = await getDocs(qName);
-        if (!nameSnap.empty) {
-          customerAccDoc = nameSnap.docs[0];
+        const qAll = query(collection(db, 'accounts'), where('franchiseId', '==', franchiseId || null));
+        const allSnap = await getDocs(qAll);
+        const match = allSnap.docs.find(d => d.data().name?.trim().toLowerCase() === customerName.trim().toLowerCase());
+        if (match) {
+          customerAccDoc = match;
         }
       }
 

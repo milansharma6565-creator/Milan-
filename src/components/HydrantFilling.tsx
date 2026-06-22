@@ -314,11 +314,10 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
         
         const mode = formData.paymentMode;
         let paymentAccName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : formData.partyName;
-        let paymentAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', franchiseId || null)));
-        if (paymentAccSnap.empty && franchiseId) {
-          paymentAccSnap = await getDocs(query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', null)));
-        }
-        let paymentAccId = paymentAccSnap.docs[0]?.id;
+        
+        // Prevent duplicate ledger accounts by looking up case-insensitively using preloaded state
+        const matchedPaymentAcc = accounts.find(a => a.name.toLowerCase().trim() === paymentAccName.toLowerCase().trim());
+        let paymentAccId = matchedPaymentAcc?.id;
         let isNewPaymentAcc = false;
 
         if (!paymentAccId) {

@@ -402,13 +402,22 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .reduce((sum, b) => sum + b.grandTotal, 0);
       
     const totalPending = accounts
-      .filter(acc => acc.group === 'Sundry Debtors' || acc.group === 'Duty Assignment' || customers.some(c => c.id === acc.customerId || c.name === acc.name))
+      .filter(acc => {
+        const grp = (acc.group || '').trim().toLowerCase();
+        const isCustomer = customers.some(c => 
+          c.id === acc.customerId || 
+          c.name.trim().toLowerCase() === acc.name.trim().toLowerCase()
+        );
+        return grp === 'sundry debtors' || grp === 'duty assignment' || isCustomer;
+      })
       .reduce((sum, acc) => {
-        // For Sundry Debtors (Customers), Dr balance is positive pending
-        const bal = acc.balanceType === 'Dr' ? acc.currentBalance : -acc.currentBalance;
-        // Only include if it's a customer-linked account
-        const isCustomer = customers.some(c => c.id === acc.customerId || c.name === acc.name);
-        return isCustomer ? sum + bal : sum;
+        const bal = acc.balanceType === 'Dr' ? (acc.currentBalance || 0) : -(acc.currentBalance || 0);
+        const isCustomer = customers.some(c => 
+          c.id === acc.customerId || 
+          c.name.trim().toLowerCase() === acc.name.trim().toLowerCase()
+        );
+        const grp = (acc.group || '').trim().toLowerCase();
+        return (isCustomer || grp === 'sundry debtors') ? sum + bal : sum;
       }, 0);
 
     const deliveredCount = bills.filter(b => b.status === 'Delivered').length;
@@ -595,6 +604,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts, franchiseId, commissionPercentage]);
 
   const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
+  const [billSortOption, setBillSortOption] = useState<'Default' | 'Number' | 'Time'>('Default');
   const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [quickVoucher, setQuickVoucher] = useState<{
     type: 'Receipt' | 'Payment';
@@ -828,11 +838,25 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
         setAccounts(deduplicated);
         
-        // Derive Cash & Bank from accounts
-        const cash = deduplicated.find(a => a.name === 'Cash');
-        const bank = deduplicated.find(a => a.name === 'Bank Account');
-        if (cash) setCashBalance(cash.currentBalance || 0);
-        if (bank) setBankBalance(bank.currentBalance || 0);
+        // Derive Cash & Bank from accounts of all matching ledger accounts
+        const totalCashBalance = deduplicated
+          .filter(a => {
+            const norm = a.name.trim().toLowerCase();
+            const grp = (a.group || '').trim().toLowerCase();
+            return norm === 'cash' || norm === 'cash in hand' || grp === 'cash-in-hand' || grp === 'cash in hand';
+          })
+          .reduce((sum, a) => sum + (a.currentBalance || 0), 0);
+
+        const totalBankBalance = deduplicated
+          .filter(a => {
+            const norm = a.name.trim().toLowerCase();
+            const grp = (a.group || '').trim().toLowerCase();
+            return norm.includes('bank') || norm.includes('baroda') || norm.includes('bob') || grp.includes('bank');
+          })
+          .reduce((sum, a) => sum + (a.currentBalance || 0), 0);
+
+        setCashBalance(totalCashBalance);
+        setBankBalance(totalBankBalance);
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts-dashboard')
     );
@@ -860,20 +884,41 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     // Weight 4: Delivered and settled (cash, upi, credit fully settled) or Cancelled (last/bottom)
     // Within same weights: sort by time descending safely
     baseBills.sort((a, b) => {
-      const getWeight = (bill: any): number => {
-        if (bill.status === 'Pending') return 1;
-        if (['Filling', 'Assigned', 'On the way', 'Reached'].includes(bill.status || '')) return 2;
-        if (bill.status === 'Delivered' && !bill.isSettled) return 3;
-        return 4;
-      };
+      if (billSortOption === 'Default') {
+        const getWeight = (bill: any): number => {
+          if (bill.status === 'Pending') return 1;
+          if (['Filling', 'Assigned', 'On the way', 'Reached'].includes(bill.status || '')) return 2;
+          
+          // A bill is settled if it has been marked settled or has received a payment (Mode is not 'Pending')
+          const isSettle = bill.isSettled === true || (bill.paymentMode && bill.paymentMode !== 'Pending');
+          if (bill.status === 'Delivered' && !isSettle) return 3;
+          
+          return 4;
+        };
 
-      const wA = getWeight(a);
-      const wB = getWeight(b);
-      if (wA !== wB) return wA - wB;
+        const wA = getWeight(a);
+        const wB = getWeight(b);
+        if (wA !== wB) return wA - wB;
 
-      const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : (a.date ? new Date(a.date).getTime() : Date.now()));
-      const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : (b.date ? new Date(b.date).getTime() : Date.now()));
-      return timeB - timeA;
+        // When weights are equal, sort numerically by billNumber ascending (e.g. 101, 102, 103...)
+        const numA = parseInt(String(a.billNumber || '').replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(String(b.billNumber || '').replace(/\D/g, ''), 10) || 0;
+        if (numA !== numB) {
+          return numA - numB;
+        }
+
+        const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : (a.date ? new Date(a.date).getTime() : Date.now()));
+        const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : (b.date ? new Date(b.date).getTime() : Date.now()));
+        return timeB - timeA;
+      } else if (billSortOption === 'Number') {
+        const numA = parseInt(String(a.billNumber || '').replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(String(b.billNumber || '').replace(/\D/g, ''), 10) || 0;
+        return numB - numA; // Newest / highest bill on top
+      } else {
+        const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : (a.date ? new Date(a.date).getTime() : Date.now()));
+        const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : (b.date ? new Date(b.date).getTime() : Date.now()));
+        return timeB - timeA;
+      }
     });
 
     const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -927,7 +972,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         return format(bDate, 'yyyy-MM-dd') === selectedTokenDate;
       });
     }
-  }, [bills, tokenFilter, selectedTokenDate]);
+  }, [bills, tokenFilter, selectedTokenDate, billSortOption]);
 
   const handleQuickVchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2037,14 +2082,16 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         const cashAccRef = cashAccId ? doc(db, 'accounts', cashAccId) : null;
         const bankAccRef = bankAccId ? doc(db, 'accounts', bankAccId) : null;
         const customerAccRef = customerAccId ? doc(db, 'accounts', customerAccId) : null;
+        const salesVchRef = doc(db, 'vouchers', `VCH-${editingBill.id}-SALE`);
 
         // --- 1. READS FIRST ---
-        const [billDoc, custDoc, cashAccDoc, bankAccDoc, customerAccDoc] = await Promise.all([
+        const [billDoc, custDoc, cashAccDoc, bankAccDoc, customerAccDoc, salesVchDoc] = await Promise.all([
           transaction.get(billRef),
           transaction.get(customerRef),
           cashAccRef ? transaction.get(cashAccRef) : Promise.resolve(null),
           bankAccRef ? transaction.get(bankAccRef) : Promise.resolve(null),
-          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null)
+          customerAccRef ? transaction.get(customerAccRef) : Promise.resolve(null),
+          transaction.get(salesVchRef)
         ]);
         
         if (!billDoc.exists()) throw new Error("Bill not found");
@@ -2095,10 +2142,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             transaction.update(bankAccRef!, { currentBalance: adjusted + (isNewBank ? amount : 0) });
           }
 
-          if (customerAccDoc?.exists()) {
+          if (isCredit && customerAccDoc?.exists()) {
             const base = (customerAccDoc.data().currentBalance || 0);
             const adjusted = (oldMode === 'Pending') ? base - amount : base;
-            transaction.update(customerAccRef!, { currentBalance: adjusted + (isCredit ? amount : 0) });
+            transaction.update(customerAccRef!, { currentBalance: adjusted + amount });
+          } else if (!isCredit && oldMode === 'Pending' && customerAccDoc?.exists()) {
+            const base = (customerAccDoc.data().currentBalance || 0);
+            transaction.update(customerAccRef!, { currentBalance: Math.max(0, base - amount) });
           }
 
           // Update Customer pendingAmount field
@@ -2111,26 +2161,32 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             });
           }
 
-          // C. UPSERT VOUCHERS
+          // C. UPDATE SALES VOUCHER & DELETE RECEIPT VOUCHER
           const receiptVchId = `VCH-${editingBill.id}-RECPT`;
-          if (!isCredit) {
-            const debitAccId = isNewBank ? finalBankAccId! : finalCashAccId!;
-            const debitAccName = isNewBank ? 'Bank Account' : 'Cash';
+          transaction.delete(doc(db, 'vouchers', receiptVchId));
+
+          if (salesVchDoc.exists()) {
+            const vchData = salesVchDoc.data();
+            const items = vchData.items || [];
             
-            transaction.set(doc(db, 'vouchers', receiptVchId), {
-              date: new Date(),
-              type: 'Receipt',
-              voucherNumber: `REC-${billData.billNumber}`,
-              items: [
-                { accountId: debitAccId, accountName: debitAccName, amount: amount, type: 'Dr' },
-                { accountId: customerAccId, accountName: billData.customerName, amount: amount, type: 'Cr' }
-              ],
-              narration: `Payment mode update for Bill #${billData.billNumber} to ${mode}`,
-              totalAmount: amount,
-              createdAt: serverTimestamp()
+            // Map the primary debit item to point to Cash/Bank directly instead of the customer
+            const updatedItems = items.map((item: any) => {
+              if (item.type === 'Dr' && item.accountName !== 'Franchise Loyalty Expense') {
+                const debitAccId = isCredit ? customerAccId! : (isNewBank ? finalBankAccId! : finalCashAccId!);
+                const debitAccName = isCredit ? billData.customerName : (isNewBank ? 'Bank Account' : 'Cash');
+                return {
+                  ...item,
+                  accountId: debitAccId,
+                  accountName: debitAccName
+                };
+              }
+              return item;
             });
-          } else {
-            transaction.delete(doc(db, 'vouchers', receiptVchId));
+
+            transaction.update(salesVchRef, {
+              items: updatedItems,
+              updatedAt: serverTimestamp()
+            });
           }
         }
 
@@ -2344,8 +2400,32 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       }
       
       // 2. Generate new bill number
-      const allBills = await getDocs(collection(db, 'bills'));
-      const newBillNumber = generateBillNumber(allBills.size + 1);
+      let highestBillNum = 0;
+      try {
+        let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
+        const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
+        if (fId) {
+          q = query(collection(db, 'bills'), where('franchiseId', '==', fId), orderBy('billNumber', 'desc'), limit(1));
+        }
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          const lastNumStr = snapshot.docs[0].data().billNumber;
+          const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
+          if (!isNaN(parsed)) highestBillNum = parsed;
+        }
+      } catch (e) {}
+
+      let counterNum = 0;
+      try {
+        const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
+        const counterSnap = await getDoc(doc(db, 'counters', fId ? `bill_sequence_${fId}` : 'bill_sequence_global'));
+        if (counterSnap.exists()) {
+          counterNum = counterSnap.data().lastSequence || 0;
+        }
+      } catch (e) {}
+
+      const nextNum = Math.max(highestBillNum, counterNum) + 1;
+      const newBillNumber = generateBillNumber(nextNum);
 
       // 3. Create new bill based on original but with current time
       const newBillData = {
@@ -2366,6 +2446,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
       try {
         await addDoc(collection(db, 'bills'), newBillData);
+        const seq = parseInt(newBillNumber.replace(/\D/g, ''), 10);
+        if (!isNaN(seq)) {
+          const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
+          await setDoc(doc(db, 'counters', fId ? `bill_sequence_${fId}` : 'bill_sequence_global'), { lastSequence: seq }, { merge: true });
+        }
       } catch (billErr) {
         handleFirestoreError(billErr, OperationType.CREATE, 'bills');
         throw billErr;
@@ -2417,9 +2502,22 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       let bankAccId = bankSnap.docs[0]?.id;
       let customerAccId = customerAccSnap.docs[0]?.id;
 
-      // FETCH TRIPS TO DELETE OUTSIDE TRANSACTION
+      // FETCH TRIPS AND ASSOCIATED VOUCHERS TO DELETE OUTSIDE TRANSACTION
       const qTrips = query(collection(db, 'trips'), where('billId', '==', id));
-      const tripSnap = await getDocs(qTrips);
+      const qVouchersByBillId = query(collection(db, 'vouchers'), where('billId', '==', id));
+      const qVouchersByTrpNo = query(collection(db, 'vouchers'), where('voucherNumber', '==', 'TRP-' + (billData.billNumber || '')));
+
+      const [tripSnap, vouchersByBillIdSnap, vouchersByTrpNoSnap] = await Promise.all([
+        getDocs(qTrips),
+        getDocs(qVouchersByBillId),
+        getDocs(qVouchersByTrpNo)
+      ]);
+
+      const oldVoucherIds = new Set<string>();
+      vouchersByBillIdSnap.docs.forEach(d => oldVoucherIds.add(d.id));
+      vouchersByTrpNoSnap.docs.forEach(d => oldVoucherIds.add(d.id));
+      oldVoucherIds.add(`VCH-${id}-SALE`);
+      oldVoucherIds.add(`VCH-${id}-RECPT`);
 
       await runTransaction(db, async (transaction) => {
         const billRef = doc(db, 'bills', id);
@@ -2465,11 +2563,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                updatedAt: serverTimestamp()
              });
           }
-
-          // Delete Vouchers
-          transaction.delete(doc(db, 'vouchers', `VCH-${id}-SALE`));
-          transaction.delete(doc(db, 'vouchers', `VCH-${id}-RECPT`));
         }
+
+        // Delete all old associated voucher records securely inside transaction
+        oldVoucherIds.forEach(vid => {
+          transaction.delete(doc(db, 'vouchers', vid));
+        });
 
         // Delete associated trips fetched outside
         tripSnap.forEach(tDoc => {
@@ -3471,31 +3570,66 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             </button>
           </div>
           
-          <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl w-full sm:w-auto">
-            <button
-              onClick={() => setTokenFilter('Today')}
-              className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                tokenFilter === 'Today' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              Today
-            </button>
-            <button
-              onClick={() => setTokenFilter('Yesterday')}
-              className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                tokenFilter === 'Yesterday' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              Yesterday
-            </button>
-            <button
-              onClick={() => setTokenFilter('Custom')}
-              className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                tokenFilter === 'Custom' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              Date
-            </button>
+          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+            {/* Period Filter */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl flex-1 sm:flex-none">
+              <button
+                onClick={() => setTokenFilter('Today')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                  tokenFilter === 'Today' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                onClick={() => setTokenFilter('Yesterday')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                  tokenFilter === 'Yesterday' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                Yesterday
+              </button>
+              <button
+                onClick={() => setTokenFilter('Custom')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                  tokenFilter === 'Custom' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                Date
+              </button>
+            </div>
+
+            {/* Sort Filter */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl flex-1 sm:flex-none">
+              <span className="text-[9px] font-display font-medium text-slate-400 pl-2 uppercase tracking-[0.1em] select-none">Sort:</span>
+              <button
+                onClick={() => setBillSortOption('Default')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                  billSortOption === 'Default' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+                title="Priority Status Wise"
+              >
+                Status
+              </button>
+              <button
+                onClick={() => setBillSortOption('Number')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                  billSortOption === 'Number' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+                title="Bill Number (Newest first)"
+              >
+                Bill No
+              </button>
+              <button
+                onClick={() => setBillSortOption('Time')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                  billSortOption === 'Time' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+                title="Creation Time (Newest first)"
+              >
+                Time
+              </button>
+            </div>
           </div>
         </div>
 

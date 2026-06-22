@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc, runTransaction, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc, runTransaction, orderBy, limit, setDoc } from 'firebase/firestore';
 import { Customer, Driver, Bill } from '../types';
 import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare, CloudLightning } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -91,6 +91,15 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
               // Save bill
               const docRef = await addDoc(collection(db, 'bills'), finalBillData);
               const bookedBillWithId = { ...finalBillData, id: docRef.id };
+
+              const seqCount = parseInt(finalBillData.billNumber.replace(/\D/g, ''), 10);
+              if (!isNaN(seqCount)) {
+                try {
+                  await setDoc(doc(db, 'counters', (franchiseId || finalBillData.franchiseId) ? `bill_sequence_${franchiseId || finalBillData.franchiseId}` : 'bill_sequence_global'), { lastSequence: seqCount }, { merge: true });
+                } catch (errSeq) {
+                  console.error("Soft fail saving counter during offline sync:", errSeq);
+                }
+              }
 
               // Log invoice generation activity
               try {
@@ -234,12 +243,24 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           q = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), orderBy('billNumber', 'desc'), limit(1));
         }
         const snapshot = await getDocs(q);
-        let nextNum = 1;
+        let highestBillNum = 0;
         if (!snapshot.empty) {
           const lastNumStr = snapshot.docs[0].data().billNumber;
           const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
-          if (!isNaN(parsed)) nextNum = parsed + 1;
+          if (!isNaN(parsed)) highestBillNum = parsed;
         }
+
+        let counterNum = 0;
+        try {
+          const counterSnap = await getDoc(doc(db, 'counters', franchiseId ? `bill_sequence_${franchiseId}` : 'bill_sequence_global'));
+          if (counterSnap.exists()) {
+            counterNum = counterSnap.data().lastSequence || 0;
+          }
+        } catch (err) {
+          console.error("Error fetching bill counter:", err);
+        }
+
+        const nextNum = Math.max(highestBillNum, counterNum) + 1;
         setForm(prev => ({ ...prev, billNumber: generateBillNumber(nextNum) }));
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, 'bills-init-number');
@@ -587,6 +608,15 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
         const docRef = await addDoc(collection(db, 'bills'), storeData);
         const bookedBillWithId = { ...storeData, id: docRef.id };
+
+        const seq = parseInt(storeData.billNumber.replace(/\D/g, ''), 10);
+        if (!isNaN(seq)) {
+          try {
+            await setDoc(doc(db, 'counters', (franchiseId || storeData.franchiseId) ? `bill_sequence_${franchiseId || storeData.franchiseId}` : 'bill_sequence_global'), { lastSequence: seq }, { merge: true });
+          } catch (errSeq) {
+            console.error("Soft fail saving counter:", errSeq);
+          }
+        }
         setBookedBill(bookedBillWithId);
 
         try {
@@ -647,10 +677,33 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
       setShowBookingSuccess(true);
 
-      const snapshotSize = (await getDocs(collection(db, 'bills'))).size;
+      let highestBillNum = 0;
+      try {
+        let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
+        if (!isSuperAdmin && franchiseId) {
+          q = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), orderBy('billNumber', 'desc'), limit(1));
+        }
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          const lastNumStr = snapshot.docs[0].data().billNumber;
+          const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
+          if (!isNaN(parsed)) highestBillNum = parsed;
+        }
+      } catch (e) {}
+
+      let counterNum = 0;
+      try {
+        const counterSnap = await getDoc(doc(db, 'counters', franchiseId ? `bill_sequence_${franchiseId}` : 'bill_sequence_global'));
+        if (counterSnap.exists()) {
+          counterNum = counterSnap.data().lastSequence || 0;
+        }
+      } catch (e) {}
+
+      const nextNum = Math.max(highestBillNum, counterNum) + 1;
+
       setForm(prev => ({
         ...prev,
-        billNumber: generateBillNumber(snapshotSize + 1),
+        billNumber: generateBillNumber(nextNum),
         quantity: 1,
         extraCharges: 0,
         discount: 0,
