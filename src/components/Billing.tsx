@@ -778,8 +778,6 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
       const docRef = await addDoc(collection(db, 'customers'), newCust);
       
-      // Auto-create ledger account for customer
-      await ledgerAutomation.ensureCustomerAccount(docRef.id, newCust.name, franchiseId || null);
 
       const added = { ...newCust, id: docRef.id } as Customer;
       setSelectedCustomer(added);

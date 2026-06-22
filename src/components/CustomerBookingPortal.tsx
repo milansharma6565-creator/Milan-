@@ -918,11 +918,6 @@ export function CustomerBookingPortal() {
       };
 
       const docRef = await addDoc(collection(db, "customers"), newCustData);
-      await ledgerAutomation.ensureCustomerAccount(
-        docRef.id,
-        newCustData.name,
-        newCustData.franchiseId || null,
-      );
 
       completeLogin({ id: docRef.id, ...newCustData } as Customer);
     } catch (err: any) {

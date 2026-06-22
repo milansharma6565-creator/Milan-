@@ -197,8 +197,6 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
         createdAt: serverTimestamp()
       });
 
-      // Auto-create ledger account for customer
-      await ledgerAutomation.ensureCustomerAccount(docRef.id, newCustomer.name.trim(), franchiseId || null);
       setIsAdding(false);
       setNewCustomer({ name: '', mobile: '', address: '', alternateMobile: '', vehicleNumber: '', notes: '', pin: '' });
     } catch (error) {
