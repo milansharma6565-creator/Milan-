@@ -35,6 +35,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   const [offlinePendingCount, setOfflinePendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submissionRef = useRef(false);
+  const syncingRef = useRef(false);
 
   // Sync state loader
   const updatePendingCount = () => {
@@ -55,17 +57,22 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   };
 
   const syncOfflineBills = async () => {
-    if (isSyncing) return;
+    if (isSyncing || syncingRef.current) return;
     const count = updatePendingCount();
     if (count === 0) return;
     if (!navigator.onLine) return;
 
+    syncingRef.current = true;
     setIsSyncing(true);
     try {
       const stored = localStorage.getItem('offline_pending_bills');
       if (stored) {
         const arr = JSON.parse(stored);
         if (Array.isArray(arr) && arr.length > 0) {
+          // Immediately empty the localStorage queue to protect it against concurrent/overlapping runs
+          localStorage.setItem('offline_pending_bills', JSON.stringify([]));
+          setOfflinePendingCount(0);
+
           const remaining: any[] = [];
           for (const billData of arr) {
             try {
@@ -170,12 +177,24 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
               remaining.push(billData);
             }
           }
-          localStorage.setItem('offline_pending_bills', JSON.stringify(remaining));
+
+          // Merge any failed bills back into queue with newly created ones
+          if (remaining.length > 0) {
+            try {
+              const currentStored = localStorage.getItem('offline_pending_bills') || '[]';
+              const currentArr = JSON.parse(currentStored);
+              const merged = [...remaining, ...currentArr];
+              localStorage.setItem('offline_pending_bills', JSON.stringify(merged));
+            } catch (mergeErr) {
+              console.error("Failed to merge back offline bills:", mergeErr);
+            }
+          }
         }
       }
     } catch (err) {
       console.error("Failed offline sync loop:", err);
     } finally {
+      syncingRef.current = false;
       setIsSyncing(false);
       updatePendingCount();
     }
@@ -526,12 +545,13 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || submissionRef.current) return;
     if (!selectedCustomer) {
       alert('Please select a customer');
       return;
     }
 
+    submissionRef.current = true;
     setIsSubmitting(true);
     const subtotal = form.quantity * form.rate;
     const grandTotal = subtotal + form.extraCharges - form.discount;
@@ -609,6 +629,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       setDeliveryLocation(null);
       setShowMap(false);
       setIsSubmitting(false);
+      submissionRef.current = false;
     };
 
     if (!navigator.onLine) {
@@ -717,11 +738,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
         }
       })();
 
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('timeout')), 2000)
-      );
-
-      await Promise.race([dbPromise, timeoutPromise]);
+      await dbPromise;
 
       setShowBookingSuccess(true);
 
@@ -762,15 +779,11 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       setDeliveryLocation(null);
       setShowMap(false);
     } catch (error: any) {
-      if (error?.message === 'timeout') {
-        console.warn("Database response exceeded safety timeout. Switching to Offline Printing workflow...");
-        useOfflineWorkflow();
-      } else {
-        console.error("Database write throw, switching to offline fallback:", error);
-        useOfflineWorkflow();
-      }
+      console.error("Database write throw, switching to offline fallback:", error);
+      useOfflineWorkflow();
     } finally {
       setIsSubmitting(false);
+      submissionRef.current = false;
     }
   };
 
