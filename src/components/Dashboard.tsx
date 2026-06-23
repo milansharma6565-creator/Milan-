@@ -345,6 +345,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
   const stats = useMemo(() => {
     const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const memoNow = new Date();
+    const memoWeekStartObj = startOfWeek(memoNow, { weekStartsOn: 1 });
+    memoWeekStartObj.setHours(0, 0, 0, 0);
+    const memoMonthStartObj = startOfMonth(memoNow);
+    memoMonthStartObj.setHours(0, 0, 0, 0);
 
     const todayBillsList = bills.filter(b => {
       if (b.date === todayStr) return true;
@@ -447,13 +452,51 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           tractorUsage[tractorName] = (tractorUsage[tractorName] || 0) + 1;
         }
       });
+
+      const todayDriverBills = driverBills.filter(b => {
+        if (b.date === todayStr) return true;
+        if (b.createdAt) {
+          try {
+            const cDate = b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt.seconds * 1000);
+            if (format(cDate, 'yyyy-MM-dd') === todayStr) return true;
+          } catch (e) {}
+        }
+        try {
+          const bObj = b.date instanceof Date ? b.date : new Date(b.date);
+          return format(bObj, 'yyyy-MM-dd') === todayStr;
+        } catch (e) {
+          return false;
+        }
+      });
+
+      const weekDriverBills = driverBills.filter(b => {
+        try {
+          const bObj = b.date instanceof Date ? b.date : new Date(b.date);
+          return bObj >= memoWeekStartObj;
+        } catch (e) {
+          return false;
+        }
+      });
+
+      const monthDriverBills = driverBills.filter(b => {
+        try {
+          const bObj = b.date instanceof Date ? b.date : new Date(b.date);
+          return bObj >= memoMonthStartObj;
+        } catch (e) {
+          return false;
+        }
+      });
+
       return {
         name: driver.name,
         mobile: driver.mobile,
         tripCount: driverBills.length,
+        todayTripCount: todayDriverBills.length,
+        weekTripCount: weekDriverBills.length,
+        monthTripCount: monthDriverBills.length,
         mostUsedTractor: Object.entries(tractorUsage).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A'
       };
-    }).filter(d => d.tripCount > 0).sort((a, b) => b.tripCount - a.tripCount);
+    }).filter(d => d.tripCount > 0);
 
     const nowSecs = Math.floor(Date.now() / 1000);
     const oneDayInSecs = 24 * 60 * 60; // 24 hours
@@ -658,6 +701,23 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts, franchiseId, commissionPercentage]);
 
   const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
+  const [driverTripPeriod, setDriverTripPeriod] = useState<'Day' | 'Week' | 'Month'>('Day');
+
+  const activeDriverStatsList = useMemo(() => {
+    return stats.driverStats
+      .map((driver: any) => {
+        const count = 
+          driverTripPeriod === 'Day' ? driver.todayTripCount :
+          driverTripPeriod === 'Week' ? driver.weekTripCount :
+          driver.monthTripCount;
+        return {
+          ...driver,
+          activeTripCount: count
+        };
+      })
+      .filter((d: any) => d.activeTripCount > 0)
+      .sort((a: any, b: any) => b.activeTripCount - a.activeTripCount);
+  }, [stats.driverStats, driverTripPeriod]);
   const [billSortOption, setBillSortOption] = useState<'Default' | 'Number' | 'Time'>('Default');
   const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [quickVoucher, setQuickVoucher] = useState<{
@@ -3964,28 +4024,50 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       </div>
 
       {/* Trip Board */}
-      <div className="mt-8">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-display font-bold text-lg">Trip Board</h3>
-          <div className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-lg font-bold uppercase tracking-wider">
-            Live Rankings
+      <div className="mt-8 hover:shadow-md transition-shadow p-2 rounded-[2.5rem] bg-slate-50/30 border border-slate-100/50">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5 px-2">
+          <div>
+            <h3 className="font-display font-bold text-lg text-slate-800">Trip Board (Rankings)</h3>
+            <p className="text-xs text-slate-400 font-medium">Rankings of drivers based on completed trips</p>
+          </div>
+          
+          <div className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200 shadow-inner">
+            {(['Day', 'Week', 'Month'] as const).map((period) => (
+              <button
+                key={period}
+                onClick={() => setDriverTripPeriod(period)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  driverTripPeriod === period
+                    ? 'bg-white text-blue-600 shadow-md font-extrabold transform scale-102'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {period === 'Day' ? 'Day (Daily)' : period === 'Week' ? 'Week (Weekly)' : 'Month (Monthly)'}
+              </button>
+            ))}
           </div>
         </div>
+
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-          {stats.driverStats.length === 0 ? (
-            <div className="p-8 text-center text-slate-400 text-sm italic">
-              No completed trips recorded yet.
+          {activeDriverStatsList.length === 0 ? (
+            <div className="p-12 text-center text-slate-400 text-sm">
+              <span className="font-medium italic block mb-1">No completed trips recorded for {
+                driverTripPeriod === 'Day' ? 'Today (Day)' :
+                driverTripPeriod === 'Week' ? 'This Week (Weekly)' :
+                'This Month (Monthly)'
+              }.</span>
+              <span className="text-xs text-slate-400">Choose a different period or assign standard delivery.</span>
             </div>
           ) : (
             <div className="divide-y divide-slate-50">
-              {stats.driverStats.map((driver: any, index: number) => (
+              {activeDriverStatsList.map((driver: any, index: number) => (
                 <div key={driver.name} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
                   <div className="flex items-center gap-4">
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm ${
-                      index === 0 ? 'bg-yellow-100 text-yellow-600' :
-                      index === 1 ? 'bg-slate-100 text-slate-500' :
-                      index === 2 ? 'bg-orange-100 text-orange-600' :
-                      'bg-slate-50 text-slate-400'
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm select-none ${
+                      index === 0 ? 'bg-yellow-100 text-yellow-600 border border-yellow-200' :
+                      index === 1 ? 'bg-slate-100 text-slate-600 border border-slate-200' :
+                      index === 2 ? 'bg-orange-100 text-orange-600 border border-orange-200' :
+                      'bg-slate-50 text-slate-400 border border-slate-100'
                     }`}>
                       #{index + 1}
                     </div>
@@ -3993,18 +4075,18 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                       <div className="font-bold text-slate-900">{driver.name}</div>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <Truck size={10} className="text-blue-600" />
-                        <span className="text-[10px] font-bold text-blue-600 uppercase">
+                        <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">
                           {driver.mostUsedTractor}
                         </span>
                       </div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xl font-display font-black text-slate-900">
-                      {driver.tripCount}
+                    <div className="text-xl font-display font-black text-slate-900 tracking-tight">
+                      {driver.activeTripCount}
                     </div>
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
-                      Trips Done
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                      Trips {driverTripPeriod === 'Day' ? 'Today' : driverTripPeriod === 'Week' ? 'This Week' : 'This Month'}
                     </div>
                   </div>
                 </div>
