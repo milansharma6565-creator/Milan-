@@ -197,13 +197,14 @@ export const ledgerAutomation = {
                       accounts.find(a => a.name.toLowerCase() === bill.customerName.toLowerCase());
       }
 
-      let salesAcc = accounts.find(a => a.name.toLowerCase() === 'service income') ||
+      let salesAcc = accounts.find(a => a.name.toLowerCase() === 'sales') ||
+                     accounts.find(a => a.name.toLowerCase() === 'service income') ||
                      accounts.find(a => a.name.toLowerCase() === 'water sales') || 
                      accounts.find(a => a.name.toLowerCase().includes('sales')) ||
                      accounts.find(a => a.name.toLowerCase().includes('income'));
 
       if (!salesAcc) {
-        // Create Service Income account under Direct Incomes group
+        // Create Sales account under Direct Incomes group
         try {
           const groupsSnap = await getDocs(collection(db, 'accountGroups'));
           let incomeGroup = groupsSnap.docs.find(d => d.data().name === 'Direct Incomes' || d.data().name === 'Direct Income');
@@ -218,7 +219,7 @@ export const ledgerAutomation = {
             incomeGroupId = newIncomeGroupRef.id;
           }
           const newSalesAccRef = await addDoc(collection(db, 'accounts'), {
-            name: 'Service Income',
+            name: 'Sales',
             groupId: incomeGroupId,
             openingBalance: 0,
             balanceType: 'Cr',
@@ -228,7 +229,7 @@ export const ledgerAutomation = {
           });
           salesAcc = {
             id: newSalesAccRef.id,
-            name: 'Service Income',
+            name: 'Sales',
             groupId: incomeGroupId,
             openingBalance: 0,
             balanceType: 'Cr',
@@ -656,14 +657,14 @@ export const ledgerAutomation = {
         incomeGroupId = newIncomeGroupRef.id;
       }
 
-      // 5. Create Service Income ledger under Direct Incomes
+      // 5. Create Sales ledger under Direct Incomes
       let serviceAcc = accountsSnap.docs.find(d => {
         const data = d.data();
-        return data.name === 'Service Income' && data.franchiseId === franchiseId;
+        return (data.name === 'Sales' || data.name === 'Service Income') && data.franchiseId === franchiseId;
       });
       if (!serviceAcc) {
         await addDoc(collection(db, 'accounts'), {
-          name: 'Service Income',
+          name: 'Sales',
           groupId: incomeGroupId,
           openingBalance: 0,
           currentBalance: 0,
@@ -673,7 +674,7 @@ export const ledgerAutomation = {
         });
       }
 
-      console.log(`Successfully initialized default ledgers (Cash, Bank Account, Service Income) for franchise: ${franchiseName}`);
+      console.log(`Successfully initialized default ledgers (Cash, Bank Account, Sales) for franchise: ${franchiseName}`);
     } catch (e) {
       console.error('Error setupFranchiseLedgers:', e);
     }

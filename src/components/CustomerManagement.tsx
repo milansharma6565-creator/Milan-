@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, where, orderBy, runTransaction, getDocs, deleteDoc, getDoc } from 'firebase/firestore';
 import { Customer, Bill, LedgerEntry, Account } from '../types';
@@ -46,6 +46,7 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
   const [shareLedgerCustomer, setShareLedgerCustomer] = useState<Customer | null>(null);
   
   const [validationError, setValidationError] = useState<{ name?: string; mobile?: string }>({});
+  const [showOnlyPendingDues, setShowOnlyPendingDues] = useState(false);
 
   // Real-time duplicate checking for New Customer
   useEffect(() => {
@@ -162,6 +163,28 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
     };
   }, [searchTerm, franchiseId, isSuperAdmin]);
 
+  const customerBalancesCombined = useMemo(() => {
+    return customers.map(customer => {
+      const customerAccount = accounts.find(acc => acc.customerId === customer.id || acc.name === customer.name);
+      const currentPending = customerAccount ? (customerAccount.balanceType === 'Dr' ? customerAccount.currentBalance : -customerAccount.currentBalance) : 0;
+      return {
+        customer,
+        currentPending,
+      };
+    });
+  }, [customers, accounts]);
+
+  const displayedCustomers = useMemo(() => {
+    if (showOnlyPendingDues) {
+      return customerBalancesCombined.filter(item => item.currentPending > 0);
+    }
+    return customerBalancesCombined;
+  }, [customerBalancesCombined, showOnlyPendingDues]);
+
+  const totalDuesAmount = useMemo(() => {
+    return displayedCustomers.reduce((sum, item) => sum + Math.max(0, item.currentPending), 0);
+  }, [displayedCustomers]);
+
   const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustomer.name || !newCustomer.mobile) return;
@@ -249,7 +272,13 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
   };
 
   const exportPDF = (onlyPending: boolean = false) => {
-    const listToExport = onlyPending ? customers.filter(c => c.pendingAmount > 0) : customers;
+    const items = customers.map(c => {
+      const customerAccount = accounts.find(acc => acc.customerId === c.id || acc.name === c.name);
+      const currentPending = customerAccount ? (customerAccount.balanceType === 'Dr' ? customerAccount.currentBalance : -customerAccount.currentBalance) : 0;
+      return { customer: c, pending: currentPending };
+    });
+    
+    const listToExport = onlyPending ? items.filter(i => i.pending > 0) : items;
     
     if (!listToExport || listToExport.length === 0) {
       alert(onlyPending ? 'No customers with pending amount found.' : 'No customers to export.');
@@ -269,21 +298,30 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
     
     const pdfFormatCurrency = (val: number) => `Rs. ${val.toLocaleString('en-IN')}`;
     
-    const tableData = listToExport.map(c => [
-      c.name,
-      `+91 ${c.mobile}`,
-      c.address || '-',
-      pdfFormatCurrency(c.pendingAmount)
+    const tableData = listToExport.map(item => [
+      item.customer.name,
+      `+91 ${item.customer.mobile}`,
+      item.customer.address || '-',
+      pdfFormatCurrency(item.pending)
+    ]);
+
+    // Append Grand Total Row at the bottom of the table
+    const grandDuesTotal = listToExport.reduce((sum, item) => sum + item.pending, 0);
+    tableData.push([
+      'Grand Total (कुल बकाया जोड़)',
+      '',
+      '',
+      pdfFormatCurrency(grandDuesTotal)
     ]);
 
     autoTable(doc, {
-      head: [['Name', 'Mobile', 'Address', 'Pending Amount']],
+      head: [['Name', 'Mobile', 'Address', 'Pending Amount (बकाया राशि)']],
       body: tableData,
       startY: 25,
       theme: 'grid',
       headStyles: { fillColor: onlyPending ? [220, 38, 38] : [37, 99, 235] },
       columnStyles: {
-        3: { halign: 'right' }
+        3: { halign: 'right', fontStyle: 'bold' }
       },
       styles: { fontSize: 9 }
     });
@@ -450,22 +488,68 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
           </div>
         </div>
 
-        <div className="relative group">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={20} />
-          <input
-            type="text"
-            placeholder="Search customers by name or mobile..."
-            className="material-input pl-12 h-14 text-base"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+        <div className="flex flex-col sm:flex-row gap-4 items-stretch justify-between bg-slate-50 border border-slate-100 p-3 rounded-2xl">
+          {/* Tabs for All vs Dues */}
+          <div className="flex bg-slate-200/60 p-1 rounded-xl">
+            <button
+              onClick={() => setShowOnlyPendingDues(false)}
+              className={`flex-1 sm:flex-initial px-5 py-2 text-xs font-bold rounded-lg transition-all ${
+                !showOnlyPendingDues 
+                  ? 'bg-white text-slate-800 shadow-xs' 
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              👥 All Clients (सभी ग्राहक)
+            </button>
+            <button
+              onClick={() => setShowOnlyPendingDues(true)}
+              className={`flex-1 sm:flex-initial px-5 py-2 text-xs font-bold rounded-lg transition-all ${
+                showOnlyPendingDues 
+                  ? 'bg-red-600 text-white shadow-md' 
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              ⏳ Pending Dues Only (केवल उधार बकाया वाले)
+            </button>
+          </div>
+
+          {/* Quick search input */}
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input
+              type="text"
+              placeholder="Search by name or phone..."
+              className="w-full text-xs font-bold bg-white border border-slate-200/80 rounded-xl pl-11 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Customer Dues Summary Banner */}
+        <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-[1.8rem] p-6 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-0.5">
+              {showOnlyPendingDues ? '⚠️ Filtered Pending Accounts' : '📊 Total Customer Portfolio'}
+            </span>
+            <h2 className="text-xl font-bold tracking-tight">
+              {showOnlyPendingDues ? 'Pending Dues Summary' : 'Customer Account Overview'}
+            </h2>
+          </div>
+          <div className="flex gap-4 sm:border-l sm:border-slate-700/65 sm:pl-6">
+            <div>
+              <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Clients Shown</div>
+              <div className="text-lg font-black text-white">{displayedCustomers.length}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Total Outstanding (कुल बकाया)</div>
+              <div className="text-xl font-black text-red-400">₹{totalDuesAmount.toLocaleString('en-IN')}</div>
+            </div>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          {customers?.map((customer) => {
-            const customerAccount = accounts.find(acc => acc.customerId === customer.id || acc.name === customer.name);
-            const currentPending = customerAccount ? (customerAccount.balanceType === 'Dr' ? customerAccount.currentBalance : -customerAccount.currentBalance) : 0;
-            
+          {displayedCustomers.map(({ customer, currentPending }) => {
             return (
               <motion.div
                 key={customer.id}

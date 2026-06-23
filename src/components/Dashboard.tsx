@@ -534,12 +534,40 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
     const monthWaterLiters = monthBillsList.reduce((sum, b) => sum + getLiters(b), 0);
 
+    const now = new Date();
     const todayTankerTrips = todayBillsList
       .filter(b => b.status === 'Delivered' && (b.category || '').includes('TANKER'))
       .reduce((sum, b) => sum + (b.quantity || 1), 0);
 
+    const weekStartObj = startOfWeek(now, { weekStartsOn: 1 });
+    weekStartObj.setHours(0, 0, 0, 0);
+    const weekBillsList = bills.filter(b => {
+      try {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        return bDate >= weekStartObj && b.status === 'Delivered';
+      } catch (e) {
+        return false;
+      }
+    });
+    const weekTankerTrips = weekBillsList
+      .filter(b => (b.category || '').includes('TANKER'))
+      .reduce((sum, b) => sum + (b.quantity || 1), 0);
+
     const monthTankerTrips = monthBillsList
       .filter(b => b.status === 'Delivered' && (b.category || '').includes('TANKER'))
+      .reduce((sum, b) => sum + (b.quantity || 1), 0);
+
+    const yearStartObj = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+    const yearBillsList = bills.filter(b => {
+      try {
+        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        return bDate >= yearStartObj && b.status === 'Delivered';
+      } catch (e) {
+        return false;
+      }
+    });
+    const yearTankerTrips = yearBillsList
+      .filter(b => (b.category || '').includes('TANKER'))
       .reduce((sum, b) => sum + (b.quantity || 1), 0);
 
     const todayTotalSale = todayBillsList
@@ -1166,7 +1194,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           vouchersByBillIdSnap,
           vouchersByTrpNoSnap
         ] = await Promise.all([
-          getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', franchiseIdForBill))),
+          getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Sales', 'Service Income']), where('franchiseId', '==', franchiseIdForBill))),
           getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
           getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
           getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
@@ -1369,8 +1397,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           }
           
           const newSalesTotalAmount = newGrandTotal + prevRedeemed;
+          const incomeAccName = incomeSnap.docs[0]?.data()?.name || 'Sales';
           if (incomeAccId) {
-            salesItems.push({ accountId: incomeAccId, accountName: 'Service Income', amount: newSalesTotalAmount, type: 'Cr' });
+            salesItems.push({ accountId: incomeAccId, accountName: incomeAccName, amount: newSalesTotalAmount, type: 'Cr' });
           }
 
           transaction.set(doc(db, 'vouchers', salesVchId), {
@@ -1584,7 +1613,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       // Fetch required data outside transaction
       const franchiseIdForBill = editingBill.franchiseId || 'legacy-rajhans';
       const [incomeSnap, cashSnap, bankSnap, customerSnap, franchiseDoc, loyaltyExpenseAccSnap] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Sales', 'Service Income']), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
@@ -1757,7 +1786,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         loyaltyExpenseAccSnap,
         expensesGroupSnap
       ] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Sales', 'Service Income']), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
         bankQueryPromise,
         getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Sundry Debtors'), where('franchiseId', '==', franchiseIdForBill))),
@@ -1884,7 +1913,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         if (!incomeAccId) {
           const newAcc = doc(collection(db, 'accounts'));
           transaction.set(newAcc, { 
-            name: 'Service Income', 
+            name: 'Sales', 
             groupId: incomeGroupId, 
             openingBalance: 0, 
             balanceType: 'Cr', 
@@ -2044,7 +2073,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         if (redeemed > 0 && finalLoyaltyExpenseAccId) {
           salesItems.push({ accountId: finalLoyaltyExpenseAccId, accountName: 'Franchise Loyalty Expense', amount: redeemed, type: 'Dr' });
         }
-        salesItems.push({ accountId: finalIncomeAccId, accountName: 'Service Income', amount: salesTotalAmount, type: 'Cr' });
+        const finalIncomeAccName = incomeSnap.docs[0]?.data()?.name || 'Sales';
+        salesItems.push({ accountId: finalIncomeAccId, accountName: finalIncomeAccName, amount: salesTotalAmount, type: 'Cr' });
 
         transaction.set(doc(db, 'vouchers', salesVchId), {
           date: new Date(),
@@ -2537,7 +2567,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       const fid = billData.franchiseId || 'legacy-rajhans';
 
       const [incomeSnap, cashSnap, bankSnap, customerAccSnap] = await Promise.all([
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Service Income'), where('franchiseId', '==', fid))),
+        getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Sales', 'Service Income']), where('franchiseId', '==', fid))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', fid))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', fid))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', billData.customerName), where('franchiseId', '==', fid)))
@@ -2624,6 +2654,41 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         // Delete the bill
         transaction.delete(billRef);
       });
+
+      // AFTER TRANSACTION COMPLETES SUCCESSFULLY:
+      // Reset the franchise's/global counter back to the maximum remaining sequence number so that deleted serial numbers are reused and not skipped.
+      try {
+        const actualFid = billData.franchiseId || null;
+        let qHighest = query(
+          collection(db, 'bills'),
+          orderBy('billNumber', 'desc'),
+          limit(1)
+        );
+        if (actualFid) {
+          qHighest = query(
+            collection(db, 'bills'),
+            where('franchiseId', '==', actualFid),
+            orderBy('billNumber', 'desc'),
+            limit(1)
+          );
+        }
+        const highestBillSnap = await getDocs(qHighest);
+        let newHighestSeq = 0;
+        if (!highestBillSnap.empty) {
+          const lastNumStr = highestBillSnap.docs[0].data().billNumber;
+          const parsed = parseInt(lastNumStr.replace(/\D/g, ''), 10);
+          if (!isNaN(parsed)) {
+            newHighestSeq = parsed;
+          }
+        }
+        
+        // Update the counter doc to the new highest sequence
+        const counterDocRef = doc(db, 'counters', actualFid ? `bill_sequence_${actualFid}` : 'bill_sequence_global');
+        await setDoc(counterDocRef, { lastSequence: newHighestSeq }, { merge: true });
+        console.log(`Successfully reset counter lastSequence to ${newHighestSeq} for franchise ${actualFid}`);
+      } catch (counterResetErr) {
+        console.error("Failed to reset bill counter after deletion:", counterResetErr);
+      }
 
       setEditingBill(null);
       setDeleteConfirm(null);
@@ -3816,6 +3881,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     <span className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
                       {bill.customerName}
                     </span>
+                    {bill.customerMobile && (
+                      <span className="px-1.5 py-0.5 bg-emerald-150 border border-emerald-300 text-emerald-800 font-mono text-[9px] font-black rounded shadow-xs leading-none flex items-center gap-1 select-all hover:bg-emerald-200 transition-colors" title="Customer mobile number (Tap to copy)">
+                        <Smartphone size={10} className="text-emerald-600 shrink-0" />
+                        {bill.customerMobile}
+                      </span>
+                    )}
                     <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
                       bill.status === 'Cancelled'
                         ? 'bg-slate-100 text-slate-500'

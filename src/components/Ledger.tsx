@@ -227,7 +227,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         { name: 'Maintenance', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
         { name: 'Salary Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
         { name: 'Salary Payable', group: 'Current Liabilities', opening: 0, type: 'Cr' },
-        { name: 'Service Income', group: 'Direct Income', opening: 0, type: 'Cr' },
+        { name: 'Sales', group: 'Direct Income', opening: 0, type: 'Cr' },
         { name: 'Penalty Recovery', group: 'Direct Income', opening: 0, type: 'Cr' },
       ];
 
@@ -1866,7 +1866,38 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
     const bankVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'UPI');
     const debitVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'Debit');
 
+    const cashTotal = cashVouchers.reduce((sum, v) => sum + v.totalAmount, 0);
+    const bankTotal = bankVouchers.reduce((sum, v) => sum + v.totalAmount, 0);
+    const debitTotal = debitVouchers.reduce((sum, v) => sum + v.totalAmount, 0);
+    const grandSum = cashTotal + bankTotal + debitTotal;
+
     let currentY = 42;
+
+    // Add main Summary table in PDF
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 41, 59);
+    doc.text("📋 Daybook Summary (कुल जोड़)", 14, currentY);
+    currentY += 4;
+
+    autoTable(doc, {
+      head: [['Category (वर्ग)', 'Total Amount (कुल राशि)']],
+      body: [
+        ['💵 Cash Total (नकद कुल)', `₹ ${cashTotal.toLocaleString('en-IN')}`],
+        ['📱 UPI / Bank Total (बैंक/UPI कुल)', `₹ ${bankTotal.toLocaleString('en-IN')}`],
+        ['📁 Debit / Udhar Total (उधार कुल)', `₹ ${debitTotal.toLocaleString('en-IN')}`],
+        ['📊 Grand Total (कुल जोड़)', `₹ ${grandSum.toLocaleString('en-IN')}`]
+      ],
+      startY: currentY,
+      theme: 'grid',
+      headStyles: { fillColor: [15, 23, 42] },
+      columnStyles: {
+        1: { halign: 'right', fontStyle: 'bold' }
+      },
+      margin: { left: 14, right: 14 }
+    });
+
+    currentY = (doc as any).lastAutoTable.finalY + 12;
 
     const addSectionTable = (title: string, vchList: Voucher[], rgbColor: [number, number, number]) => {
       // If we are getting too low, add a page
@@ -1968,6 +1999,26 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
             <Plus size={18} />
             <span>New Voucher</span>
           </button>
+        </div>
+      </div>
+
+      {/* Screen - Daybook Quick Summary (Totals) */}
+      <div className="mx-6 mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4 print:grid">
+        <div className="bg-emerald-55/40 border border-emerald-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
+          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">💵 Cash Total (नकद कुल)</span>
+          <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'Cash').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
+        </div>
+        <div className="bg-blue-55/40 border border-blue-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
+          <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">📱 UPI Total (UPI कुल)</span>
+          <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'UPI').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
+        </div>
+        <div className="bg-orange-55/40 border border-orange-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
+          <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">📁 Debit Total (उधार कुल)</span>
+          <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'Debit').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
+        </div>
+        <div className="bg-slate-50 border border-slate-200/50 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">📊 Grand Total (कुल जोड़)</span>
+          <span className="text-xl font-black text-slate-800 mt-1">₹{filtered.reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
         </div>
       </div>
 
@@ -2517,10 +2568,13 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [hiddenRows, setHiddenRows] = useState<Set<number>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
 
-  const sortedAccounts = useMemo(() => {
-    return [...accounts].sort((a, b) => a.name.localeCompare(b.name));
-  }, [accounts]);
+  const filteredSortedAccounts = useMemo(() => {
+    return [...accounts]
+      .filter(acc => acc.name.toLowerCase().includes(searchTerm.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [accounts, searchTerm]);
 
   const statement = useMemo(() => {
     if (!selectedAccountId) return [];
@@ -2659,19 +2713,34 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
       {/* Search Sidebar */}
       <div className="lg:col-span-1 space-y-4">
         <div className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Select Account</label>
-          <div className="space-y-1">
-            {sortedAccounts.map(acc => (
-              <button
-                key={acc.id}
-                onClick={() => setSelectedAccountId(acc.id!)}
-                className={`w-full text-left px-4 py-3 rounded-xl text-sm font-bold transition-all ${
-                  selectedAccountId === acc.id ? 'bg-slate-900 text-white shadow-lg' : 'hover:bg-slate-50 text-slate-600'
-                }`}
-              >
-                {acc.name}
-              </button>
-            ))}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Select Account</label>
+            <div className="mt-2 relative">
+              <input 
+                type="text"
+                placeholder="Type name to search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all text-slate-800"
+              />
+            </div>
+          </div>
+          <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1">
+            {filteredSortedAccounts.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6 font-semibold">No matches found</p>
+            ) : (
+              filteredSortedAccounts.map(acc => (
+                <button
+                  key={acc.id}
+                  onClick={() => setSelectedAccountId(acc.id!)}
+                  className={`w-full text-left px-4 py-3 rounded-xl text-sm font-bold transition-all ${
+                    selectedAccountId === acc.id ? 'bg-slate-900 text-white shadow-lg' : 'hover:bg-slate-50 text-slate-600'
+                  }`}
+                >
+                  {acc.name}
+                </button>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -3877,7 +3946,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
                     description: "IMPS / TRANS-RECV / RAJENDRA PRASAD SIKAR TANKER PAY",
                     amount: 14500,
                     type: "Cr",
-                    suggestedAccountName: "Service Income"
+                    suggestedAccountName: "Sales"
                   },
                   {
                     date: formatOffset(4),
@@ -3891,7 +3960,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
                     description: "UPI / MILAN SHARMA SIKAR DIRECT DEPOSIT",
                     amount: 2500,
                     type: "Cr",
-                    suggestedAccountName: "Service Income"
+                    suggestedAccountName: "Sales"
                   },
                   {
                     date: formatOffset(2),
@@ -3991,7 +4060,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
                     description: "IMPS / TRANS-RECV / RAJENDRA PRASAD SIKAR TANKER PAY",
                     amount: 14500,
                     type: "Cr",
-                    suggestedAccountName: "Service Income"
+                    suggestedAccountName: "Sales"
                   },
                   {
                     date: formatOffset(4),
@@ -4005,7 +4074,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
                     description: "UPI / MILAN SHARMA SIKAR DIRECT DEPOSIT",
                     amount: 2500,
                     type: "Cr",
-                    suggestedAccountName: "Service Income"
+                    suggestedAccountName: "Sales"
                   },
                   {
                     date: formatOffset(2),
