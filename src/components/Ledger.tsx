@@ -55,7 +55,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { format } from 'date-fns';
 import { ConfirmationModal } from './ConfirmationModal';
-import { generatePDF } from '../lib/pdfUtils';
+import { generatePDF, addSwanWatermarkToPDF, sanitizePdfText } from '../lib/pdfUtils';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -63,18 +63,50 @@ import * as XLSX from 'xlsx';
 type AccountingTab = 'vouchers' | 'daybook' | 'ledgers' | 'reports' | 'accounts' | 'bank-feed' | 'tally-sync';
 
 const DEFAULT_GROUPS: Partial<AccountGroup>[] = [
+  // Root categories for base system compatibility
   { name: 'Assets', type: 'Asset' },
   { name: 'Liabilities', type: 'Liability' },
   { name: 'Income', type: 'Income' },
   { name: 'Expenses', type: 'Expense' },
-  { name: 'Cash-in-hand', parentGroupId: 'Assets', type: 'Asset' },
-  { name: 'Bank Accounts', parentGroupId: 'Assets', type: 'Asset' },
-  { name: 'Sundry Debtors', parentGroupId: 'Assets', type: 'Asset' },
-  { name: 'Sundry Creditors', parentGroupId: 'Liabilities', type: 'Liability' },
-  { name: 'Indirect Expenses', parentGroupId: 'Expenses', type: 'Expense' },
-  { name: 'Direct Income', parentGroupId: 'Income', type: 'Income' },
+
+  // Tally ERP 9 Primary Groups (15)
+  { name: 'Branch / Divisions', parentGroupId: 'Liabilities', type: 'Liability' },
+  { name: 'Capital Account', parentGroupId: 'Liabilities', type: 'Liability' },
+  { name: 'Current Assets', parentGroupId: 'Assets', type: 'Asset' },
   { name: 'Current Liabilities', parentGroupId: 'Liabilities', type: 'Liability' },
   { name: 'Direct Expenses', parentGroupId: 'Expenses', type: 'Expense' },
+  { name: 'Direct Incomes', parentGroupId: 'Income', type: 'Income' },
+  { name: 'Fixed Assets', parentGroupId: 'Assets', type: 'Asset' },
+  { name: 'Indirect Expenses', parentGroupId: 'Expenses', type: 'Expense' },
+  { name: 'Indirect Incomes', parentGroupId: 'Income', type: 'Income' },
+  { name: 'Investments', parentGroupId: 'Assets', type: 'Asset' },
+  { name: 'Loans (Liability)', parentGroupId: 'Liabilities', type: 'Liability' },
+  { name: 'Misc. Expenses (Asset)', parentGroupId: 'Assets', type: 'Asset' },
+  { name: 'Purchase Accounts', parentGroupId: 'Expenses', type: 'Expense' },
+  { name: 'Sales Accounts', parentGroupId: 'Income', type: 'Income' },
+  { name: 'Suspense A/c', parentGroupId: 'Liabilities', type: 'Liability' },
+
+  // Tally ERP 9 Sub-groups (13)
+  { name: 'Bank Accounts', parentGroupId: 'Current Assets', type: 'Asset' },
+  { name: 'Bank OD A/c', parentGroupId: 'Loans (Liability)', type: 'Liability' },
+  { name: 'Cash-in-hand', parentGroupId: 'Current Assets', type: 'Asset' },
+  { name: 'Duties & Taxes', parentGroupId: 'Current Liabilities', type: 'Liability' },
+  { name: 'Loans & Advances (Asset)', parentGroupId: 'Current Assets', type: 'Asset' },
+  { name: 'Provisions', parentGroupId: 'Current Liabilities', type: 'Liability' },
+  { name: 'Reserves & Surplus', parentGroupId: 'Capital Account', type: 'Liability' },
+  { name: 'Secured Loans', parentGroupId: 'Loans (Liability)', type: 'Liability' },
+  { name: 'Stock-in-hand', parentGroupId: 'Current Assets', type: 'Asset' },
+  { name: 'Sundry Debtors', parentGroupId: 'Current Assets', type: 'Asset' },
+  { name: 'Sundry Creditors', parentGroupId: 'Current Liabilities', type: 'Liability' },
+  { name: 'Unsecured Loans', parentGroupId: 'Loans (Liability)', type: 'Liability' },
+  { name: 'Retained Earnings', parentGroupId: 'Capital Account', type: 'Liability' },
+
+  // Backward-compatibility aliases (if any code looks for them)
+  { name: 'Direct Income', parentGroupId: 'Income', type: 'Income' },
+  { name: 'Indirect Income', parentGroupId: 'Income', type: 'Income' },
+  { name: 'Suspense Accounts', parentGroupId: 'Liabilities', type: 'Liability' },
+  { name: 'Prepaid Expenses', parentGroupId: 'Assets', type: 'Asset' },
+  { name: 'Equity', parentGroupId: 'Liabilities', type: 'Liability' }
 ];
 
 export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
@@ -87,9 +119,72 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
   // Modal States
   const [isAddingVoucher, setIsAddingVoucher] = useState(false);
+  const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
   const [isAddingAccount, setIsAddingAccount] = useState(false);
   const [selectedVoucher, setSelectedVoucher] = useState<Voucher | null>(null);
   const [selectedLedgerId, setSelectedLedgerId] = useState<string | null>(null);
+
+  const ensureAllTallyGroups = async (existingGroups: AccountGroup[], fid: string | null) => {
+    if (isInitializing) return;
+    
+    // Check if any groups from DEFAULT_GROUPS are missing (case-insensitive name comparison)
+    const missing = DEFAULT_GROUPS.filter(dg => 
+      !existingGroups.some(eg => eg.name.trim().toLowerCase() === dg.name?.trim().toLowerCase())
+    );
+
+    if (missing.length === 0) return;
+
+    setIsInitializing(true);
+    try {
+      const batch = writeBatch(db);
+      
+      const groupRefs: Record<string, string> = {};
+      existingGroups.forEach(eg => {
+        groupRefs[eg.name] = eg.id;
+      });
+
+      // Separation of missing groups to maintain hierarchy
+      const missingPrimary = missing.filter(m => !m.parentGroupId);
+      const missingSub = missing.filter(m => m.parentGroupId);
+
+      // Create missing primary/root groups first
+      for (const gData of missingPrimary) {
+        const ref = doc(collection(db, 'accountGroups'));
+        batch.set(ref, {
+          name: gData.name,
+          type: gData.type,
+          franchiseId: fid,
+          createdAt: serverTimestamp()
+        });
+        groupRefs[gData.name!] = ref.id;
+      }
+
+      // Create missing subgroups
+      for (const gData of missingSub) {
+        const ref = doc(collection(db, 'accountGroups'));
+        let parentId = groupRefs[gData.parentGroupId!];
+        if (!parentId) {
+          parentId = gData.parentGroupId!;
+        }
+
+        batch.set(ref, {
+          name: gData.name,
+          parentGroupId: parentId,
+          type: gData.type,
+          franchiseId: fid,
+          createdAt: serverTimestamp()
+        });
+        groupRefs[gData.name!] = ref.id;
+      }
+
+      await batch.commit();
+      console.log(`Successfully auto-seeded ${missing.length} missing Tally ERP 9 groups.`);
+    } catch (e) {
+      console.error("Error auto-seeding Tally groups:", e);
+    } finally {
+      setIsInitializing(false);
+    }
+  };
 
   useEffect(() => {
     const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
@@ -107,6 +202,8 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         setGroups(g);
         if (g.length === 0 && !isInitializing) {
           setupInitialData();
+        } else if (g.length > 0 && g.length < DEFAULT_GROUPS.length && !isInitializing) {
+          ensureAllTallyGroups(g, fid);
         }
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'accountGroups')
@@ -206,14 +303,32 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     setIsInitializing(true);
     try {
       const batch = writeBatch(db);
+      const fid = franchiseId || null;
       
       // Create Groups
       const groupRefs: Record<string, string> = {};
-      for (const gData of DEFAULT_GROUPS) {
+      const primaryGroups = DEFAULT_GROUPS.filter(g => !g.parentGroupId);
+      const subGroups = DEFAULT_GROUPS.filter(g => g.parentGroupId);
+
+      for (const gData of primaryGroups) {
         const ref = doc(collection(db, 'accountGroups'));
         batch.set(ref, { 
-          ...gData,
-          franchiseId: franchiseId || null,
+          name: gData.name,
+          type: gData.type,
+          franchiseId: fid,
+          createdAt: serverTimestamp()
+        });
+        groupRefs[gData.name!] = ref.id;
+      }
+
+      for (const gData of subGroups) {
+        const ref = doc(collection(db, 'accountGroups'));
+        const parentId = groupRefs[gData.parentGroupId!] || gData.parentGroupId;
+        batch.set(ref, { 
+          name: gData.name,
+          parentGroupId: parentId,
+          type: gData.type,
+          franchiseId: fid,
           createdAt: serverTimestamp()
         });
         groupRefs[gData.name!] = ref.id;
@@ -223,23 +338,23 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       const defaultAccounts = [
         { name: 'Cash', group: 'Cash-in-hand', opening: 0, type: 'Dr' },
         { name: 'Bank Account', group: 'Bank Accounts', opening: 0, type: 'Dr' },
-        { name: 'Fuel Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
-        { name: 'Maintenance', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
+        { name: 'Fuel Expense', group: 'Direct Expenses', opening: 0, type: 'Dr' },
+        { name: 'Maintenance', group: 'Direct Expenses', opening: 0, type: 'Dr' },
         { name: 'Salary Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
         { name: 'Salary Payable', group: 'Current Liabilities', opening: 0, type: 'Cr' },
-        { name: 'Sales', group: 'Direct Income', opening: 0, type: 'Cr' },
-        { name: 'Penalty Recovery', group: 'Direct Income', opening: 0, type: 'Cr' },
+        { name: 'Sales', group: 'Sales Accounts', opening: 0, type: 'Cr' },
+        { name: 'Penalty Recovery', group: 'Direct Incomes', opening: 0, type: 'Cr' },
       ];
 
       for (const acc of defaultAccounts) {
         const ref = doc(collection(db, 'accounts'));
         batch.set(ref, {
           name: acc.name,
-          groupId: groupRefs[acc.group],
+          groupId: groupRefs[acc.group] || null,
           openingBalance: acc.opening,
           balanceType: acc.type,
           currentBalance: acc.opening,
-          franchiseId: franchiseId || null,
+          franchiseId: fid,
           createdAt: serverTimestamp()
         });
       }
@@ -447,6 +562,19 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       alert("Invalid account selection or amount.");
       return;
     }
+
+    const credAccount = accounts.find(a => a.id === retroCreditAcc);
+    const isCashAccount = credAccount?.name.toLowerCase().includes('cash') || credAccount?.groupId === groups.find(g => g.name === 'Cash-in-hand')?.id;
+    if (isCashAccount) {
+      const currentBal = getAccountBalance(retroCreditAcc);
+      const resultingBal = currentBal - retroAmount;
+      if (resultingBal < 0) {
+        if (!window.confirm(`⚠️ AUDIT WARNING: This payment will cause the cash account "${credAccount.name}" to fall into a NEGATIVE balance of ${formatCurrency(Math.abs(resultingBal))}!\nIn physical cash accounts, a negative balance is impossible and will raise severe audit flags.\n\nDo you want to proceed anyway?`)) {
+          return;
+        }
+      }
+    }
+
     setRetroSavingVoucher(true);
     try {
       const itemsList: VoucherItem[] = [
@@ -1754,25 +1882,31 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
       {/* Main Content Area */}
       <div className="min-h-[400px]">
-        {activeTab === 'daybook' && <Daybook vouchers={vouchers} onAddVoucher={() => setIsAddingVoucher(true)} onDeleteVoucher={handleDeleteVoucher} />}
+        {activeTab === 'daybook' && <Daybook vouchers={vouchers} onAddVoucher={() => setIsAddingVoucher(true)} onDeleteVoucher={handleDeleteVoucher} onEditVoucher={setEditingVoucher} />}
         {activeTab === 'vouchers' && <VoucherManager vouchers={vouchers} onAdd={() => setIsAddingVoucher(true)} />}
-        {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} onDeleteVoucher={handleDeleteVoucher} />}
+        {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} onDeleteVoucher={handleDeleteVoucher} onEditVoucher={setEditingVoucher} groups={groups} />}
         {activeTab === 'reports' && <FinancialReports accounts={accounts} vouchers={vouchers} groups={groups} />}
-        {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} vouchers={vouchers} onAddAccount={() => setIsAddingAccount(true)} />}
+        {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} vouchers={vouchers} onAddAccount={() => setIsAddingAccount(true)} franchiseId={franchiseId} />}
       </div>
 
       {/* Modals */}
       <AnimatePresence>
-        {isAddingVoucher && (
+        {(isAddingVoucher || editingVoucher) && (
           <VoucherEntryModal 
-            onClose={() => setIsAddingVoucher(false)} 
+            onClose={() => {
+              setIsAddingVoucher(false);
+              setEditingVoucher(null);
+            }} 
             accounts={accounts} 
             franchiseId={franchiseId}
+            editingVoucher={editingVoucher || undefined}
           />
         )}
         {isAddingAccount && (
           <AccountEntryModal 
-            onClose={() => setIsAddingAccount(false)} 
+            onClose={() => {
+              setIsAddingAccount(false)} 
+            }
             groups={groups} 
             accounts={accounts}
             franchiseId={franchiseId}
@@ -1821,7 +1955,7 @@ function getVoucherPaymentMode(v: Voucher): 'Cash' | 'UPI' | 'Debit' {
 }
 
 /** Daybook View */
-function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Voucher[], onAddVoucher: () => void, onDeleteVoucher: (id: string) => Promise<void> }) {
+function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { vouchers: Voucher[], onAddVoucher: () => void, onDeleteVoucher: (id: string) => Promise<void>, onEditVoucher: (vch: Voucher) => void }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState<'All' | 'Today' | 'Custom'>('Today');
   const [customDate, setCustomDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -1877,16 +2011,16 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(30, 41, 59);
-    doc.text("📋 Daybook Summary (कुल जोड़)", 14, currentY);
+    doc.text("Daybook Summary Report", 14, currentY);
     currentY += 4;
 
     autoTable(doc, {
-      head: [['Category (वर्ग)', 'Total Amount (कुल राशि)']],
+      head: [['Category', 'Total Amount']],
       body: [
-        ['💵 Cash Total (नकद कुल)', `₹ ${cashTotal.toLocaleString('en-IN')}`],
-        ['📱 UPI / Bank Total (बैंक/UPI कुल)', `₹ ${bankTotal.toLocaleString('en-IN')}`],
-        ['📁 Debit / Udhar Total (उधार कुल)', `₹ ${debitTotal.toLocaleString('en-IN')}`],
-        ['📊 Grand Total (कुल जोड़)', `₹ ${grandSum.toLocaleString('en-IN')}`]
+        ['Cash Total', `Rs. ${cashTotal.toLocaleString('en-IN')}`],
+        ['UPI / Bank Total', `Rs. ${bankTotal.toLocaleString('en-IN')}`],
+        ['Debit / Udhar Total', `Rs. ${debitTotal.toLocaleString('en-IN')}`],
+        ['Grand Total', `Rs. ${grandSum.toLocaleString('en-IN')}`]
       ],
       startY: currentY,
       theme: 'grid',
@@ -1909,16 +2043,19 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
       doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(rgbColor[0], rgbColor[1], rgbColor[2]);
-      doc.text(title, 14, currentY);
+      doc.text(sanitizePdfText(title), 14, currentY);
       currentY += 4;
 
-      const data = vchList.map(v => [
-        format(v.date, 'dd/MM/yyyy'),
-        v.voucherNumber,
-        v.type,
-        v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName,
-        v.totalAmount.toLocaleString('en-IN')
-      ]);
+      const data = vchList.map(v => {
+        const part = v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName || '';
+        return [
+          format(v.date, 'dd/MM/yyyy'),
+          sanitizePdfText(v.voucherNumber),
+          sanitizePdfText(v.type),
+          sanitizePdfText(part),
+          v.totalAmount.toLocaleString('en-IN')
+        ];
+      });
 
       autoTable(doc, {
         head: [['Date', 'Vch No.', 'Type', 'Particulars', 'Amount']],
@@ -1936,14 +2073,15 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
     };
 
     // 1. Cash Table (Green)
-    addSectionTable('💰 Cash Entries (नकद)', cashVouchers, [16, 185, 129]);
+    addSectionTable('Cash Entries', cashVouchers, [16, 185, 129]);
 
     // 2. Bank / UPI Table (Blue)
-    addSectionTable('📱 Bank / UPI Entries (बैंक/UPI)', bankVouchers, [37, 99, 235]);
+    addSectionTable('Bank / UPI Entries', bankVouchers, [37, 99, 235]);
 
     // 3. Debit / Udhar Table (Orange/Red)
-    addSectionTable('📁 Debit / Udhar Entries (उधार/खाता)', debitVouchers, [249, 115, 22]);
+    addSectionTable('Debit / Udhar Entries', debitVouchers, [249, 115, 22]);
 
+    addSwanWatermarkToPDF(doc);
     doc.save(`Daybook_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
   };
 
@@ -2086,16 +2224,28 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
                   <p className="text-sm font-display font-black text-slate-900">{formatCurrency(v.totalAmount)}</p>
                 </td>
                 <td className="p-4 pr-8 text-center print:hidden">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteVoucher(v.id);
-                    }}
-                    className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
-                    title="Delete Transaction Entry"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex justify-center items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditVoucher(v);
+                      }}
+                      className="p-1.5 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                      title="Edit Transaction Entry"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteVoucher(v.id);
+                      }}
+                      className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                      title="Delete Transaction Entry"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -2113,15 +2263,15 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher }: { vouchers: Vouche
 }
 
 /** Voucher Entry Modal */
-function VoucherEntryModal({ onClose, accounts, franchiseId }: { onClose: () => void, accounts: Account[], franchiseId?: string }) {
-  const [vchType, setVchType] = useState<VoucherType>('Payment');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [vchNo, setVchNo] = useState(`V-${Math.floor(1000 + Math.random() * 9000)}`);
-  const [items, setItems] = useState<VoucherItem[]>([
+function VoucherEntryModal({ onClose, accounts, franchiseId, editingVoucher }: { onClose: () => void, accounts: Account[], franchiseId?: string, editingVoucher?: Voucher }) {
+  const [vchType, setVchType] = useState<VoucherType>(editingVoucher ? editingVoucher.type : 'Payment');
+  const [date, setDate] = useState(editingVoucher ? format(editingVoucher.date, 'yyyy-MM-dd') : new Date().toISOString().split('T')[0]);
+  const [vchNo, setVchNo] = useState(editingVoucher ? editingVoucher.voucherNumber : `V-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [items, setItems] = useState<VoucherItem[]>(editingVoucher ? JSON.parse(JSON.stringify(editingVoucher.items)) : [
     { accountId: '', accountName: '', amount: 0, type: 'Dr' },
     { accountId: '', accountName: '', amount: 0, type: 'Cr' }
   ]);
-  const [narration, setNarration] = useState('');
+  const [narration, setNarration] = useState(editingVoucher ? editingVoucher.narration : '');
   const [submitting, setSubmitting] = useState(false);
 
   const sortedAccounts = useMemo(() => {
@@ -2146,52 +2296,102 @@ function VoucherEntryModal({ onClose, accounts, franchiseId }: { onClose: () => 
     try {
       await runTransaction(db, async (transaction) => {
         // --- 1. ALL READS FIRST ---
-        const accDocs = await Promise.all(items.map(async (item) => {
-          const accRef = doc(db, 'accounts', item.accountId);
+        const oldItems = editingVoucher?.items || [];
+        const uniqueAccountIds = Array.from(new Set([
+          ...items.map(item => item.accountId),
+          ...oldItems.map(item => item.accountId)
+        ])).filter(Boolean);
+
+        const accDocMap: Record<string, { ref: any, data: any }> = {};
+        for (const accId of uniqueAccountIds) {
+          const accRef = doc(db, 'accounts', accId);
           const accDoc = await transaction.get(accRef);
-          return { item, accRef, accDoc };
-        }));
+          if (accDoc.exists()) {
+            accDocMap[accId] = { ref: accRef, data: accDoc.data() };
+          }
+        }
 
         // --- 2. VALIDATE & CALCULATE BALANCES ---
-        const updates: { ref: any, newBalance: number }[] = [];
-        for (const { item, accDoc } of accDocs) {
-          if (accDoc.exists()) {
-            const accData = accDoc.data();
-            let newBalance = accData.currentBalance || 0;
+        const balanceUpdates: Record<string, number> = {};
+        for (const accId of uniqueAccountIds) {
+          if (accDocMap[accId]) {
+            balanceUpdates[accId] = accDocMap[accId].data.currentBalance || 0;
+          }
+        }
+
+        // A. REVERSE previous voucher items (if editing)
+        if (editingVoucher) {
+          for (const item of oldItems) {
+            if (!item.accountId || !accDocMap[item.accountId]) continue;
+            const accData = accDocMap[item.accountId].data;
+            const balanceType = accData.balanceType || 'Dr';
             
             if (item.type === 'Dr') {
-              newBalance += (accData.balanceType === 'Dr' ? item.amount : -item.amount);
+              balanceUpdates[item.accountId] -= (balanceType === 'Dr' ? item.amount : -item.amount);
             } else {
-              newBalance += (accData.balanceType === 'Cr' ? item.amount : -item.amount);
+              balanceUpdates[item.accountId] -= (balanceType === 'Cr' ? item.amount : -item.amount);
             }
+          }
+        }
 
-            // Validation: Cash/Bank should not go negative
-            if (accData.balanceType === 'Dr' && (accData.name === 'Cash' || accData.name === 'Bank Account' || accData.name === 'Petrol Pump')) {
-              if (newBalance < 0) {
-                throw new Error(`INSUFFICIENT_FUNDS:${accData.name}:${accData.currentBalance || 0}`);
-              }
+        // B. APPLY new voucher items
+        for (const item of items) {
+          if (!item.accountId || !accDocMap[item.accountId]) continue;
+          const accData = accDocMap[item.accountId].data;
+          const balanceType = accData.balanceType || 'Dr';
+
+          if (item.type === 'Dr') {
+            balanceUpdates[item.accountId] += (balanceType === 'Dr' ? item.amount : -item.amount);
+          } else {
+            balanceUpdates[item.accountId] += (balanceType === 'Cr' ? item.amount : -item.amount);
+          }
+        }
+
+        // C. VALIDATION: Check for negative cash/bank balances
+        for (const accId of uniqueAccountIds) {
+          if (!accDocMap[accId]) continue;
+          const accData = accDocMap[accId].data;
+          const newBalance = balanceUpdates[accId];
+          
+          if (accData.balanceType === 'Dr' && (accData.name === 'Cash' || accData.name === 'Bank Account' || accData.name === 'Petrol Pump')) {
+            if (newBalance < 0) {
+              throw new Error(`INSUFFICIENT_FUNDS:${accData.name}:${accData.currentBalance || 0}`);
             }
-            updates.push({ ref: accDoc.ref, newBalance });
           }
         }
 
         // --- 3. EXECUTE WRITES ---
-        for (const update of updates) {
-          transaction.update(update.ref, { currentBalance: update.newBalance });
+        for (const accId of uniqueAccountIds) {
+          if (accDocMap[accId]) {
+            transaction.update(accDocMap[accId].ref, { currentBalance: balanceUpdates[accId] });
+          }
         }
 
         // --- 4. SAVE VOUCHER ---
-        const vchRef = doc(collection(db, 'vouchers'));
-        transaction.set(vchRef, {
-          date: new Date(date),
-          type: vchType,
-          voucherNumber: vchNo,
-          items,
-          narration,
-          totalAmount: totals.dr,
-          franchiseId: franchiseId || null,
-          createdAt: serverTimestamp()
-        });
+        if (editingVoucher) {
+          const vchRef = doc(db, 'vouchers', editingVoucher.id);
+          transaction.update(vchRef, {
+            date: new Date(date),
+            type: vchType,
+            voucherNumber: vchNo,
+            items,
+            narration,
+            totalAmount: totals.dr,
+            updatedAt: serverTimestamp()
+          });
+        } else {
+          const vchRef = doc(collection(db, 'vouchers'));
+          transaction.set(vchRef, {
+            date: new Date(date),
+            type: vchType,
+            voucherNumber: vchNo,
+            items,
+            narration,
+            totalAmount: totals.dr,
+            franchiseId: franchiseId || null,
+            createdAt: serverTimestamp()
+          });
+        }
       });
 
       onClose();
@@ -2513,7 +2713,7 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
               onChange={e => setGroupId(e.target.value)}
             >
               <option value="">Select Group...</option>
-              {groups.map(g => (
+              {[...groups].sort((a,b) => a.name.localeCompare(b.name)).map(g => (
                 <option key={g.id} value={g.id}>{g.name}</option>
               ))}
             </select>
@@ -2564,11 +2764,12 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
 }
 
 /** Ledger Statements View */
-function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: Account[], vouchers: Voucher[], onDeleteVoucher: (id: string) => Promise<void> }) {
+function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, groups }: { accounts: Account[], vouchers: Voucher[], onDeleteVoucher: (id: string) => Promise<void>, onEditVoucher: (vch: Voucher) => void, groups: AccountGroup[] }) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [hiddenRows, setHiddenRows] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
   const filteredSortedAccounts = useMemo(() => {
     return [...accounts]
@@ -2678,7 +2879,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
     doc.setFontSize(20);
     doc.text('TankerWala Powered by Rajhans', 14, 20);
     doc.setFontSize(12);
-    doc.text(`Ledger Account: ${acc.name}`, 14, 30);
+    doc.text(`Ledger Account: ${sanitizePdfText(acc.name)}`, 14, 30);
     doc.setFontSize(10);
     doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 36);
 
@@ -2686,7 +2887,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
       .filter(row => !row.isHidden)
       .map(row => [
         row.date ? format(row.date, 'dd/MM/yyyy') : '-',
-        row.particulars + (row.vchNo ? ` (${row.vchType} #${row.vchNo})` : ''),
+        sanitizePdfText(row.particulars + (row.vchNo ? ` (${row.vchType} #${row.vchNo})` : '')),
         row.dr > 0 ? row.dr.toLocaleString('en-IN') : '',
         row.cr > 0 ? row.cr.toLocaleString('en-IN') : '',
         `${row.balance.toLocaleString('en-IN')} ${row.balType}`
@@ -2705,6 +2906,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
       }
     });
 
+    addSwanWatermarkToPDF(doc);
     doc.save(`Ledger_${acc.name}_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
   };
 
@@ -2751,9 +2953,21 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
             <div className="p-8 border-b border-slate-50 flex items-center justify-between print:hidden">
               <div>
-                <h3 className="text-2xl font-display font-black text-slate-900">
-                  {accounts.find(a => a.id === selectedAccountId)?.name}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-2xl font-display font-black text-slate-900">
+                    {accounts.find(a => a.id === selectedAccountId)?.name}
+                  </h3>
+                  <button
+                    onClick={() => {
+                      const acc = accounts.find(a => a.id === selectedAccountId);
+                      if (acc) setEditingAccount(acc);
+                    }}
+                    className="p-1.5 hover:bg-blue-55 hover:text-blue-600 text-slate-400 rounded-lg transition-colors cursor-pointer"
+                    title="Edit Account Name/Group (खाता संपादित करें)"
+                  >
+                    <Edit2 size={16} />
+                  </button>
+                </div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Account Statement (Historical)</p>
               </div>
               <button onClick={async () => {
@@ -2810,16 +3024,27 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
                       </td>
                       <td className="p-4 pr-8 text-center print:hidden">
                         {row.id !== 'OP' ? (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteVoucher(row.id);
-                            }}
-                            className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
-                            title="Delete Transaction Entry"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          <div className="flex justify-center items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => {
+                                const vch = vouchers.find(v => v.id === row.id);
+                                if (vch) onEditVoucher(vch);
+                              }}
+                              className="p-1.5 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Transaction Entry"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                onDeleteVoucher(row.id);
+                              }}
+                              className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Transaction Entry"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-xs text-slate-300 font-bold font-mono">-</span>
                         )}
@@ -2840,6 +3065,14 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher }: { accounts: A
           </div>
         )}
       </div>
+
+      {editingAccount && (
+        <AccountEditModal 
+          account={editingAccount} 
+          groups={groups} 
+          onClose={() => setEditingAccount(null)} 
+        />
+      )}
     </div>
   );
 }
@@ -2849,15 +3082,22 @@ function AccountSetup({
   accounts, 
   groups, 
   vouchers, 
-  onAddAccount 
+  onAddAccount,
+  franchiseId
 }: { 
   accounts: Account[], 
   groups: AccountGroup[], 
   vouchers: Voucher[], 
-  onAddAccount: () => void 
+  onAddAccount: () => void,
+  franchiseId?: string
 }) {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [deletingAccount, setDeletingAccount] = useState<Account | null>(null);
+  
+  // Group States
+  const [viewMode, setViewMode] = useState<'ledgers' | 'groups'>('ledgers');
+  const [editingGroup, setEditingGroup] = useState<AccountGroup | null>(null);
+  const [isAddingGroup, setIsAddingGroup] = useState(false);
 
   // Filter out duplicate or empty account groups dynamically
   const filteredGroups = useMemo(() => {
@@ -2883,91 +3123,353 @@ function AccountSetup({
     return uniqueGroups.sort((a, b) => a.name.localeCompare(b.name));
   }, [groups, accounts]);
 
+  const hasSubgroups = (groupName: string) => {
+    return groups.some(g => g.parentGroupId === groupName);
+  };
+
+  const hasAccountsInGroup = (groupId: string) => {
+    return accounts.some(a => a.groupId === groupId);
+  };
+
+  const handleDeleteGroup = async (group: AccountGroup) => {
+    if (hasSubgroups(group.name)) {
+      alert(`Cannot delete group "${group.name}" because it contains other subgroups (e.g. Under ${group.name}). Please delete or reassign those subgroups first.`);
+      return;
+    }
+    if (hasAccountsInGroup(group.id!)) {
+      alert(`Cannot delete group "${group.name}" because it contains active ledger accounts. Please delete or reassign those accounts first.`);
+      return;
+    }
+    if (confirm(`Are you sure you want to delete the account group "${group.name}"?`)) {
+      try {
+        await deleteDoc(doc(db, 'accountGroups', group.id!));
+      } catch (error) {
+        alert(`Error deleting group: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
-       <div className="flex items-center justify-between">
-         <div>
-           <h3 className="text-lg font-display font-black text-slate-900">Chart of Accounts</h3>
-           <p className="text-xs text-slate-500 font-sans">Hover or tap on any account card to edit name, group, or delete.</p>
-         </div>
-         <button 
-           onClick={onAddAccount}
-           className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black flex items-center gap-2 shadow-lg active:scale-95 transition-all text-sm cursor-pointer"
-         >
-           <Plus size={18} /> New Ledger
-         </button>
-       </div>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-display font-black text-slate-900">Chart & Group Setup</h3>
+            <p className="text-xs text-slate-500 font-sans">Manage your ledger accounts (ledgers) and custom structural categories (groups).</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex bg-slate-100 p-1 rounded-2xl">
+              <button
+                onClick={() => setViewMode('ledgers')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${viewMode === 'ledgers' ? 'bg-white text-slate-900 shadow-sm font-black' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                📁 Ledger Accounts (खाते)
+              </button>
+              <button
+                onClick={() => setViewMode('groups')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${viewMode === 'groups' ? 'bg-white text-slate-900 shadow-sm font-black' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                🏷️ Account Groups (ग्रुप्स)
+              </button>
+            </div>
+            {viewMode === 'groups' && (
+              <button 
+                onClick={() => setIsAddingGroup(true)}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold flex items-center gap-2 shadow-md active:scale-95 transition-all text-xs cursor-pointer"
+              >
+                <Plus size={14} /> New Group
+              </button>
+            )}
+            <button 
+              onClick={onAddAccount}
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black flex items-center gap-2 shadow-lg active:scale-95 transition-all text-xs cursor-pointer animate-pulse"
+            >
+              <Plus size={16} /> New Ledger Account
+            </button>
+          </div>
+        </div>
 
-       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-         {filteredGroups.map(g => {
-           const groupAccounts = accounts.filter(a => a.groupId === g.id).sort((a,b) => a.name.localeCompare(b.name));
-           return (
-             <div key={g.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-50 pb-3">
-                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">{g.name}</h4>
-                  <span className="text-[10px] font-bold text-slate-400 px-2 py-0.5 bg-slate-50 rounded-full">{g.type}</span>
+        {viewMode === 'ledgers' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {filteredGroups.map(g => {
+              const groupAccounts = accounts.filter(a => a.groupId === g.id).sort((a,b) => a.name.localeCompare(b.name));
+              return (
+                <div key={g.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
+                   <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+                     <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">{g.name}</h4>
+                     <span className="text-[10px] font-bold text-slate-400 px-2 py-0.5 bg-slate-50 rounded-full">{g.type}</span>
+                   </div>
+                   <div className="space-y-1">
+                     {groupAccounts.map(a => (
+                       <div key={a.id} className="flex justify-between items-center text-sm p-2 rounded-xl hover:bg-slate-50 transition-all group/item">
+                         <div className="flex flex-col min-w-0 pr-2">
+                           <span className="font-bold text-slate-700 truncate max-w-[150px]">{a.name}</span>
+                           {a.openingBalance > 0 && (
+                             <span className="text-[9px] font-bold text-slate-400 uppercase">
+                               Op: {formatCurrency(a.openingBalance)} ({a.balanceType})
+                             </span>
+                           )}
+                         </div>
+                         <div className="flex items-center gap-1.5 ml-auto">
+                           <span className="text-slate-500 font-mono text-xs font-bold group-hover/item:hidden">
+                             {formatCurrency(a.currentBalance || 0)}
+                           </span>
+                           
+                           {/* Interactive edit, change group & delete options */}
+                           <div className="hidden group-hover/item:flex items-center gap-1">
+                             <button 
+                               title="Edit Ledger Settings (खाता संपादित करें)"
+                               onClick={() => setEditingAccount(a)}
+                               className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-all cursor-pointer"
+                             >
+                               <Edit2 size={12} />
+                             </button>
+                             <button 
+                               title="Delete Ledger (खाता हटाएं)"
+                               onClick={() => setDeletingAccount(a)}
+                               className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-all cursor-pointer"
+                             >
+                               <Trash2 size={12} />
+                             </button>
+                           </div>
+                         </div>
+                       </div>
+                     ))}
+                     {groupAccounts.length === 0 && <p className="text-xs text-slate-300 italic p-2">No accounts yet</p>}
+                   </div>
                 </div>
-                <div className="space-y-1">
-                  {groupAccounts.map(a => (
-                    <div key={a.id} className="flex justify-between items-center text-sm p-2 rounded-xl hover:bg-slate-50 transition-all group/item">
-                      <div className="flex flex-col min-w-0 pr-2">
-                        <span className="font-bold text-slate-700 truncate max-w-[150px]">{a.name}</span>
-                        {a.openingBalance > 0 && (
-                          <span className="text-[9px] font-bold text-slate-400 uppercase">
-                            Op: {formatCurrency(a.openingBalance)} ({a.balanceType})
+              );
+            })}
+          </div>
+        ) : (
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 border-b border-slate-100">
+                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-8">Group Name</th>
+                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Parent Group (Under)</th>
+                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Type</th>
+                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Accounts Count</th>
+                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center pr-8">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {[...groups].sort((a,b) => a.name.localeCompare(b.name)).map(g => {
+                    const accCount = accounts.filter(a => a.groupId === g.id).length;
+                    const hasSub = hasSubgroups(g.name);
+                    return (
+                      <tr key={g.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="p-4 pl-8 text-sm font-bold text-slate-800">{g.name}</td>
+                        <td className="p-4 text-sm font-semibold text-slate-500">{g.parentGroupId || <span className="text-[10px] text-slate-300 italic">Primary (Root)</span>}</td>
+                        <td className="p-4">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                            g.type === 'Asset' ? 'bg-emerald-50 text-emerald-600' :
+                            g.type === 'Liability' ? 'bg-red-50 text-red-600' :
+                            g.type === 'Equity' ? 'bg-indigo-50 text-indigo-600' :
+                            g.type === 'Income' ? 'bg-blue-50 text-blue-600' :
+                            'bg-orange-50 text-orange-600'
+                          }`}>
+                            {g.type}
                           </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 ml-auto">
-                        <span className="text-slate-500 font-mono text-xs font-bold group-hover/item:hidden">
-                          {formatCurrency(a.currentBalance || 0)}
-                        </span>
-                        
-                        {/* Interactive edit, change group & delete options */}
-                        <div className="hidden group-hover/item:flex items-center gap-1">
-                          <button 
-                            title="Edit Ledger Settings (खाता संपादित करें)"
-                            onClick={() => setEditingAccount(a)}
-                            className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-all cursor-pointer"
-                          >
-                            <Edit2 size={12} />
-                          </button>
-                          <button 
-                            title="Delete Ledger (खाता हटाएं)"
-                            onClick={() => setDeletingAccount(a)}
-                            className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-all cursor-pointer"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {groupAccounts.length === 0 && <p className="text-xs text-slate-300 italic p-2">No accounts yet</p>}
-                </div>
-             </div>
-           );
-         })}
-       </div>
+                        </td>
+                        <td className="p-4 text-center text-sm font-bold text-slate-600">{accCount}</td>
+                        <td className="p-4 pr-8 text-center">
+                          <div className="flex justify-center items-center gap-1.5">
+                            <button
+                              onClick={() => setEditingGroup(g)}
+                              className="p-1.5 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Account Group"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteGroup(g)}
+                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                accCount > 0 || hasSub
+                                  ? 'text-slate-200 cursor-not-allowed' 
+                                  : 'hover:bg-red-50 text-slate-400 hover:text-red-600'
+                              }`}
+                              disabled={accCount > 0 || hasSub}
+                              title={accCount > 0 || hasSub ? "Cannot delete: contains active accounts or subgroups" : "Delete Account Group"}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
-       {/* Sub-modals for editing name / group, or deleting */}
-       <AnimatePresence>
-         {editingAccount && (
-           <AccountEditModal 
-             account={editingAccount} 
-             groups={groups} 
-             onClose={() => setEditingAccount(null)} 
-           />
-         )}
-         {deletingAccount && (
-           <AccountDeleteConfirmationModal 
-             account={deletingAccount} 
-             vouchers={vouchers} 
-             onClose={() => setDeletingAccount(null)} 
-             onDeleteSuccess={() => setDeletingAccount(null)} 
-           />
-         )}
-       </AnimatePresence>
+        {/* Sub-modals for editing name / group, or deleting */}
+        <AnimatePresence>
+          {editingAccount && (
+            <AccountEditModal 
+              account={editingAccount} 
+              groups={groups} 
+              onClose={() => setEditingAccount(null)} 
+            />
+          )}
+          {deletingAccount && (
+            <AccountDeleteConfirmationModal 
+              account={deletingAccount} 
+              vouchers={vouchers} 
+              onClose={() => setDeletingAccount(null)} 
+              onDeleteSuccess={() => setDeletingAccount(null)} 
+            />
+          )}
+          {(isAddingGroup || editingGroup) && (
+            <GroupEntryModal 
+              onClose={() => {
+                setIsAddingGroup(false);
+                setEditingGroup(null);
+              }}
+              groups={groups}
+              franchiseId={franchiseId}
+              editingGroup={editingGroup || undefined}
+            />
+          )}
+        </AnimatePresence>
+    </div>
+  );
+}
+
+/** Group Entry / Edit Modal */
+function GroupEntryModal({ 
+  onClose, 
+  groups, 
+  franchiseId,
+  editingGroup 
+}: { 
+  onClose: () => void, 
+  groups: AccountGroup[], 
+  franchiseId?: string,
+  editingGroup?: AccountGroup 
+}) {
+  const [name, setName] = useState(editingGroup ? editingGroup.name : '');
+  const [parentGroupId, setParentGroupId] = useState(editingGroup ? editingGroup.parentGroupId || '' : '');
+  const [type, setType] = useState<'Asset' | 'Liability' | 'Income' | 'Expense' | 'Equity'>(editingGroup ? editingGroup.type as any : 'Asset');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+
+    const cleanName = name.trim();
+    
+    // Check for duplicate name (excluding itself if editing)
+    const isDuplicate = groups.some(g => 
+      (!editingGroup || g.id !== editingGroup.id) && 
+      g.name.toLowerCase().trim() === cleanName.toLowerCase()
+    );
+    if (isDuplicate) {
+      alert(`Error: A group with the name "${cleanName}" already exists!`);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      if (editingGroup) {
+        await updateDoc(doc(db, 'accountGroups', editingGroup.id!), {
+          name: cleanName,
+          parentGroupId: parentGroupId || null,
+          type,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await addDoc(collection(db, 'accountGroups'), {
+          name: cleanName,
+          parentGroupId: parentGroupId || null,
+          type,
+          franchiseId: franchiseId || null,
+          createdAt: serverTimestamp()
+        });
+      }
+      onClose();
+    } catch (error) {
+       handleFirestoreError(error, OperationType.WRITE, 'accountGroups');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden p-8"
+      >
+        <div className="flex justify-between items-center mb-8">
+           <div>
+             <h2 className="text-2xl font-display font-black text-slate-900">
+               {editingGroup ? 'Edit Group' : 'Create Group'}
+             </h2>
+             <p className="text-sm text-slate-500">
+               {editingGroup ? 'Modify account category properties' : 'Create custom Tally category'}
+             </p>
+           </div>
+           <button onClick={onClose} className="p-2 text-slate-300 hover:text-slate-900"><X /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Group Name</label>
+            <input 
+              required
+              className="w-full h-14 px-5 bg-slate-50 rounded-2xl text-base font-bold border-none outline-none focus:ring-2 focus:ring-slate-900/5 transition-all"
+              placeholder="e.g. Direct Expenses, Sundry Debtors"
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Group Type</label>
+            <select 
+              required
+              className="w-full h-14 px-5 bg-slate-50 rounded-2xl text-base font-bold border-none outline-none focus:ring-2 focus:ring-slate-900/5 transition-all appearance-none"
+              value={type}
+              onChange={e => setType(e.target.value as any)}
+            >
+              <option value="Asset">Asset (सम्पत्ति)</option>
+              <option value="Liability">Liability (दायित्व)</option>
+              <option value="Equity">Equity (पूंजी/इक्विटी)</option>
+              <option value="Income">Income (आय)</option>
+              <option value="Expense">Expense (खर्च)</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Parent Group (Under)</label>
+            <select 
+              className="w-full h-14 px-5 bg-slate-50 rounded-2xl text-base font-bold border-none outline-none focus:ring-2 focus:ring-slate-900/5 transition-all appearance-none"
+              value={parentGroupId}
+              onChange={e => setParentGroupId(e.target.value)}
+            >
+              <option value="">Primary (No Parent)</option>
+              {[...groups]
+                .filter(g => !editingGroup || g.id !== editingGroup.id)
+                .sort((a,b) => a.name.localeCompare(b.name))
+                .map(g => (
+                  <option key={g.id} value={g.name}>{g.name} ({g.type})</option>
+                ))
+              }
+            </select>
+          </div>
+
+          <button 
+            disabled={submitting}
+            className="w-full h-16 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-display font-black text-lg shadow-xl shadow-slate-200 transition-all active:scale-[0.98] disabled:bg-slate-100 disabled:text-slate-300"
+          >
+            {submitting ? 'Saving Group...' : 'Save Group'}
+          </button>
+        </form>
+      </motion.div>
     </div>
   );
 }
@@ -3053,7 +3555,7 @@ function AccountEditModal({
               onChange={e => setGroupId(e.target.value)}
             >
               <option value="">Select Group...</option>
-              {groups.map(g => (
+              {[...groups].sort((a,b) => a.name.localeCompare(b.name)).map(g => (
                 <option key={g.id} value={g.id}>{g.name} ({g.type})</option>
               ))}
             </select>
@@ -3191,7 +3693,8 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
   const [reportType, setReportType] = useState<'trial' | 'pl' | 'bs'>('trial');
   
   const getBal = (accountId: string) => {
-    const acc = accounts.find(a => a.id === accountId)!;
+    const acc = accounts.find(a => a.id === accountId);
+    if (!acc) return 0;
     let balance = acc.balanceType === 'Dr' ? acc.openingBalance : -acc.openingBalance;
     vouchers.forEach(v => {
       v.items.forEach(item => {
@@ -3261,7 +3764,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
 
     if (reportType === 'trial') {
       const tableData = trialBalance.map(a => [
-        a.name,
+        sanitizePdfText(a.name),
         a.dr > 0 ? a.dr.toLocaleString('en-IN') : '',
         a.cr > 0 ? a.cr.toLocaleString('en-IN') : ''
       ]);
@@ -3291,9 +3794,9 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
         const income = plData.incomes[i];
         const expense = plData.expenses[i];
         tableData.push([
-          expense?.name || '',
+          expense?.name ? sanitizePdfText(expense.name) : '',
           expense?.amount ? expense.amount.toLocaleString('en-IN') : '',
-          income?.name || '',
+          income?.name ? sanitizePdfText(income.name) : '',
           income?.amount ? income.amount.toLocaleString('en-IN') : ''
         ]);
       }
@@ -3328,15 +3831,15 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
       
       const libItems: any[] = [];
       liabilities.forEach(g => {
-        const bal = accounts.filter(a => a.groupId === g.id).reduce((s, a) => s + Math.abs(getBal(a.id!)), 0);
-        if (bal > 0) libItems.push({ name: g.name, bal });
+        const bal = -accounts.filter(a => a.groupId === g.id).reduce((s, a) => s + getBal(a.id!), 0);
+        if (bal !== 0) libItems.push({ name: g.name, bal });
       });
       if (plData.net > 0) libItems.push({ name: 'Profit & Loss A/c (Profit)', bal: plData.net });
       
       const assetItems: any[] = [];
       assets.forEach(g => {
-        const bal = accounts.filter(a => a.groupId === g.id).reduce((s, a) => s + Math.abs(getBal(a.id!)), 0);
-        if (bal > 0) assetItems.push({ name: g.name, bal });
+        const bal = accounts.filter(a => a.groupId === g.id).reduce((s, a) => s + getBal(a.id!), 0);
+        if (bal !== 0) assetItems.push({ name: g.name, bal });
       });
       if (plData.net < 0) assetItems.push({ name: 'Profit & Loss A/c (Loss)', bal: Math.abs(plData.net) });
       
@@ -3344,9 +3847,9 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
       const tableData = [];
       for (let i = 0; i < maxLength; i++) {
         tableData.push([
-          libItems[i]?.name || '',
+          libItems[i]?.name ? sanitizePdfText(libItems[i].name) : '',
           libItems[i]?.bal ? libItems[i].bal.toLocaleString('en-IN') : '',
-          assetItems[i]?.name || '',
+          assetItems[i]?.name ? sanitizePdfText(assetItems[i].name) : '',
           assetItems[i]?.bal ? assetItems[i].bal.toLocaleString('en-IN') : ''
         ]);
       }
@@ -3369,6 +3872,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
       });
     }
 
+    addSwanWatermarkToPDF(doc);
     doc.save(`${reportType.toUpperCase()}_Report_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
   };
 
@@ -3487,7 +3991,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
               <div className="space-y-4">
                 {groups.filter(g => g.type === 'Liability' || g.type === 'Equity').sort((a, b) => a.name.localeCompare(b.name)).map(g => {
                   const grpAccs = accounts.filter(a => a.groupId === g.id).sort((a, b) => a.name.localeCompare(b.name));
-                  const bal = grpAccs.reduce((s, a) => s + Math.abs(getBal(a.id!)), 0);
+                  const bal = -grpAccs.reduce((s, a) => s + getBal(a.id!), 0);
                   if (bal === 0) return null;
                   return (
                     <div key={g.id} className="space-y-1">
@@ -3495,12 +3999,16 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
                         <span>{g.name}</span>
                         <span>{formatCurrency(bal)}</span>
                       </div>
-                      {grpAccs.map(a => (
-                        <div key={a.id} className="flex justify-between text-[10px] text-slate-400 font-bold pl-4">
-                          <span>{a.name}</span>
-                          <span>{formatCurrency(Math.abs(getBal(a.id!)))}</span>
-                        </div>
-                      ))}
+                      {grpAccs.map(a => {
+                        const aBal = -getBal(a.id!);
+                        if (aBal === 0) return null;
+                        return (
+                          <div key={a.id} className="flex justify-between text-[10px] text-slate-400 font-bold pl-4">
+                            <span>{a.name}</span>
+                            <span>{formatCurrency(aBal)}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -3513,7 +4021,11 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
                 <span>Total Liabilities</span>
                 <span>{formatCurrency(
                   groups.filter(g => g.type === 'Liability' || g.type === 'Equity')
-                    .reduce((s, g) => s + accounts.filter(a => a.groupId === g.id).reduce((s2, a) => s2 + Math.abs(getBal(a.id!)), 0), 0) + 
+                    .reduce((s, g) => {
+                      const grpAccs = accounts.filter(a => a.groupId === g.id);
+                      const sum = grpAccs.reduce((s2, a) => s2 + getBal(a.id!), 0);
+                      return s + (-sum);
+                    }, 0) + 
                   Math.max(0, plData.net)
                 )}</span>
               </div>
@@ -3524,7 +4036,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
               <div className="space-y-4">
                 {groups.filter(g => g.type === 'Asset').sort((a, b) => a.name.localeCompare(b.name)).map(g => {
                   const grpAccs = accounts.filter(a => a.groupId === g.id).sort((a, b) => a.name.localeCompare(b.name));
-                  const bal = grpAccs.reduce((s, a) => s + Math.abs(getBal(a.id!)), 0);
+                  const bal = grpAccs.reduce((s, a) => s + getBal(a.id!), 0);
                   if (bal === 0) return null;
                   return (
                     <div key={g.id} className="space-y-1">
@@ -3532,12 +4044,16 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
                         <span>{g.name}</span>
                         <span>{formatCurrency(bal)}</span>
                       </div>
-                      {grpAccs.map(a => (
-                        <div key={a.id} className="flex justify-between text-[10px] text-slate-400 font-bold pl-4">
-                          <span>{a.name}</span>
-                          <span>{formatCurrency(Math.abs(getBal(a.id!)))}</span>
-                        </div>
-                      ))}
+                      {grpAccs.map(a => {
+                        const aBal = getBal(a.id!);
+                        if (aBal === 0) return null;
+                        return (
+                          <div key={a.id} className="flex justify-between text-[10px] text-slate-400 font-bold pl-4">
+                            <span>{a.name}</span>
+                            <span>{formatCurrency(aBal)}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -3550,7 +4066,11 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
                 <span>Total Assets</span>
                 <span>{formatCurrency(
                   groups.filter(g => g.type === 'Asset')
-                    .reduce((s, g) => s + accounts.filter(a => a.groupId === g.id).reduce((s2, a) => s2 + Math.abs(getBal(a.id!)), 0), 0) + 
+                    .reduce((s, g) => {
+                      const grpAccs = accounts.filter(a => a.groupId === g.id);
+                      const sum = grpAccs.reduce((s2, a) => s2 + getBal(a.id!), 0);
+                      return s + sum;
+                    }, 0) + 
                   Math.abs(Math.min(0, plData.net))
                 )}</span>
               </div>
@@ -4388,13 +4908,13 @@ function TallySyncWorkspace({
         { name: 'Laxmikant Pipe Suppliers', groupName: 'Sundry Creditors', openingBalance: 45000, balanceType: 'Cr' },
         { name: 'Rajendra Tractor Repairs', groupName: 'Sundry Creditors', openingBalance: 14000, balanceType: 'Cr' },
         { name: 'Bank of Baroda Operating A/c', groupName: 'Bank Accounts', openingBalance: 350000, balanceType: 'Dr' },
-        { name: 'SBI Capital Term Loan', groupName: 'Current Liabilities', openingBalance: 430000, balanceType: 'Cr' },
+        { name: 'SBI Capital Term Loan', groupName: 'Secured Loans', openingBalance: 430000, balanceType: 'Cr' },
         { name: 'Petty Cash Box Balance A/c', groupName: 'Cash-in-hand', openingBalance: 42000, balanceType: 'Dr' },
         { name: 'Driver Wages Outstanding Box', groupName: 'Current Liabilities', openingBalance: 38000, balanceType: 'Cr' },
         { name: 'Swan Enterprise Capital Reserve', groupName: 'Equity', openingBalance: 500000, balanceType: 'Cr' },
-        { name: 'Municipal Hydrant Tax Payable', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' },
+        { name: 'Municipal Hydrant Tax Payable', groupName: 'Current Liabilities', openingBalance: 0, balanceType: 'Cr' },
         { name: 'Borewell Machinery Depreciation', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' },
-        { name: 'Tractor Fuel Consumption A/c', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' },
+        { name: 'Tractor Fuel Consumption A/c', groupName: 'Direct Expenses', openingBalance: 0, balanceType: 'Dr' },
         { name: 'Borewell Electricity & Power', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' },
         { name: 'Staff Welfare Tea & Snacks Ledger', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' },
         { name: 'Commercial Tanker Sales Income', groupName: 'Direct Income', openingBalance: 0, balanceType: 'Cr' },
@@ -4418,7 +4938,7 @@ function TallySyncWorkspace({
       data: [
         { name: 'Shree Balaji Transfuels Sikar', groupName: 'Sundry Creditors', openingBalance: 23000, balanceType: 'Cr' },
         { name: 'Ashok Leyland Spares Hub', groupName: 'Sundry Creditors', openingBalance: 67000, balanceType: 'Cr' },
-        { name: 'Shriram Transportation Finance', groupName: 'Current Liabilities', openingBalance: 650000, balanceType: 'Cr' },
+        { name: 'Shriram Transportation Finance', groupName: 'Secured Loans', openingBalance: 650000, balanceType: 'Cr' },
         { name: 'SBI Cash Credit Hypothecation', groupName: 'Bank Accounts', openingBalance: 430000, balanceType: 'Cr' },
         { name: 'Petty Cash Box (Drivers)', groupName: 'Cash-in-hand', openingBalance: 8500, balanceType: 'Dr' },
         { name: 'National Heavy Vehicle Insurance', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' },
@@ -4429,15 +4949,15 @@ function TallySyncWorkspace({
         { name: 'Suresh Kumar Tractor Hire Service', groupName: 'Sundry Creditors', openingBalance: 32000, balanceType: 'Cr' },
         { name: 'Amara Raja Heavy Battery Dealers', groupName: 'Sundry Creditors', openingBalance: 18000, balanceType: 'Cr' },
         { name: 'Apollo Tyres Commercial Zone', groupName: 'Sundry Creditors', openingBalance: 98000, balanceType: 'Cr' },
-        { name: 'Tractor Mobil Oil & Lubricants', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' },
-        { name: 'Water Tanker Iron Welding Works', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' },
+        { name: 'Tractor Mobil Oil & Lubricants', groupName: 'Direct Expenses', openingBalance: 0, balanceType: 'Dr' },
+        { name: 'Water Tanker Iron Welding Works', groupName: 'Direct Expenses', openingBalance: 0, balanceType: 'Dr' },
         { name: 'Rajasthan Road Development Corp', groupName: 'Sundry Debtors', openingBalance: 112000, balanceType: 'Dr' },
         { name: 'Sikar Cement Concrete Products', groupName: 'Sundry Debtors', openingBalance: 47000, balanceType: 'Dr' },
         { name: 'Gopal Lal Driver Sikar Log', groupName: 'Current Liabilities', openingBalance: 12000, balanceType: 'Cr' },
         { name: 'Mahesh Sharma Driver Sikar Log', groupName: 'Current Liabilities', openingBalance: 15000, balanceType: 'Cr' },
         { name: 'Tractor Renting Revenue Ledger', groupName: 'Direct Income', openingBalance: 0, balanceType: 'Cr' },
         { name: 'Bulk Site Logistics Receipts', groupName: 'Direct Income', openingBalance: 0, balanceType: 'Cr' },
-        { name: 'Driver Night Halting Allowance', groupName: 'Indirect Expenses', openingBalance: 0, balanceType: 'Dr' }
+        { name: 'Driver Night Halting Allowance', groupName: 'Direct Expenses', openingBalance: 0, balanceType: 'Dr' }
       ]
     },
     {
@@ -5144,8 +5664,15 @@ User Legacy Description:
         'direct expenses': 'Direct Expenses',
         'current liabilities': 'Current Liabilities',
         'liabilities': 'Current Liabilities',
-        'equity': 'Assets', // standard fallback if Equity isn't present
-        'assets': 'Assets'
+        'equity': 'Equity',
+        'assets': 'Assets',
+        'fixed assets': 'Fixed Assets',
+        'secured loans': 'Secured Loans',
+        'duties & taxes': 'Duties & Taxes',
+        'duties and taxes': 'Duties & Taxes',
+        'stock-in-hand': 'Stock-in-hand',
+        'provisions': 'Current Liabilities',
+        'suspense': 'Suspense Accounts'
       };
 
       setSyncSteps(prev => [

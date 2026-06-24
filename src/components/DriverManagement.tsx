@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, deleteDoc, doc, where, getDocs, runTransaction, serverTimestamp, updateDoc, getDoc } from 'firebase/firestore';
 import { Driver, Account } from '../types';
-import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Download, UserPlus, UserMinus, FileText, IndianRupee, CheckCircle2, Minus, AlertCircle, Lock, Edit2 } from 'lucide-react';
+import { Plus, Phone, User, Trash2, X, Truck, Navigation, Share2, Download, UserPlus, UserMinus, FileText, IndianRupee, CheckCircle2, Minus, AlertCircle, Lock, Edit2, LayoutDashboard } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmationModal } from './ConfirmationModal';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { addSwanWatermarkToPDF } from '../lib/pdfUtils';
 
 export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [isAdding, setIsAdding] = useState(false);
@@ -205,6 +206,16 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
     }
   };
 
+  const toggleDashboardAccess = async (id: string, currentVal: boolean) => {
+    try {
+      await updateDoc(doc(db, 'drivers', id), {
+        showDashboardToDriver: !currentVal
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `drivers/${id}`);
+    }
+  };
+
   const toggleDriverStatus = async (id: string, newStatus: 'Active' | 'Inactive' | 'approved' | 'pending') => {
     try {
       if (newStatus === 'approved') {
@@ -288,7 +299,8 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
         mobile: editingDriver.mobile.replace(/\D/g, ''),
         email: editingDriver.email.trim().toLowerCase(),
         monthlySalary: Number(editingDriver.monthlySalary) || 0,
-        pin: editingDriver.pin || '1234'
+        pin: editingDriver.pin || '1234',
+        showDashboardToDriver: !!editingDriver.showDashboardToDriver
       });
 
       // Synchronize associated account name in Ledger
@@ -342,6 +354,7 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
       margin: { top: 40 },
     });
 
+    addSwanWatermarkToPDF(pdfDoc);
     pdfDoc.save(`TankerWala_${activeTab}_Drivers_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
@@ -464,6 +477,15 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
                         <UserMinus size={12} /> Inactive
                       </div>
                     )}
+                    {driver.showDashboardToDriver !== false ? (
+                      <div className="flex items-center gap-1 text-emerald-600 px-2 py-1 bg-emerald-50 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-emerald-100">
+                        <LayoutDashboard size={12} /> Dashboard ON
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 text-slate-400 px-2 py-1 bg-slate-50 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-slate-100">
+                        <LayoutDashboard size={12} /> Dashboard OFF
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex gap-1">
@@ -477,6 +499,20 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
                       title="Show PIN"
                     >
                       <Lock size={18} />
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleDashboardAccess(driver.id!, driver.showDashboardToDriver !== false);
+                      }}
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all active:scale-95 ${
+                        driver.showDashboardToDriver !== false 
+                          ? 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100' 
+                          : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-slate-100'
+                      }`}
+                      title={driver.showDashboardToDriver !== false ? "Turn Off Driver App Dashboard" : "Turn On Driver App Dashboard"}
+                    >
+                      <LayoutDashboard size={18} />
                     </button>
                     {activeTab === 'pending' ? (
                       <button 
@@ -875,6 +911,24 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
                       className="w-full h-12 bg-slate-50 rounded-xl px-4 border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-bold text-sm"
                     />
                   </div>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between mt-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center">
+                      <LayoutDashboard size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-700">Driver Portal Dashboard</h4>
+                      <p className="text-[10px] text-slate-400">Show salary, ledger, attendance & leaderboard to driver</p>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={!!editingDriver.showDashboardToDriver}
+                    onChange={(e) => setEditingDriver({ ...editingDriver, showDashboardToDriver: e.target.checked })}
+                    className="w-5 h-5 text-blue-600 bg-slate-200 border-none rounded focus:ring-0 cursor-pointer"
+                  />
                 </div>
 
                 <div className="flex gap-3 mt-4">

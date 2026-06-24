@@ -1218,11 +1218,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [isWiping, setIsWiping] = useState(false);
   const isAdmin = isSuperAdmin || !!franchiseId;
   const isMilan = isSuperAdmin || (franchiseId === 'legacy-rajhans');
-  // Allow Rajhans main account also for system maintenance unless disabled by Super Admin
-  const isSystemAdmin = isSuperAdmin || (
-    (isMilan || currentFranchise?.email === 'rajhanssikar@gmail.com') &&
-    (franchiseDetail?.allowSystemMaintenance !== false && currentFranchise?.allowSystemMaintenance !== false)
-  );
+  // System maintenance is strictly restricted to Milan Sharma (Super Admin)
+  const isSystemAdmin = auth.currentUser?.email?.toLowerCase() === 'milan.sharma6565@gmail.com';
 
   const handleSaveBillEdits = async () => {
     if (!editingBill?.id || isSavingEdit) return;
@@ -3942,8 +3939,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                       {bill.customerName}
                     </span>
                     {bill.customerMobile && (
-                      <span className="px-1.5 py-0.5 bg-emerald-150 border border-emerald-300 text-emerald-800 font-mono text-[9px] font-black rounded shadow-xs leading-none flex items-center gap-1 select-all hover:bg-emerald-200 transition-colors" title="Customer mobile number (Tap to copy)">
-                        <Smartphone size={10} className="text-emerald-600 shrink-0" />
+                      <span className="px-2.5 py-1 bg-emerald-100 border-2 border-emerald-400 text-emerald-950 font-mono text-xs font-black rounded-lg shadow-sm leading-none flex items-center gap-1 select-all hover:bg-emerald-200 hover:border-emerald-500 transition-colors" title="Customer mobile number (Tap to copy)">
+                        <Smartphone size={13} className="text-emerald-700 shrink-0" />
                         {bill.customerMobile}
                       </span>
                     )}

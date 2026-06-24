@@ -5,7 +5,7 @@ import { Customer, Bill, LedgerEntry, Account } from '../types';
 import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare, Minus, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
-import { generatePDF } from '../lib/pdfUtils';
+import { generatePDF, addSwanWatermarkToPDF } from '../lib/pdfUtils';
 import { printThermalReceipt } from '../lib/printUtils';
 import { openWhatsAppDirect } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
@@ -327,6 +327,7 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
     });
 
     const fileName = onlyPending ? `TankerWala_Pending_Dues_${format(new Date(), 'dd_MMM')}.pdf` : 'TankerWala_Steel_Water_Customer_List.pdf';
+    addSwanWatermarkToPDF(doc);
     doc.save(fileName);
   };
 
@@ -1193,6 +1194,7 @@ function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: {
       doc.text(`Total Outstanding: ${pdfFormatCurrency(runningBalance)}`, 196, finalY, { align: 'right' });
 
       // Save and Share
+      addSwanWatermarkToPDF(doc);
       const pdfBlob = doc.output('blob');
       const fileName = `Hisab_${customer.name}_${format(new Date(), 'dd_MMM')}.pdf`;
       let file: any;

@@ -6,7 +6,7 @@ import { Download, Calendar, CheckSquare, ListFilter, MapPin, AlertCircle, Print
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { formatCurrency } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
-import { generatePDF } from '../lib/pdfUtils';
+import { generatePDF, addSwanWatermarkToPDF } from '../lib/pdfUtils';
 import { printThermalReceipt } from '../lib/printUtils';
 import { openWhatsAppDirect } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
@@ -233,6 +233,7 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
       doc.text("This report is securely compiled and transmitted to the owners of Rajhans Steels.", 105, 275, { align: 'center' });
       doc.text("Thank you for using TankerWala System.", 105, 280, { align: 'center' });
 
+      addSwanWatermarkToPDF(doc);
       doc.save(`Rajhans_EOD_Report_${data.date}.pdf`);
     } catch (e) {
       console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));

@@ -35,6 +35,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from '
 import { formatCurrency } from '../constants';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { addSwanWatermarkToPDF } from '../lib/pdfUtils';
 
 export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -323,8 +324,8 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
         stats.fullDays,
         stats.halfDays,
         stats.totalDays,
-        formatCurrency(driver.monthlySalary),
-        formatCurrency(salary)
+        `Rs. ${Math.round(driver.monthlySalary).toLocaleString('en-IN')}`,
+        `Rs. ${Math.round(salary).toLocaleString('en-IN')}`
       ];
     });
 
@@ -336,6 +337,7 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
       headStyles: { fillColor: '#1e293b' }
     });
 
+    addSwanWatermarkToPDF(doc);
     doc.save(`Attendance_${monthYear}.pdf`);
   };
 

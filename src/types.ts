@@ -288,6 +288,7 @@ export interface Driver {
   pin?: string;
   email?: string;
   createdAt?: any;
+  showDashboardToDriver?: boolean;
 }
 
 export type AttendanceStatus = 'Full Day' | 'Half Day' | 'Absent';

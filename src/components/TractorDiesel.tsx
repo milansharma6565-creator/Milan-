@@ -28,6 +28,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { addSwanWatermarkToPDF } from '../lib/pdfUtils';
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, format, subDays } from 'date-fns';
 import { ConfirmationModal } from './ConfirmationModal';
 
@@ -888,6 +889,7 @@ export function TractorDiesel({ franchiseId, isSuperAdmin }: { franchiseId?: str
       }
     }
 
+    addSwanWatermarkToPDF(doc);
     doc.save(`Tractor_Report_${periodLabel}_${now.getTime()}.pdf`);
     setShowReportModal(false);
   };

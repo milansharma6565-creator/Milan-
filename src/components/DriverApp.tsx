@@ -19,7 +19,14 @@ import {
   ClipboardList,
   Mail,
   Lock,
-  FlaskConical as Flask
+  FlaskConical as Flask,
+  LayoutDashboard,
+  Trophy,
+  Calendar,
+  TrendingUp,
+  Wallet,
+  DollarSign,
+  Award
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth, handleFirestoreError, OperationType, onAuthStateChanged, signInWithPopup, googleProvider, safeString } from '../firebase';
@@ -48,11 +55,44 @@ import { ledgerAutomation } from '../services/ledgerAutomation';
 
 import { WishesOverlay } from './WishesOverlay';
 
+const getSafeDateString = (dateVal: any): string => {
+  if (!dateVal) return '';
+  if (typeof dateVal === 'string') return dateVal;
+  if (typeof dateVal === 'object') {
+    if (typeof dateVal.toDate === 'function') {
+      try {
+        return format(dateVal.toDate(), 'yyyy-MM-dd');
+      } catch (e) {
+        return '';
+      }
+    } else if (dateVal instanceof Date) {
+      try {
+        return format(dateVal, 'yyyy-MM-dd');
+      } catch (e) {
+        return '';
+      }
+    } else if (dateVal.seconds) {
+      try {
+        return format(new Date(dateVal.seconds * 1000), 'yyyy-MM-dd');
+      } catch (e) {
+        return '';
+      }
+    }
+  }
+  return String(dateVal);
+};
+
 export function DriverApp() {
   const [driver, setDriver] = useState<any>(null);
   const [activeTrip, setActiveTrip] = useState<any>(null);
   const [trips, setTrips] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'HOME' | 'HISTORY' | 'ALERTS' | 'DIESEL' | 'FUEL_HISTORY' | 'CANS'>('HOME');
+  const [activeTab, setActiveTab] = useState<'HOME' | 'HISTORY' | 'ALERTS' | 'DIESEL' | 'FUEL_HISTORY' | 'CANS' | 'DASHBOARD'>('HOME');
+  const [driverAccount, setDriverAccount] = useState<any>(null);
+  const [driverAttendance, setDriverAttendance] = useState<any[]>([]);
+  const [driverVouchers, setDriverVouchers] = useState<any[]>([]);
+  const [allFranchiseDrivers, setAllFranchiseDrivers] = useState<any[]>([]);
+  const [leaderboardTrips, setLeaderboardTrips] = useState<any[]>([]);
+  const [lbPeriod, setLbPeriod] = useState<'Day' | 'Week' | 'Month'>('Month');
   const [tractors, setTractors] = useState<any[]>([]);
   const [isTracking, setIsTracking] = useState(false);
   const [fillingTime, setFillingTime] = useState<number>(() => {
@@ -338,6 +378,8 @@ export function DriverApp() {
           localStorage.removeItem('isDriverLoggedIn');
           auth.signOut();
           alert("Your account is no longer Active. Contact admin.");
+        } else {
+          setDriver({ id: snap.id, ...dData });
         }
       }
     }, (error) => {
@@ -346,6 +388,57 @@ export function DriverApp() {
 
     return () => unsubDriverDoc();
   }, [isLogged, driver?.id]);
+
+  useEffect(() => {
+    if (!isLogged || !driver?.id) return;
+    const fId = driver.franchiseId || 'legacy-rajhans';
+
+    // 1. Fetch driver's account in accounts
+    const qAcc = query(collection(db, 'accounts'), where('driverId', '==', driver.id));
+    const unsubAcc = onSnapshot(qAcc, (snap) => {
+      setDriverAccount(snap.docs[0]?.data() ? { id: snap.docs[0].id, ...snap.docs[0].data() } : null);
+    });
+
+    // 2. Fetch driver's attendance
+    const qAtt = query(collection(db, 'attendance'), where('driverId', '==', driver.id));
+    const unsubAtt = onSnapshot(qAtt, (snap) => {
+      const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setDriverAttendance(records);
+    });
+
+    // 3. Fetch driver's vouchers
+    const qVch = query(collection(db, 'vouchers'), where('driverId', '==', driver.id));
+    const unsubVch = onSnapshot(qVch, (snap) => {
+      const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setDriverVouchers(records);
+    });
+
+    // 4. Fetch all franchise drivers (for leaderboard)
+    const qDrvs = query(collection(db, 'drivers'), where('franchiseId', '==', fId), where('status', '==', 'Active'));
+    const unsubDrvs = onSnapshot(qDrvs, (snap) => {
+      const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAllFranchiseDrivers(records);
+    });
+
+    // 5. Fetch all delivered trips (for leaderboard and work count)
+    const qAllTrips = query(
+      collection(db, 'trips'),
+      where('franchiseId', '==', fId),
+      where('status', '==', 'Delivered')
+    );
+    const unsubAllTrips = onSnapshot(qAllTrips, (snap) => {
+      const records = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setLeaderboardTrips(records);
+    });
+
+    return () => {
+      unsubAcc();
+      unsubAtt();
+      unsubVch();
+      unsubDrvs();
+      unsubAllTrips();
+    };
+  }, [isLogged, driver?.id, driver?.franchiseId]);
 
   useEffect(() => {
     if (driver?.id) {
@@ -491,15 +584,21 @@ export function DriverApp() {
   const handleAttendanceAndLedger = async (driverId: string, driverName: string, salary: number) => {
     const today = format(new Date(), 'yyyy-MM-dd');
     const fId = driver?.franchiseId || 'legacy-rajhans';
-    const qAtt = query(collection(db, 'attendance'), where('driverId', '==', driverId), where('date', '==', today));
-    const attSnap = await getDocs(qAtt);
+    
+    // Check if attendance document already exists for today using the standard docId pattern
+    const docId = `${driverId}_${today}`;
+    const docRef = doc(db, 'attendance', docId);
+    const docSnap = await getDoc(docRef);
 
-    if (attSnap.empty) {
-      // Create Attendance
-      await addDoc(collection(db, 'attendance'), {
+    if (!docSnap.exists()) {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      // Create Attendance using the exact standard format & document ID as the Admin dashboard
+      await setDoc(docRef, {
         driverId,
         driverName,
-        date: today,
+        date: Timestamp.fromDate(startOfToday),
         status: 'Full Day',
         createdAt: serverTimestamp(),
         franchiseId: fId
@@ -1396,6 +1495,353 @@ export function DriverApp() {
             </div>
           </div>
         )}
+
+        {/* My Account Dashboard View */}
+        {activeTab === 'DASHBOARD' && (() => {
+          const currentMonthStr = format(new Date(), 'yyyy-MM');
+          const currentMonthAttendance = driverAttendance.filter(att => {
+            let dateStr = '';
+            if (att.date) {
+              if (typeof att.date === 'string') {
+                dateStr = att.date;
+              } else if (typeof att.date === 'object') {
+                if (typeof att.date.toDate === 'function') {
+                  dateStr = format(att.date.toDate(), 'yyyy-MM-dd');
+                } else if (att.date instanceof Date) {
+                  dateStr = format(att.date, 'yyyy-MM-dd');
+                } else if (att.date.seconds) {
+                  dateStr = format(new Date(att.date.seconds * 1000), 'yyyy-MM-dd');
+                }
+              }
+            }
+            return typeof dateStr === 'string' && dateStr.indexOf(currentMonthStr) === 0;
+          });
+          const workedDaysCount = currentMonthAttendance.reduce((sum, att) => {
+            if (att.status === 'Full Day') return sum + 1;
+            if (att.status === 'Half Day') return sum + 0.5;
+            return sum;
+          }, 0);
+
+          const drvDeliveredTrips = leaderboardTrips.filter(t => t.driverId === driver.id);
+          const thisMonthTripsCount = drvDeliveredTrips.filter(t => {
+            if (!t.completedAt) return false;
+            const compDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+            return format(compDate, 'yyyy-MM') === format(new Date(), 'yyyy-MM');
+          }).length;
+
+          const leaderboardData = allFranchiseDrivers.map(drv => {
+            const drvTrips = leaderboardTrips.filter(t => t.driverId === drv.id);
+            const periodTrips = drvTrips.filter(t => {
+              if (!t.completedAt) return false;
+              const compDate = t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt);
+              const today = new Date();
+              
+              if (lbPeriod === 'Day') {
+                return format(compDate, 'yyyy-MM-dd') === format(today, 'yyyy-MM-dd');
+              } else if (lbPeriod === 'Week') {
+                const diffTime = Math.abs(today.getTime() - compDate.getTime());
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                return diffDays <= 7;
+              } else {
+                return format(compDate, 'yyyy-MM') === format(today, 'yyyy-MM');
+              }
+            });
+            
+            return {
+              id: drv.id,
+              name: drv.name,
+              tripCount: periodTrips.length
+            };
+          }).sort((a: any, b: any) => b.tripCount - a.tripCount);
+
+          return (
+            <div className="space-y-6 pb-24 text-white">
+              {/* Profile Card */}
+              <div className="bg-gradient-to-br from-indigo-900/40 via-slate-900 to-slate-900 border border-indigo-500/20 rounded-[2rem] p-6 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl" />
+                <div className="flex items-center gap-4 relative z-10">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+                    <Award size={28} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black">{driver.name}</h3>
+                    <p className="text-xs text-indigo-300 font-bold uppercase tracking-wider font-mono">+91 {driver.mobile}</p>
+                    <div className="mt-1 flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-md text-[10px] font-bold w-max border border-emerald-500/20">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Active Driver (चालक)
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Header Cards */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Monthly Salary Card */}
+                <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-5 flex flex-col justify-between relative overflow-hidden">
+                  <div className="absolute top-3 right-3 text-slate-700">
+                    <DollarSign size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Monthly Salary</p>
+                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(मासिक वेतन)</p>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-xl font-black text-white">₹{(driver.monthlySalary || 0).toLocaleString()}</p>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase mt-1">Salary Rate</p>
+                  </div>
+                </div>
+
+                {/* Account Balance Card */}
+                <div className={`bg-slate-900 border rounded-[2rem] p-5 flex flex-col justify-between relative overflow-hidden ${
+                  driverAccount?.balanceType === 'Cr' ? 'border-emerald-500/20' : 'border-orange-500/20'
+                }`}>
+                  <div className="absolute top-3 right-3 text-slate-700">
+                    <Wallet size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Account Balance</p>
+                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(खाता बैलेंस)</p>
+                  </div>
+                  <div className="mt-4">
+                    <p className={`text-xl font-black ${
+                      driverAccount?.balanceType === 'Cr' ? 'text-emerald-400' : 'text-orange-400'
+                    }`}>
+                      ₹{(driverAccount?.currentBalance || 0).toLocaleString()}
+                    </p>
+                    <p className={`text-[9px] font-bold uppercase mt-1 ${
+                      driverAccount?.balanceType === 'Cr' ? 'text-emerald-500' : 'text-orange-400'
+                    }`}>
+                      {driverAccount?.balanceType === 'Cr' ? 'Due to You (जमा)' : 'Advance (अग्रिम)'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Worked Days Card */}
+                <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-5 flex flex-col justify-between relative overflow-hidden">
+                  <div className="absolute top-3 right-3 text-slate-700">
+                    <Calendar size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Days Worked</p>
+                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(काम के दिन - चालू माह)</p>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-xl font-black text-white">{workedDaysCount} Days</p>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase mt-1">Attendance total</p>
+                  </div>
+                </div>
+
+                {/* Total Trips Month Card */}
+                <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-5 flex flex-col justify-between relative overflow-hidden">
+                  <div className="absolute top-3 right-3 text-slate-700">
+                    <TrendingUp size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Trips Completed</p>
+                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(कुल ट्रिप्स - चालू माह)</p>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-xl font-black text-white">{thisMonthTripsCount} Trips</p>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase mt-1">Month Total</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Attendance Log section */}
+              <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-white text-base">Attendance History (हाजिरी इतिहास)</h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Your record for current month ({format(new Date(), 'MMMM yyyy')})</p>
+                  </div>
+                  <div className="bg-slate-800 text-slate-300 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                    {currentMonthAttendance.length} Logged
+                  </div>
+                </div>
+
+                {currentMonthAttendance.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 text-xs italic">
+                    No attendance logs recorded for this month.
+                  </div>
+                ) : (
+                  <div className="max-h-56 overflow-y-auto space-y-2 pr-1 scrollbar-hide">
+                    {currentMonthAttendance
+                      .sort((a, b) => {
+                        const parseDate = (d: any) => {
+                          if (!d) return 0;
+                          if (typeof d.toDate === 'function') return d.toDate().getTime();
+                          if (d instanceof Date) return d.getTime();
+                          if (d.seconds) return d.seconds * 1000;
+                          const t = new Date(d).getTime();
+                          return isNaN(t) ? 0 : t;
+                        };
+                        return parseDate(b.date) - parseDate(a.date);
+                      })
+                      .map((att) => {
+                        const safeDateStr = getSafeDateString(att.date);
+                        const displayDate = safeDateStr ? format(new Date(safeDateStr), 'dd MMMM yyyy, EEEE') : 'N/A';
+                        return (
+                          <div key={att.id} className="p-3 bg-slate-950/50 rounded-xl border border-slate-800 flex items-center justify-between">
+                            <div>
+                              <p className="text-xs font-bold text-slate-200">{displayDate}</p>
+                              {att.notes && <p className="text-[10px] text-slate-400 mt-0.5 italic">Note: {att.notes}</p>}
+                            </div>
+                            <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
+                              att.status === 'Full Day' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                              att.status === 'Half Day' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
+                              'bg-red-500/10 text-red-400 border border-red-500/20'
+                            }`}>
+                              {att.status === 'Full Day' ? 'Full Day (पूरा दिन)' :
+                               att.status === 'Half Day' ? 'Half Day (आधा दिन)' :
+                               'Absent (अनुपस्थित)'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+
+              {/* Leaderboard / Trip Board Section */}
+              <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-5">
+                  <div>
+                    <h3 className="font-bold text-white text-base flex items-center gap-2">
+                      <Trophy className="text-yellow-500 animate-bounce" size={18} />
+                      Trip Scoreboard (रैंकिंग बोर्ड)
+                    </h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Healthy competition to complete more trips!</p>
+                  </div>
+                  
+                  {/* Switch button */}
+                  <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 shadow-inner w-full sm:w-auto">
+                    {(['Day', 'Week', 'Month'] as const).map((period) => (
+                      <button
+                        key={period}
+                        onClick={() => setLbPeriod(period)}
+                        className={`flex-1 sm:flex-none px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                          lbPeriod === period
+                            ? 'bg-indigo-600 text-white font-extrabold shadow-md'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {period === 'Day' ? 'Today' : period === 'Week' ? 'Weekly' : 'Monthly'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {leaderboardData.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 text-xs italic">
+                      No trip statistics available.
+                    </div>
+                  ) : (
+                    leaderboardData.map((lbItem, index) => {
+                      const isCurrentUser = lbItem.id === driver.id;
+                      return (
+                        <div 
+                          key={lbItem.id} 
+                          className={`p-3.5 rounded-xl border flex items-center justify-between transition-all ${
+                            isCurrentUser 
+                              ? 'bg-indigo-950/40 border-indigo-500/50 shadow-md' 
+                              : 'bg-slate-950/30 border-slate-800/80 hover:bg-slate-950/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${
+                              index === 0 ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' :
+                              index === 1 ? 'bg-slate-300/10 text-slate-300 border border-slate-300/20' :
+                              index === 2 ? 'bg-amber-600/10 text-amber-500 border border-amber-600/20' :
+                              'bg-slate-800/30 text-slate-400 border border-slate-800/50'
+                            }`}>
+                              {index === 0 ? '🏆' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
+                            </div>
+                            <div>
+                              <p className={`text-xs font-bold flex items-center gap-1.5 ${isCurrentUser ? 'text-indigo-300 font-black' : 'text-slate-200'}`}>
+                                {lbItem.name}
+                                {isCurrentUser && (
+                                  <span className="bg-indigo-600/30 text-indigo-400 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">
+                                    YOU (आप)
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-[9px] text-slate-500 mt-0.5 uppercase tracking-wide">Delivered trips</p>
+                            </div>
+                          </div>
+                          
+                          <div className="text-right">
+                            <p className={`text-sm font-black ${isCurrentUser ? 'text-indigo-400' : 'text-white'}`}>
+                              {lbItem.tripCount}
+                            </p>
+                            <p className="text-[8px] text-slate-400 uppercase font-bold tracking-wider">Trips</p>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Voucher Log section (Debit Balance Vouchers) */}
+              <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-white text-base">Ledger Transactions (लेन-देन का विवरण)</h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Details of salary advances, payments and penalties</p>
+                  </div>
+                  <div className="bg-slate-800 text-slate-300 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                    {driverVouchers.length} entries
+                  </div>
+                </div>
+
+                {driverVouchers.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 text-xs italic">
+                    No transactions recorded in your ledger.
+                  </div>
+                ) : (
+                  <div className="max-h-60 overflow-y-auto space-y-2 pr-1 scrollbar-hide">
+                    {driverVouchers
+                      .sort((a, b) => {
+                        const parseDate = (d: any) => {
+                          if (!d) return 0;
+                          if (typeof d.toDate === 'function') return d.toDate().getTime();
+                          if (d instanceof Date) return d.getTime();
+                          if (d.seconds) return d.seconds * 1000;
+                          const t = new Date(d).getTime();
+                          return isNaN(t) ? 0 : t;
+                        };
+                        return parseDate(b.date) - parseDate(a.date);
+                      })
+                      .map((vch) => {
+                        const safeDateStr = getSafeDateString(vch.date);
+                        const displayDate = safeDateStr ? format(new Date(safeDateStr), 'dd MMM yyyy') : 'N/A';
+                        return (
+                          <div key={vch.id} className="p-3.5 bg-slate-950/50 rounded-xl border border-slate-800 flex items-center justify-between">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="bg-slate-800 text-[9px] font-mono text-slate-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-widest">
+                                  {vch.voucherNumber}
+                                </span>
+                                <p className="text-xs font-bold text-slate-200">{displayDate}</p>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1">{vch.narration}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-black text-orange-400">-₹{vch.totalAmount.toLocaleString()}</p>
+                              <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider">
+                                Debited
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Bottom Nav */}
@@ -1442,6 +1888,15 @@ export function DriverApp() {
           <Bell size={22} fill={activeTab === 'ALERTS' ? "currentColor" : "none"} opacity={activeTab === 'ALERTS' ? 0.3 : 1} />
           <span className="text-[10px] font-bold">Alerts</span>
         </button>
+        {driver?.showDashboardToDriver !== false && (
+          <button 
+            onClick={() => setActiveTab('DASHBOARD')}
+            className={`flex flex-col items-center gap-1 ${activeTab === 'DASHBOARD' ? 'text-indigo-400' : 'text-slate-500'}`}
+          >
+            <LayoutDashboard size={22} fill={activeTab === 'DASHBOARD' ? "currentColor" : "none"} opacity={activeTab === 'DASHBOARD' ? 0.3 : 1} />
+            <span className="text-[10px] font-bold">My Account</span>
+          </button>
+        )}
       </div>
 
       {/* Diesel Entry Modal */}
