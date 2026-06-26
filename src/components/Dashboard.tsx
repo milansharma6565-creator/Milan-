@@ -3008,11 +3008,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent skew-x-20 pointer-events-none z-20"
           />
 
-          {/* Background Decorative Graphic */}
-          <div className="absolute inset-x-0 bottom-0 top-[40%] opacity-[0.06] pointer-events-none overflow-hidden select-none">
-            <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <path d="M0,80 Q25,30 50,65 T100,20 L100,100 L0,100 Z" fill="#10b981" />
-            </svg>
+          {/* Elegant Logo Branding Background Watermark */}
+          <div className="absolute right-4 bottom-2 opacity-[0.05] pointer-events-none select-none z-0 flex flex-col items-center text-emerald-950">
+            <Logo size={110} />
+            <span className="text-[9px] font-black uppercase tracking-[0.15em] font-sans mt-0.5">TANKERWALA</span>
           </div>
 
           <div className="relative z-10">
@@ -3078,18 +3077,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             background: "linear-gradient(135deg, #ffffff 0%, #fffbf7 100%)"
           }}
         >
-          {/* Digits Eating Animation Layer */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
-             <motion.div 
-               animate={{ 
-                 x: eatingState === 'walking' ? [-100, 150] : 150,
-                 y: eatingState === 'idle' ? [200, 500] : 50,
-                 scale: eatingState === 'eating' ? [1, 1.2, 1] : 1
-               }}
-               className="absolute"
-             >
-               <Users size={120} />
-             </motion.div>
+          {/* Elegant Logo Branding Background Watermark */}
+          <div className="absolute right-4 bottom-2 opacity-[0.05] pointer-events-none select-none z-0 flex flex-col items-center text-orange-950">
+            <Logo size={110} />
+            <span className="text-[9px] font-black uppercase tracking-[0.15em] font-sans mt-0.5">TANKERWALA</span>
           </div>
 
           <div className="relative z-10">
@@ -3138,10 +3129,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               background: "linear-gradient(135deg, #ffffff 0%, #f7faff 100%)"
             }}
           >
-            <div className="absolute inset-0 pointer-events-none opacity-5">
-              <div className="absolute -right-4 -bottom-4 animate-spin-slow">
-                <RefreshCw size={150} />
-              </div>
+            {/* Elegant Logo Branding Background Watermark */}
+            <div className="absolute right-4 bottom-2 opacity-[0.05] pointer-events-none select-none z-0 flex flex-col items-center text-blue-950">
+              <Logo size={110} />
+              <span className="text-[9px] font-black uppercase tracking-[0.15em] font-sans mt-0.5">TANKERWALA</span>
             </div>
             <div className="relative z-10">
               <div className="bg-blue-50 text-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
@@ -3183,17 +3174,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 background: "linear-gradient(135deg, #ffffff 0%, #fbfbfe 100%)"
               }}
             >
-              <div className="absolute inset-0 pointer-events-none opacity-[0.05] overflow-hidden">
-                {[...Array(10)].map((_, i) => (
-                  <motion.div
-                    key={`bank-dots-${bankAcc.id}-${i}`}
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: [0, 1.5, 0], opacity: [0, 1, 0] }}
-                    transition={{ duration: 2, repeat: Infinity, delay: Math.random() * 5 }}
-                    className="absolute w-2 h-2 bg-blue-600 rounded-full"
-                    style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
-                  />
-                ))}
+              {/* Elegant Logo Branding Background Watermark */}
+              <div className="absolute right-4 bottom-2 opacity-[0.05] pointer-events-none select-none z-0 flex flex-col items-center text-indigo-950">
+                <Logo size={90} />
+                <span className="text-[8px] font-black uppercase tracking-[0.15em] font-sans mt-0.5">TANKERWALA</span>
               </div>
 
               <div className="relative z-10">
