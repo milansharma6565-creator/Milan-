@@ -292,154 +292,209 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
       const amount = Number(formData.rate) * Number(formData.quantity);
       const tokenNumber = formData.type === 'Inward' ? `IN-${Date.now().toString().slice(-6)}` : `OUT-${Date.now().toString().slice(-6)}`;
       
+      const incomeAccName = 'Hydrant Filling Income';
+      const expenseAccName = 'Tanker Filling Expense';
+      const mode = formData.paymentMode;
+      const paymentAccName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : formData.partyName;
+      const fid = franchiseId || null;
+
+      // Prepare queries outside the transaction
+      let qIncomeAcc = query(collection(db, 'accounts'), where('name', '==', incomeAccName), where('franchiseId', '==', fid));
+      let qExpenseAcc = query(collection(db, 'accounts'), where('name', '==', expenseAccName), where('franchiseId', '==', fid));
+      let qAssetsGrp = query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'), where('franchiseId', '==', fid));
+      let qIncGrp = query(collection(db, 'accountGroups'), where('name', '==', 'Indirect Incomes'), where('franchiseId', '==', fid));
+      let qExpGrp = query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'), where('franchiseId', '==', fid));
+      let qPaymentAcc = query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', fid));
+
+      const grpName = formData.type === 'Inward' ? 'Sundry Debtors' : 'Sundry Creditors';
+      let qUdhaarGrp = query(collection(db, 'accountGroups'), where('name', '==', grpName), where('franchiseId', '==', fid));
+
+      let qCustomer = query(collection(db, 'customers'), where('name', '==', formData.partyName.trim()));
+      if (fid) {
+        qCustomer = query(qCustomer, where('franchiseId', '==', fid));
+      }
+
+      const [
+        incomeAccSnap,
+        expenseAccSnap,
+        assetsGrpSnap,
+        incGrpSnap,
+        expGrpSnap,
+        paymentAccSnap,
+        udhaarGrpSnap,
+        customerSnap
+      ] = await Promise.all([
+        getDocs(qIncomeAcc),
+        getDocs(qExpenseAcc),
+        getDocs(qAssetsGrp),
+        getDocs(qIncGrp),
+        getDocs(qExpGrp),
+        getDocs(qPaymentAcc),
+        getDocs(qUdhaarGrp),
+        getDocs(qCustomer)
+      ]);
+
+      let incomeAccId = incomeAccSnap.docs[0]?.id;
+      let expenseAccId = expenseAccSnap.docs[0]?.id;
+      let assetsGrpId = assetsGrpSnap.docs[0]?.id;
+      let incGrpId = incGrpSnap.docs[0]?.id;
+      let expGrpId = expGrpSnap.docs[0]?.id;
+      let paymentAccId = paymentAccSnap.docs[0]?.id;
+      let udhaarGrpId = udhaarGrpSnap.docs[0]?.id;
+      let customerId = customerSnap.docs[0]?.id;
+
+      let isNewPaymentAcc = false;
+      if (!paymentAccId) {
+        isNewPaymentAcc = true;
+        // Generate new random ID
+        paymentAccId = doc(collection(db, 'accounts')).id;
+      }
+
       await runTransaction(db, async (transaction) => {
         const fillingRef = doc(collection(db, 'hydrantFillings'));
         const voucherRef = doc(collection(db, 'vouchers'));
-        
-        const incomeAccName = 'Hydrant Filling Income';
-        const expenseAccName = 'Tanker Filling Expense';
-        
-        const [incomeAccSnap, expenseAccSnap, assetsGrpSnap, incGrpSnap, expGrpSnap] = await Promise.all([
-          getDocs(query(collection(db, 'accounts'), where('name', '==', incomeAccName), where('franchiseId', '==', franchiseId || null))),
-          getDocs(query(collection(db, 'accounts'), where('name', '==', expenseAccName), where('franchiseId', '==', franchiseId || null))),
-          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'), where('franchiseId', '==', franchiseId || null))),
-          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Indirect Incomes'), where('franchiseId', '==', franchiseId || null))),
-          getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Direct Expenses'), where('franchiseId', '==', franchiseId || null)))
-        ]);
 
-        let incomeAccId = incomeAccSnap.docs[0]?.id;
-        let expenseAccId = expenseAccSnap.docs[0]?.id;
-        let incGrpId = incGrpSnap.docs[0]?.id;
-        let expGrpId = expGrpSnap.docs[0]?.id;
-        
-        const mode = formData.paymentMode;
-        let paymentAccName = mode === 'Cash' ? 'Cash' : mode === 'Bank' ? 'Bank Account' : formData.partyName;
-        
-        // Prevent duplicate ledger accounts by looking up case-insensitively using preloaded state
-        const matchedPaymentAcc = accounts.find(a => a.name.toLowerCase().trim() === paymentAccName.toLowerCase().trim());
-        let paymentAccId = matchedPaymentAcc?.id;
-        let isNewPaymentAcc = false;
-
-        if (!paymentAccId) {
-          isNewPaymentAcc = true;
-          const tempDocRef = doc(collection(db, 'accounts'));
-          paymentAccId = tempDocRef.id;
-        }
-
-        // Perform all TRANSACTIONAL READS first
-        const paymentAccRef = isNewPaymentAcc ? null : doc(db, 'accounts', paymentAccId);
+        const paymentAccRef = doc(db, 'accounts', paymentAccId);
         const incAccRef = incomeAccId ? doc(db, 'accounts', incomeAccId) : null;
         const expAccRef = expenseAccId ? doc(db, 'accounts', expenseAccId) : null;
+        const customerRef = customerId ? doc(db, 'customers', customerId) : null;
 
-        const [paymentAccDoc, incAccDoc, expAccDoc] = await Promise.all([
-          paymentAccRef ? transaction.get(paymentAccRef) : Promise.resolve(null),
+        // Perform transactional gets FIRST
+        const [paymentAccDoc, incAccDoc, expAccDoc, customerDoc] = await Promise.all([
+          transaction.get(paymentAccRef),
           incAccRef ? transaction.get(incAccRef) : Promise.resolve(null),
-          expAccRef ? transaction.get(expAccRef) : Promise.resolve(null)
+          expAccRef ? transaction.get(expAccRef) : Promise.resolve(null),
+          customerRef ? transaction.get(customerRef) : Promise.resolve(null)
         ]);
 
-        // NOW PERFORM ALL WRITES
-        
-        let assetsGrpId = assetsGrpSnap.docs[0]?.id;
-        
-        // Auto-create category accounts if missing
-        if (!incomeAccId) {
-          if (!incGrpId) {
-            const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { 
-              name: 'Indirect Incomes', 
-              type: 'Income',
-              franchiseId: franchiseId || null,
-              createdAt: serverTimestamp()
-            });
-            incGrpId = newGrp.id;
-          }
-          const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { 
-            name: incomeAccName, 
-            groupId: incGrpId, 
-            openingBalance: 0, 
-            balanceType: 'Cr', 
-            currentBalance: amount, 
-            franchiseId: franchiseId || null,
-            createdAt: serverTimestamp() 
-          });
-          incomeAccId = newAcc.id;
-        }
+        const actualIsNewPaymentAcc = !paymentAccDoc.exists();
 
-        if (!expenseAccId) {
-          if (!expGrpId) {
-            const newGrp = doc(collection(db, 'accountGroups'));
-            transaction.set(newGrp, { 
-              name: 'Direct Expenses', 
-              type: 'Expense',
-              franchiseId: franchiseId || null,
-              createdAt: serverTimestamp()
-            });
-            expGrpId = newGrp.id;
-          }
-          const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { 
-            name: expenseAccName, 
-            groupId: expGrpId, 
-            openingBalance: 0, 
-            balanceType: 'Dr', 
-            currentBalance: amount, 
-            franchiseId: franchiseId || null,
-            createdAt: serverTimestamp() 
-          });
-          expenseAccId = newAcc.id;
-        }
-
-        if (isNewPaymentAcc) {
+        // 1. Manage/Create Accounts if New
+        if (actualIsNewPaymentAcc) {
           if (mode === 'Cash' || mode === 'Bank') {
             if (!assetsGrpId) {
               const newGrp = doc(collection(db, 'accountGroups'));
               transaction.set(newGrp, { 
                 name: 'Current Assets', 
                 type: 'Asset',
-                franchiseId: franchiseId || null,
+                franchiseId: fid,
                 createdAt: serverTimestamp()
               });
               assetsGrpId = newGrp.id;
             }
-            const newAcc = doc(db, 'accounts', paymentAccId);
             const initialBal = formData.type === 'Inward' ? amount : -amount;
-            transaction.set(newAcc, {
+            transaction.set(paymentAccRef, {
               name: paymentAccName,
               groupId: assetsGrpId,
               openingBalance: 0,
               balanceType: 'Dr',
               currentBalance: initialBal,
-              franchiseId: franchiseId || null,
+              franchiseId: fid,
               createdAt: serverTimestamp()
             });
           } else if (mode === 'Udhaar') {
-            const grpName = formData.type === 'Inward' ? 'Sundry Debtors' : 'Sundry Creditors';
-            const grpSnap = await getDocs(query(collection(db, 'accountGroups'), where('name', '==', grpName), where('franchiseId', '==', franchiseId || null)));
-            let grpId = grpSnap.docs[0]?.id;
-            if (!grpId) {
+            if (!udhaarGrpId) {
               const newG = doc(collection(db, 'accountGroups'));
               transaction.set(newG, { 
                 name: grpName, 
                 type: formData.type === 'Inward' ? 'Asset' : 'Liability',
-                franchiseId: franchiseId || null,
+                franchiseId: fid,
                 createdAt: serverTimestamp()
               });
-              grpId = newG.id;
+              udhaarGrpId = newG.id;
             }
-            const newAcc = doc(db, 'accounts', paymentAccId);
-            transaction.set(newAcc, { 
+            transaction.set(paymentAccRef, { 
               name: paymentAccName, 
-              groupId: grpId, 
+              groupId: udhaarGrpId, 
               openingBalance: 0, 
               balanceType: formData.type === 'Inward' ? 'Dr' : 'Cr', 
               currentBalance: amount, 
-              franchiseId: franchiseId || null,
+              franchiseId: fid,
               createdAt: serverTimestamp() 
             });
           }
+        } else {
+          // Update existing payment account balance
+          const currentBal = paymentAccDoc.data()?.currentBalance || 0;
+          const isCr = paymentAccDoc.data()?.balanceType === 'Cr';
+          let updatedBal = currentBal;
+          if (formData.type === 'Inward') {
+            updatedBal = isCr ? currentBal - amount : currentBal + amount;
+          } else {
+            updatedBal = isCr ? currentBal + amount : currentBal - amount;
+          }
+          transaction.update(paymentAccRef, { currentBalance: updatedBal });
         }
 
+        // 2. Manage Income/Expense accounts
+        let finalIncomeAccId = incomeAccId;
+        let finalExpenseAccId = expenseAccId;
+
+        if (formData.type === 'Inward') {
+          if (!incomeAccId) {
+            if (!incGrpId) {
+              const newGrp = doc(collection(db, 'accountGroups'));
+              transaction.set(newGrp, { 
+                name: 'Indirect Incomes', 
+                type: 'Income',
+                franchiseId: fid,
+                createdAt: serverTimestamp()
+              });
+              incGrpId = newGrp.id;
+            }
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, { 
+              name: incomeAccName, 
+              groupId: incGrpId, 
+              openingBalance: 0, 
+              balanceType: 'Cr', 
+              currentBalance: amount, 
+              franchiseId: fid,
+              createdAt: serverTimestamp() 
+            });
+            finalIncomeAccId = newAcc.id;
+          } else {
+            const currentIncBal = incAccDoc?.exists() ? (incAccDoc.data()?.currentBalance || 0) : 0;
+            transaction.update(incAccRef!, { currentBalance: currentIncBal + amount });
+          }
+        } else {
+          if (!expenseAccId) {
+            if (!expGrpId) {
+              const newGrp = doc(collection(db, 'accountGroups'));
+              transaction.set(newGrp, { 
+                name: 'Direct Expenses', 
+                type: 'Expense',
+                franchiseId: fid,
+                createdAt: serverTimestamp()
+              });
+              expGrpId = newGrp.id;
+            }
+            const newAcc = doc(collection(db, 'accounts'));
+            transaction.set(newAcc, { 
+              name: expenseAccName, 
+              groupId: expGrpId, 
+              openingBalance: 0, 
+              balanceType: 'Dr', 
+              currentBalance: amount, 
+              franchiseId: fid,
+              createdAt: serverTimestamp() 
+            });
+            finalExpenseAccId = newAcc.id;
+          } else {
+            const currentExpBal = expAccDoc?.exists() ? (expAccDoc.data()?.currentBalance || 0) : 0;
+            transaction.update(expAccRef!, { currentBalance: currentExpBal + amount });
+          }
+        }
+
+        // 3. Update matching customer profile pending balance if Udhaar mode is used
+        if (formData.type === 'Inward' && mode === 'Udhaar' && customerRef && customerDoc?.exists()) {
+          const currentPending = customerDoc.data()?.pendingAmount || 0;
+          transaction.update(customerRef, {
+            pendingAmount: currentPending + amount
+          });
+        }
+
+        // 4. Save Hydrant Filling entry
         const fillingData: any = {
           tokenNumber,
           date: new Date().toISOString(),
@@ -453,12 +508,12 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
           paymentAccountId: paymentAccId,
           status: 'Completed',
           remarks: formData.remarks,
-          franchiseId: franchiseId || null,
+          franchiseId: fid,
           createdAt: serverTimestamp()
         };
-
         transaction.set(fillingRef, fillingData);
 
+        // 5. Save Accounting Voucher
         if (formData.type === 'Inward') {
           transaction.set(voucherRef, {
             voucherNumber: `VCH-${tokenNumber}`,
@@ -466,49 +521,27 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
             type: mode === 'Udhaar' ? 'Sales' : 'Receipt',
             items: [
               { accountId: paymentAccId, accountName: paymentAccName, amount: amount, type: 'Dr' },
-              { accountId: incomeAccId, accountName: incomeAccName, amount: amount, type: 'Cr' }
+              { accountId: finalIncomeAccId || incomeAccId, accountName: incomeAccName, amount: amount, type: 'Cr' }
             ],
             narration: `Hydrant filling for ${formData.partyName} (${formData.vehicleNumber}) [Token: ${tokenNumber}]`,
             totalAmount: amount,
-            franchiseId: franchiseId || null,
+            franchiseId: fid,
             createdAt: serverTimestamp()
           });
-          
-          if (paymentAccId && paymentAccRef && !isNewPaymentAcc) {
-            const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
-            transaction.update(paymentAccRef, { 
-              currentBalance: (paymentAccDoc?.exists() && paymentAccDoc.data().balanceType === 'Cr') ? currentBal - amount : currentBal + amount 
-            });
-          }
-          // Update income account
-          if (incomeAccId && incAccRef) {
-            transaction.update(incAccRef, { currentBalance: (incAccDoc?.data()?.currentBalance || 0) + amount });
-          }
         } else {
           transaction.set(voucherRef, {
             voucherNumber: `VCH-${tokenNumber}`,
             date: new Date(),
             type: mode === 'Udhaar' ? 'Purchase' : 'Payment',
             items: [
-              { accountId: expenseAccId, accountName: expenseAccName, amount: amount, type: 'Dr' },
+              { accountId: finalExpenseAccId || expenseAccId, accountName: expenseAccName, amount: amount, type: 'Dr' },
               { accountId: paymentAccId, accountName: paymentAccName, amount: amount, type: 'Cr' }
             ],
             narration: `Self tanker filling @ ${formData.partyName} (${formData.vehicleNumber}) [Token: ${tokenNumber}]`,
             totalAmount: amount,
-            franchiseId: franchiseId || null,
+            franchiseId: fid,
             createdAt: serverTimestamp()
           });
-
-          if (paymentAccId && paymentAccRef && !isNewPaymentAcc) {
-            const currentBal = paymentAccDoc?.exists() ? (paymentAccDoc.data().currentBalance || 0) : 0;
-            transaction.update(paymentAccRef, { 
-              currentBalance: (paymentAccDoc?.exists() && paymentAccDoc.data().balanceType === 'Dr') ? currentBal - amount : currentBal + amount 
-            });
-          }
-          // Update expense account
-          if (expenseAccId && expAccRef) {
-            transaction.update(expAccRef, { currentBalance: (expAccDoc?.data()?.currentBalance || 0) + amount });
-          }
         }
       });
 
