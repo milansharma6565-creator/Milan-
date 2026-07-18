@@ -173,7 +173,7 @@ export default function CloudPrintGateway({ franchiseId, userName }: CloudPrintG
           <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
             <Printer className="text-blue-600 animate-pulse" size={22} />
             Desktop Print Gateway
-            <span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-100 px-2.5 py-0.5 rounded-full font-bold">क्लाउड प्रिंटर</span>
+            <span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-100 px-2.5 py-0.5 rounded-full font-bold">Cloud Printer</span>
           </h2>
           <p className="text-xs text-slate-400 font-medium">Auto-receive & print bills sent from your mobile phone</p>
         </div>
@@ -292,7 +292,7 @@ export default function CloudPrintGateway({ franchiseId, userName }: CloudPrintG
                   ) : (
                     <>
                       <Printer size={18} strokeWidth={2.5} />
-                      <span>Print Thermal Bill Now (प्रिंट दबाएं) 📞</span>
+                      <span>Print Thermal Bill Now</span>
                     </>
                   )}
                 </button>

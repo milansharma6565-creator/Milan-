@@ -14,6 +14,15 @@ import { useRef } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+const parseFirestoreDate = (val: any): Date => {
+  if (!val) return new Date();
+  if (val instanceof Date) return val;
+  if (typeof val.toDate === 'function') return val.toDate();
+  if (val.seconds !== undefined) return new Date(val.seconds * 1000);
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? new Date() : d;
+};
+
 export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [selectedBillForPrint, setSelectedBillForPrint] = useState<Bill | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
@@ -390,7 +399,7 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
           date: bill.date instanceof Date ? bill.date.toISOString() : (bill.date?.seconds ? new Date(bill.date.seconds * 1000).toISOString() : String(bill.date))
         }
       });
-      alert("Print command sent to desktop! ☁️\n\n(डेस्कटॉप प्रिंटर पर रिमोट प्रिंट कमांड सफलतापूर्वक भेज दी गई है)");
+      alert("Print command sent to desktop! ☁️\n\n(Remote print command has been successfully sent to the desktop printer)");
       setSelectedBillForPrint(null);
     } catch (e: any) {
       console.error("Failed to queue remote print:", e);
@@ -540,9 +549,7 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
                       </span>
                     </div>
                     <div className="text-[10px] text-slate-400 font-medium mt-0.5">
-                      {bill.createdAt?.toDate 
-                        ? format(bill.createdAt.toDate(), 'dd MMM yyyy, hh:mm a') 
-                        : format(new Date(bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
+                      {format(parseFirestoreDate(bill.createdAt || bill.date), 'dd MMM yyyy, hh:mm a')} • {bill.billNumber}
                     </div>
                   </div>
                 </div>
@@ -579,7 +586,7 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
             // 4. Today's salary payouts or general payments from voucher
             const todayOtherCost = vouchers?.filter((vch: any) => {
               if (vch.type !== 'Payment') return false;
-              const vchD = vch.date?.toDate ? format(vch.date.toDate(), 'yyyy-MM-dd') : vch.date ? format(new Date(vch.date), 'yyyy-MM-dd') : '';
+              const vchD = vch.date ? format(parseFirestoreDate(vch.date), 'yyyy-MM-dd') : '';
               return vchD === todayStr;
             }).reduce((sum: number, vch: any) => sum + (vch.totalAmount || 0), 0) || 0;
 

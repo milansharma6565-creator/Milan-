@@ -13,6 +13,7 @@ import { toJpeg } from 'html-to-image';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 import { LocationPicker } from './LocationPicker';
 import { activityLogger } from '../services/activityLogger';
+import { QRCodeSVG } from 'qrcode.react';
 
 export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPercentage, currentFranchise }: { 
   onBillCreated?: () => void, 
@@ -31,6 +32,10 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   const [quickAddForm, setQuickAddForm] = useState({ name: '', mobile: '', address: '' });
   const [quickAddValidation, setQuickAddValidation] = useState<{ name?: string }>({});
   const thermalRef = useRef<HTMLDivElement>(null);
+
+  const [pendingBills, setPendingBills] = useState<any[]>([]);
+  const [isLoadingPending, setIsLoadingPending] = useState(false);
+  const [includePendingDues, setIncludePendingDues] = useState(false);
 
   const [offlinePendingCount, setOfflinePendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -280,16 +285,35 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   useEffect(() => {
     async function initBillNumber() {
       try {
-        let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
-        if (!isSuperAdmin && franchiseId) {
-          q = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), orderBy('billNumber', 'desc'), limit(1));
-        }
-        const snapshot = await getDocs(q);
         let highestBillNum = 0;
-        if (!snapshot.empty) {
-          const lastNumStr = snapshot.docs[0].data().billNumber;
-          const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
-          if (!isNaN(parsed)) highestBillNum = parsed;
+        try {
+          let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
+          if (!isSuperAdmin && franchiseId) {
+            q = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), orderBy('billNumber', 'desc'), limit(1));
+          }
+          const snapshot = await getDocs(q);
+          if (!snapshot.empty) {
+            const lastNumStr = snapshot.docs[0].data().billNumber;
+            const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
+            if (!isNaN(parsed)) highestBillNum = parsed;
+          }
+        } catch (innerErr) {
+          console.warn("Firestore index-based bill number query failed or requires index. Falling back to non-indexed sequence scan:", innerErr);
+          try {
+            let fallbackQ = query(collection(db, 'bills'), limit(100));
+            if (!isSuperAdmin && franchiseId) {
+              fallbackQ = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), limit(100));
+            }
+            const snap = await getDocs(fallbackQ);
+            snap.docs.forEach(doc => {
+              const val = parseInt((doc.data().billNumber || '').replace(/\D/g, ''));
+              if (!isNaN(val) && val > highestBillNum) {
+                highestBillNum = val;
+              }
+            });
+          } catch (fErr) {
+            console.error("Sequence fallback scan failed:", fErr);
+          }
         }
 
         let counterNum = 0;
@@ -310,6 +334,60 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
     }
     initBillNumber();
   }, [franchiseId, isSuperAdmin]);
+
+  const safeFormatDate = (dateVal: any) => {
+    if (!dateVal) return 'N/A';
+    try {
+      if (dateVal.seconds) {
+        return format(new Date(dateVal.seconds * 1000), 'dd/MM/yyyy');
+      }
+      return format(new Date(dateVal), 'dd/MM/yyyy');
+    } catch (e) {
+      return String(dateVal).slice(0, 10);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedCustomer?.id) {
+      setPendingBills([]);
+      setIncludePendingDues(false);
+      return;
+    }
+
+    setIsLoadingPending(true);
+    const fetchPending = async () => {
+      try {
+        const q = query(
+          collection(db, 'bills'),
+          where('customerId', '==', selectedCustomer.id),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+        const snap = await getDocs(q);
+        const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter((b: any) => b.paymentMode === 'Pending' || b.status === 'Pending' || b.isSettled === false);
+        setPendingBills(list);
+      } catch (err) {
+        console.warn("Failed to fetch pending bills with index. Falling back to un-ordered query:", err);
+        try {
+          const qFallback = query(
+            collection(db, 'bills'),
+            where('customerId', '==', selectedCustomer.id)
+          );
+          const snapFallback = await getDocs(qFallback);
+          const listFallback = snapFallback.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+            .filter((b: any) => b.paymentMode === 'Pending' || b.status === 'Pending' || b.isSettled === false);
+          setPendingBills(listFallback);
+        } catch (innerErr) {
+          console.error("Fallback query for pending bills failed too:", innerErr);
+        }
+      } finally {
+        setIsLoadingPending(false);
+      }
+    };
+
+    fetchPending();
+  }, [selectedCustomer]);
 
   useEffect(() => {
     if (searchTerm.length < 2) {
@@ -362,6 +440,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
   const subtotal = form.quantity * form.rate;
   const grandTotal = subtotal + form.extraCharges - form.discount;
+  const totalPendingDues = pendingBills.reduce((sum, b) => sum + (b.grandTotal || 0), 0);
+  const combinedTotal = grandTotal + totalPendingDues;
 
   useEffect(() => {
     const cr = currentFranchise?.customRates || {};
@@ -419,7 +499,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
     const phone = cleanMobile.startsWith('91') ? cleanMobile : `91${cleanMobile}`;
     
     const orderUrl = `${window.location.origin}/?o=${bill.id}`;
-    const message = `🙏 *Namaste from ${franchiseNameText}* 💧\n\nThank you for choosing us for pure and quality drinking water! Here is your thermal bill #${bill.billNumber} for amount *₹${bill.grandTotal}*.\n\n*🌐 LIVE BILL & TRACKING LINK:*\n👉 ${orderUrl}\n\nHave a wonderful and healthy day! 🙏🌸\n\nनमस्ते! ${franchiseNameText} की ओर से आपका बिल #${bill.billNumber} राशि ₹${bill.grandTotal} यहाँ है। शुद्ध और गुणवत्तापूर्ण पेयजल के लिए हमें चुनने के लिए धन्यवाद! आपका दिन शुभ हो! 🙏`;
+    const message = `🙏 *Greetings from ${franchiseNameText}* 💧\n\nThank you for choosing us for pure and quality drinking water! Here is your thermal bill #${bill.billNumber} for amount *₹${bill.grandTotal}*.\n\n*🌐 LIVE BILL & TRACKING LINK:*\n👉 ${orderUrl}\n\nHave a wonderful and healthy day! 🙏🌸`;
 
     try {
       // Capture the thermal receipt as JPEG
@@ -483,7 +563,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
       const waUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
       window.open(waUrl, '_blank');
-      alert(`Bill Image Downloaded! 📸 & WhatsApp opened!\n\n(थर्मल बिल इमेज डाउनलोड हो गई है! कृपया इसे व्हाट्सएप चैट में पेस्ट (Ctrl+V) करें।)`);
+      alert(`Bill Image Downloaded! 📸 & WhatsApp opened!\n\nPlease paste (Ctrl+V) it in the WhatsApp chat if needed.`);
     } catch (err: any) {
       console.error('Error sharing image:', err?.message || String(err));
       const waUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
@@ -510,7 +590,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           date: bill.date instanceof Date ? bill.date.toISOString() : (bill.date?.seconds ? new Date(bill.date.seconds * 1000).toISOString() : String(bill.date))
         }
       });
-      alert("Print command sent to desktop! ☁️\n\n(डेस्कटॉप प्रिंटर पर रिमोट प्रिंट कमांड सफलतापूर्वक भेज दी गई है)");
+      alert("Print command sent to desktop! ☁️\n\n(Remote print command has been successfully sent to the desktop printer)");
     } catch (e: any) {
       console.error("Failed to queue remote print:", e);
       alert("Error sending remote print job: " + e.message);
@@ -591,6 +671,12 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       isSettled: false,
       driverId: form.driverId,
       remarks: form.remarks.trim(),
+      includedPendingDues: includePendingDues,
+      previousPendingDuesAmount: includePendingDues ? totalPendingDues : 0,
+      previousPendingDuesDetails: includePendingDues 
+        ? pendingBills.map(b => `${safeFormatDate(b.date)} (#${b.billNumber}): ₹${b.grandTotal}`).join('\n')
+        : '',
+      combinedTotalAmount: includePendingDues ? combinedTotal : grandTotal,
     };
 
     const useOfflineWorkflow = () => {
@@ -778,6 +864,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       }));
       setDeliveryLocation(null);
       setShowMap(false);
+      setIncludePendingDues(false);
+      setPendingBills([]);
     } catch (error: any) {
       console.error("Database write throw, switching to offline fallback:", error);
       useOfflineWorkflow();
@@ -1229,6 +1317,77 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           </div>
         </div>
 
+        {selectedCustomer && totalPendingDues > 0 && (
+          <div className="bg-amber-50/80 border border-amber-200/80 rounded-3xl p-5 transition-all hover:bg-amber-50 shadow-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="include-pending-checkbox"
+                  checked={includePendingDues}
+                  onChange={(e) => setIncludePendingDues(e.target.checked)}
+                  className="mt-1 w-5 h-5 rounded-lg border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer transition-all"
+                />
+                <label htmlFor="include-pending-checkbox" className="cursor-pointer select-none">
+                  <p className="font-extrabold text-sm text-amber-950">Include Previous Dues</p>
+                  <p className="text-xs text-amber-800 font-semibold mt-0.5">
+                    This customer's total previous dues are <span className="font-black text-amber-900">{formatCurrency(totalPendingDues)}</span>.
+                  </p>
+                </label>
+              </div>
+              <div className="bg-amber-100 text-amber-900 font-extrabold px-3 py-1 rounded-full text-xs shrink-0">
+                {pendingBills.length} Bill(s) Pending
+              </div>
+            </div>
+
+            <AnimatePresence>
+              {includePendingDues && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mt-4 pt-4 border-t border-amber-200 overflow-hidden"
+                >
+                  <p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest mb-2">Unpaid Delivery Dates & Amounts (Details):</p>
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-1 mb-4">
+                    {pendingBills.map((b, idx) => (
+                      <div key={`${b.id || ''}-${idx}`} className="flex justify-between items-center text-xs font-semibold text-amber-900 bg-white/60 p-2.5 rounded-xl border border-amber-100/50">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">#{b.billNumber}</span>
+                          <span>📅 {safeFormatDate(b.date)}</span>
+                          {b.category && <span className="text-[10px] text-amber-650 font-bold uppercase">({b.category})</span>}
+                        </div>
+                        <span className="font-black">{formatCurrency(b.grandTotal)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-2 p-4 bg-slate-950 text-white rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Combined Total (New + Previous)</p>
+                      <p className="text-2xl font-black text-amber-400 mt-0.5">{formatCurrency(combinedTotal)}</p>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 bg-white/10 p-2 rounded-xl border border-white/5 self-start sm:self-center">
+                      <div className="bg-white p-1 rounded-lg border border-slate-900 shrink-0">
+                        <QRCodeSVG
+                          value={`upi://pay?pa=${currentFranchise?.upiId || "rajha94133@barodampay"}&pn=${encodeURIComponent(currentFranchise?.printName || currentFranchise?.name || "TankerWala")}&am=${combinedTotal}&cu=INR&tn=Bill%20Combined`}
+                          size={64}
+                          level="M"
+                        />
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[10px] font-black uppercase text-amber-400 leading-tight">Combined QR Code</p>
+                        <p className="text-[9px] text-slate-350 leading-tight mt-0.5">Scan to pay exact total including dues</p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
         <button 
           type="submit" 
           disabled={isSubmitting}
@@ -1322,7 +1481,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                   className="h-16 font-extrabold text-blue-700 bg-blue-50 border border-blue-200 rounded-2xl hover:bg-blue-100 transition-all flex items-center justify-center gap-3 active:scale-95"
                 >
                   <CloudLightning size={24} className="animate-bounce" />
-                  Remote Desktop Print ☁️ (रिमोट प्रिंट)
+                  Remote Desktop Print ☁️
                 </button>
                 <div className="grid grid-cols-2 gap-3">
                   <button 

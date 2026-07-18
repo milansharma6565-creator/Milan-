@@ -26,7 +26,9 @@ import {
   Globe,
   Briefcase,
   ShieldAlert,
+  Database,
   Settings as LucideSettings,
+  Cpu,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import FranchiseAIAssistant from "./components/FranchiseAIAssistant";
@@ -50,12 +52,14 @@ const DriverTrackingAdmin = React.lazy(() => import("./components/DriverTracking
 const HydrantFilling = React.lazy(() => import("./components/HydrantFilling").then(m => ({ default: m.HydrantFilling })));
 const DocumentVault = React.lazy(() => import("./components/DocumentVault").then(m => ({ default: m.DocumentVault })));
 const Settings = React.lazy(() => import("./components/Settings").then(m => ({ default: m.Settings })));
+const BackupRestore = React.lazy(() => import("./components/BackupRestore").then(m => ({ default: m.BackupRestore })));
 const LetterheadGenerator = React.lazy(() => import("./components/LetterheadGenerator").then(m => ({ default: m.LetterheadGenerator })));
 const FranchiseManagement = React.lazy(() => import("./components/FranchiseManagement").then(m => ({ default: m.FranchiseManagement })));
 const DriverApp = React.lazy(() => import("./components/DriverApp").then(m => ({ default: m.DriverApp })));
 const CustomerBookingPortal = React.lazy(() => import("./components/CustomerBookingPortal").then(m => ({ default: m.CustomerBookingPortal })));
 const Ecosystem = React.lazy(() => import("./components/Ecosystem").then(m => ({ default: m.Ecosystem })));
 const TendersMarketplace = React.lazy(() => import("./components/TendersMarketplace").then(m => ({ default: m.TendersMarketplace })));
+const MotorController = React.lazy(() => import("./components/MotorController").then(m => ({ default: m.MotorController })));
 import {
   auth,
   googleProvider,
@@ -70,9 +74,14 @@ import {
   onSnapshot,
   getDocs,
   doc,
+  setDoc,
+  getDoc,
+  getDocFromServer,
+  serverTimestamp,
 } from "firebase/firestore";
 import { User } from "firebase/auth";
 import { Franchise } from "./types";
+import { ledgerAutomation } from "./services/ledgerAutomation";
 
 type Tab =
   | "dashboard"
@@ -91,7 +100,9 @@ type Tab =
   | "ecosystem"
   | "franchise"
   | "settings"
-  | "tenders";
+  | "backup"
+  | "tenders"
+  | "motor-control";
 
 import { format } from "date-fns";
 import { formatCurrency, getPublicAppUrl, copyToClipboard } from "./constants";
@@ -152,6 +163,9 @@ export default function App() {
         "sync",
         "documents",
         "tenders",
+        "settings",
+        "backup",
+        "letterpad",
       ].includes(tabParam)
     ) {
       return tabParam;
@@ -239,6 +253,25 @@ export default function App() {
     let unsub: (() => void) | null = null;
     setFranchiseLoaded(false);
 
+    // Robust helper to get document with automatic online retries if client is offline on startup
+    const getDocWithRetry = async (docRef: any, maxRetries = 6, delayMs = 1500) => {
+      let attempt = 0;
+      while (attempt < maxRetries) {
+        try {
+          return await getDoc(docRef);
+        } catch (err: any) {
+          attempt++;
+          const isOffline = err?.message?.toLowerCase().includes('offline') || err?.code === 'unavailable';
+          if (isOffline && attempt < maxRetries) {
+            console.warn(`Firestore getDoc offline, retrying in ${delayMs}ms... (attempt ${attempt}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
+          throw err;
+        }
+      }
+    };
+
     if (isSuperAdmin) {
       if (inspectedFranchiseId) {
         unsub = onSnapshot(doc(db, "franchises", inspectedFranchiseId), (snap) => {
@@ -256,27 +289,79 @@ export default function App() {
     } else {
       const email = user.email || "";
       if (email === "rajhanssikar@gmail.com") {
+        const fId = "legacy-rajhans";
+        const fName = "Rajhans Steel and Water";
         setCurrentFranchise({
-          id: "legacy-rajhans",
-          name: "Rajhans Steel and Water",
+          id: fId,
+          name: fName,
           email: "rajhanssikar@gmail.com",
           commissionPercentage: 5,
           authorizedBy: "System",
           status: "Active",
           createdAt: new Date(),
         });
-        setFranchiseLoaded(true);
+        
+        // Auto-seed franchise document and default ledgers
+        (async () => {
+          try {
+            const fDocRef = doc(db, "franchises", fId);
+            const fSnap = await getDocWithRetry(fDocRef);
+            if (!fSnap.exists()) {
+              await setDoc(fDocRef, {
+                name: fName,
+                email: "rajhanssikar@gmail.com",
+                location: "Sikar",
+                commissionPercentage: 5,
+                status: "Active",
+                authorizedBy: "System",
+                isTesting: false,
+                createdAt: serverTimestamp()
+              });
+            }
+            await ledgerAutomation.setupFranchiseLedgers(fId, fName);
+          } catch (err) {
+            console.error("Auto-initializing legacy-rajhans failed:", err instanceof Error ? err.message : String(err));
+          } finally {
+            setFranchiseLoaded(true);
+          }
+        })();
       } else if (email === "rajhanspilefoundation@gmail.com") {
+        const fId = "legacy-pile";
+        const fName = "Rajhans Pile Foundation";
         setCurrentFranchise({
-          id: "legacy-pile",
-          name: "Rajhans Pile Foundation",
+          id: fId,
+          name: fName,
           email: "rajhanspilefoundation@gmail.com",
           commissionPercentage: 5,
           authorizedBy: "System",
           status: "Active",
           createdAt: new Date(),
         });
-        setFranchiseLoaded(true);
+
+        // Auto-seed franchise document and default ledgers
+        (async () => {
+          try {
+            const fDocRef = doc(db, "franchises", fId);
+            const fSnap = await getDocWithRetry(fDocRef);
+            if (!fSnap.exists()) {
+              await setDoc(fDocRef, {
+                name: fName,
+                email: "rajhanspilefoundation@gmail.com",
+                location: "Sikar",
+                commissionPercentage: 5,
+                status: "Active",
+                authorizedBy: "System",
+                isTesting: false,
+                createdAt: serverTimestamp()
+              });
+            }
+            await ledgerAutomation.setupFranchiseLedgers(fId, fName);
+          } catch (err) {
+            console.error("Auto-initializing legacy-pile failed:", err instanceof Error ? err.message : String(err));
+          } finally {
+            setFranchiseLoaded(true);
+          }
+        })();
       } else {
         const q = query(
           collection(db, "franchises"),
@@ -473,6 +558,7 @@ export default function App() {
   }
 
   if (!user) {
+    const isIframe = typeof window !== 'undefined' && window.self !== window.top;
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <motion.div 
@@ -506,6 +592,21 @@ export default function App() {
             )}
             {loginInProgress ? "Signing in..." : "Login with Google"}
           </button>
+
+          {isIframe && (
+            <div className="mt-6 bg-blue-50/50 border border-blue-100 p-4 rounded-2xl text-left w-full text-xs text-blue-950 leading-relaxed">
+              <p className="font-extrabold mb-1 text-blue-900">Running inside Preview?</p>
+              If your Google login fails or doesn't open a popup, click the button below to open the app in a new tab:
+              <a
+                href={window.location.href}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 block text-center w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-2 px-3 rounded-xl transition-all"
+              >
+                Open in New Tab
+              </a>
+            </div>
+          )}
           
           <p className="mt-8 text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Authorized Access Only</p>
         </motion.div>
@@ -648,10 +749,14 @@ export default function App() {
         return <PhoneSync />;
       case "settings":
         return <Settings {...props} />;
+      case "backup":
+        return <BackupRestore franchiseId={currentFranchise?.id || ""} currentFranchise={currentFranchise} />;
       case "documents":
         return <DocumentVault userEmail={user?.email || ""} />;
       case "letterpad":
         return <LetterheadGenerator currentFranchise={currentFranchise} />;
+      case "motor-control":
+        return <MotorController franchiseId={currentFranchise?.id} currentFranchise={currentFranchise} />;
       case "tenders":
         return <TendersMarketplace franchiseId={currentFranchise?.id || ""} currentFranchise={currentFranchise} isSuperAdmin={isSuperAdmin} />;
       case "ecosystem":
@@ -873,6 +978,15 @@ export default function App() {
                   }}
               />
               <SidebarButton
+                  icon={<Cpu size={20} />}
+                  label="IoT Motor Control"
+                  active={activeTab === "motor-control"}
+                  onClick={() => {
+                    setActiveTab("motor-control");
+                    setIsSidebarOpen(false);
+                  }}
+              />
+              <SidebarButton
                   icon={<Briefcase size={20} />}
                   label="Active Tenders"
                   active={activeTab === "tenders"}
@@ -887,6 +1001,15 @@ export default function App() {
                 active={activeTab === "settings"}
                 onClick={() => {
                   setActiveTab("settings");
+                  setIsSidebarOpen(false);
+                }}
+              />
+              <SidebarButton
+                icon={<Database size={20} />}
+                label="Backup & Restore"
+                active={activeTab === "backup"}
+                onClick={() => {
+                  setActiveTab("backup");
                   setIsSidebarOpen(false);
                 }}
               />

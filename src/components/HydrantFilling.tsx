@@ -672,7 +672,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-4">
             <Truck size={24} />
           </div>
-          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Self Filling (हमारा)</div>
+          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Self Filling</div>
           <div className="mt-2 space-y-2">
             <div className="flex items-baseline justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase">This Month</span>
@@ -689,7 +689,7 @@ export function HydrantFilling({ franchiseId, isSuperAdmin }: { franchiseId?: st
           <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-4">
             <Users size={24} />
           </div>
-          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Other Filling (बाहर)</div>
+          <div className="text-sm font-black text-slate-400 uppercase tracking-widest mb-1">Other Filling</div>
           <div className="mt-2 space-y-2">
             <div className="flex items-baseline justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase">This Month</span>

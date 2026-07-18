@@ -16,11 +16,13 @@ import {
   Flame, 
   Heart,
   Droplet,
-  Smartphone
+  Smartphone,
+  Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DriverManagement } from './DriverManagement';
 import { TractorDiesel } from './TractorDiesel';
+import { BackupRestore } from './BackupRestore';
 import { QRCodeSVG } from 'qrcode.react';
 import { getPublicAppUrl, copyToClipboard } from '../constants';
 import { activityLogger } from '../services/activityLogger';

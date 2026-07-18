@@ -15,6 +15,15 @@ import autoTable from 'jspdf-autotable';
 import { startOfMonth, endOfMonth, format } from 'date-fns';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 
+const parseFirestoreDate = (val: any): Date => {
+  if (!val) return new Date();
+  if (val instanceof Date) return val;
+  if (typeof val.toDate === 'function') return val.toDate();
+  if (val.seconds !== undefined) return new Date(val.seconds * 1000);
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? new Date() : d;
+};
+
 export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -308,14 +317,14 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
     // Append Grand Total Row at the bottom of the table
     const grandDuesTotal = listToExport.reduce((sum, item) => sum + item.pending, 0);
     tableData.push([
-      'Grand Total (कुल बकाया जोड़)',
+      'Grand Total',
       '',
       '',
       pdfFormatCurrency(grandDuesTotal)
     ]);
 
     autoTable(doc, {
-      head: [['Name', 'Mobile', 'Address', 'Pending Amount (बकाया राशि)']],
+      head: [['Name', 'Mobile', 'Address', 'Pending Amount']],
       body: tableData,
       startY: 25,
       theme: 'grid',
@@ -500,7 +509,7 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              👥 All Clients (सभी ग्राहक)
+              👥 All Clients
             </button>
             <button
               onClick={() => setShowOnlyPendingDues(true)}
@@ -510,7 +519,7 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              ⏳ Pending Dues Only (केवल उधार बकाया वाले)
+              ⏳ Pending Dues Only
             </button>
           </div>
 
@@ -543,7 +552,7 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
               <div className="text-lg font-black text-white">{displayedCustomers.length}</div>
             </div>
             <div>
-              <div className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Total Outstanding (कुल बकाया)</div>
+              <div className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Total Outstanding</div>
               <div className="text-xl font-black text-red-400">₹{totalDuesAmount.toLocaleString('en-IN')}</div>
             </div>
           </div>
@@ -1096,7 +1105,7 @@ function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: {
         );
       }
       const billsSnap = await getDocs(billsQ);
-      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+      const bills = billsSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: parseFirestoreDate(d.data().date) }));
 
       // 2. Fetch Ledger Entries
       let ledgerQ = query(
@@ -1115,7 +1124,7 @@ function WhatsAppLedgerModal({ customer, onClose, franchiseId, isSuperAdmin }: {
         );
       }
       const ledgerSnap = await getDocs(ledgerQ);
-      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: new Date(d.data().date) }));
+      const payments = ledgerSnap.docs.map(d => ({ ...d.data(), id: d.id, sortDate: parseFirestoreDate(d.data().date) }));
 
       // Combined and sorted list
       const allEntries = [...bills, ...payments].sort((a: any, b: any) => a.sortDate.getTime() - b.sortDate.getTime());
@@ -1525,7 +1534,7 @@ function CustomerHistoryModal({
                       </div>
                       <div className="flex items-center gap-2 text-slate-600 font-bold">
                          <Calendar size={14} className="text-slate-400" />
-                         {new Date(bill.date).toLocaleDateString()}
+                         {parseFirestoreDate(bill.date).toLocaleDateString()}
                       </div>
                     </div>
                     <div className="text-right">

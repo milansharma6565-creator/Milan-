@@ -53,7 +53,7 @@ export function Ecosystem() {
 
   const handlePWAInstall = async () => {
     if (!deferredPrompt) {
-      alert("सिस्टम रेडी है! इस ऐप को इंस्टॉल करने के लिए अपने फोन के Google Chrome ब्राउज़र में जाएं, ऊपर दायें कोने में 3 डॉट्स पर क्लिक करें और 'Install App' या 'Add to Home screen' चुनें। यह बिना किसी एरर के सीधा आपके फोन में काम करेगा!");
+      alert("The system is ready! To install this app, open Google Chrome on your phone, tap the 3 dots in the top-right corner, and select 'Install App' or 'Add to Home screen'. This will install it directly onto your phone without any errors!");
       return;
     }
     try {
@@ -222,18 +222,18 @@ export function Ecosystem() {
                   📲
                 </div>
                 <div className="space-y-3 w-full">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-blue-100 pb-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-blue-100 pb-3">
                     <h3 className="font-black text-slate-950 text-sm flex flex-wrap items-center gap-2">
                       <span>1-Click Mobile App Installation Center</span>
-                      <span className="text-xs text-blue-700 font-extrabold">(1-क्लिक मोबाइल ऐप इंस्टॉलेशन)</span>
+                      <span className="text-xs text-blue-700 font-extrabold">(1-Click Mobile App Installation)</span>
                     </h3>
                     <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 bg-white px-2.5 py-1 rounded-md border border-blue-200 shadow-xs">
                       100% Error Free standard
                     </span>
                   </div>
                   <p className="text-xs text-slate-600 font-bold leading-relaxed">
-                    एंड्रॉयड ओएस (Android OS) सुरक्षा कारणों से अनधिकृत कच्ची APK फ़ाइलों को इंस्टॉल करने पर <strong className="text-red-500">"There was a problem parsing the package"</strong> एरर दिखाता है। 
-                    इसका सबसे सुरक्षित, आधुनिक और तेज़ समाधान <strong className="text-blue-600">PWA (Progressive Web App)</strong> है। यह असली ऐप की तरह आपके फ़ोन की होम-स्क्रीन पर आ जाता है, और इसका कोई साइज़ (0 MB) नहीं होता!
+                    Android OS might show "There was a problem parsing the package" when trying to install unauthorized raw APK files for security reasons.
+                    The most secure, modern, and fastest solution is <strong className="text-blue-600">PWA (Progressive Web App)</strong>. This adds the app directly onto your phone's home screen, completely free of load, and has zero size (0 MB)!
                   </p>
                   
                   {/* Direct Native Installation Button */}
@@ -244,7 +244,7 @@ export function Ecosystem() {
                       className="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider px-6 h-12 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
                     >
                       <Download size={14} />
-                      📲 Phone Pe Direct Install Karein (Install Now)
+                      📲 Direct Install on Phone
                     </button>
                     
                     <a
@@ -260,26 +260,26 @@ export function Ecosystem() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-2">
                     <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-xs">
                       <span className="text-[9px] font-black bg-blue-50 text-blue-700 border border-blue-100 uppercase px-2.5 py-1 rounded-md">
-                        क्रोम से डायरेक्ट इनस्टॉल करने का तरीक़ा (Google Chrome Method)
+                        Direct Install via Google Chrome
                       </span>
                       <div className="text-[11px] font-bold text-slate-600 mt-2.5 space-y-1 leading-relaxed">
-                        <p>1. सबसे पहले नीचे ड्राइवर या कस्टमर ऐप के सामने दिया गया <strong>"Copy PWA Link"</strong> दबाएं।</p>
-                        <p>2. फिर अपने फोन में <strong>Google Chrome</strong> ब्राउज़र खोलें और इस लिंक को पेस्ट करें।</p>
-                        <p>3. क्रोम ब्राउज़र में सबसे ऊपर ऊपर दायें कोने में <strong>3 डॉट्स</strong> (बिंदुओं) पर क्लिक करें।</p>
-                        <p>4. वहां लिस्ट में <strong>"Install app"</strong> या <strong>"Add to Home screen"</strong> पर क्लिक करें।</p>
-                        <p className="text-emerald-600 mt-1">✓ बधाई! अब यह ड्राइवर ऐप बिना किसी एरर के सीधा आपके फ़ोन पर लाइव काम करने लगेगा।</p>
+                        <p>1. First, click on the <strong>"Copy PWA Link"</strong> button for your driver or customer app below.</p>
+                        <p>2. Then open the <strong>Google Chrome</strong> browser on your phone and paste this link.</p>
+                        <p>3. Tap the <strong>3 dots</strong> (menu button) in the top right corner of the Chrome browser.</p>
+                        <p>4. Select <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong> from the list.</p>
+                        <p className="text-emerald-600 mt-1">✓ Congratulations! Your app is now installed and ready to use without any errors.</p>
                       </div>
                     </div>
 
                     <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-xs">
                       <span className="text-[9px] font-black bg-emerald-50 text-emerald-700 border border-emerald-100 uppercase px-2.5 py-1 rounded-md">
-                        पब्लिक कस्टमाइज्ड APK खुद बनाने का आसान तरीक़ा
+                        Easy Way to Create Custom APK Files
                       </span>
                       <div className="text-[11px] font-bold text-slate-600 mt-2.5 space-y-1.5 leading-relaxed">
-                        <p>यदि ड्राइवर को समझाने में फिर भी मुश्किल है और आप खुद की कस्टमाइज्ड APK बनाना चाहते हैं:</p>
-                        <p>1. हमारी PWA लिंक कॉपी करें और मुफ्त बिल्डर <a href="https://www.webintoapp.com/" target="_blank" rel="noreferrer" className="text-blue-600 font-black underline hover:text-blue-800">WebIntoApp</a> पर जाएं।</p>
-                        <p>2. वहां अपनी पसंद का लोगो, नाम (जैसे TankerWala Sikar) और कॉपी की हुई लिंक डालकर 2 मिनट में अपनी <strong>गिल्ड-पैक सर्टिफाइड असली इंस्टॉलेबल `.apk` फ़ाइल</strong> जनरेट कर लें।</p>
-                        <p>3. उसे गूगल ड्राइव पर रख कर डाउनलोड लिंक ऊपर <strong>"APK Settings"</strong> टैब में सेट कर दें ताकि भविष्य में सारे ड्राइवर एक बार में डायरेक्ट डाउनलोड कर सकें!</p>
+                        <p>If you prefer to distribute standard installation files (.apk) to drivers:</p>
+                        <p>1. Copy our PWA link and visit the free builder website <a href="https://www.webintoapp.com/" target="_blank" rel="noreferrer" className="text-blue-600 font-black underline hover:text-blue-800">WebIntoApp</a>.</p>
+                        <p>2. Enter your custom name (e.g. TankerWala Sikar), select a logo, and paste the copied link to generate an installable `.apk` file in 2 minutes.</p>
+                        <p>3. Upload it to Google Drive and configure the download link in the <strong>"APK Settings"</strong> tab above so drivers can download it directly!</p>
                       </div>
                     </div>
                   </div>
@@ -612,20 +612,20 @@ export function Ecosystem() {
                 <div className="bg-amber-50/40 rounded-2xl p-5 border border-amber-100/60 space-y-3">
                   <div className="text-xs font-bold text-slate-700 leading-relaxed space-y-2">
                     <p className="text-slate-900 text-sm font-extrabold border-b border-amber-200/50 pb-1.5 flex items-center gap-1">
-                      <span>⚠️ ये एरर (Error) क्यों आ रहा है?</span>
+                      <span>⚠️ Why are you seeing this error?</span>
                     </p>
                     <p>
-                      एंड्रॉयड फोन में डायरेक्ट दी गई .apk फाइल डाउनलोड करके इंस्टॉल करने पर मोबाइल का सुरक्षा सिस्टम <span className="text-red-500 font-extrabold">"There was a problem parsing the package"</span> एरर दिखाता है। 
+                      When you download and try to install a direct raw .apk file on an Android phone, the mobile security system displays a <span className="text-red-500 font-extrabold">"There was a problem parsing the package"</span> error.
                     </p>
                     <p className="text-[11px] text-slate-500 mt-1 font-medium leading-relaxed">
-                      ऐसा इसलिए होता है क्योंकि सीधे सर्वर से डाउनलोड होने वाली फाइल एक <strong>सिम्युलेटेड फ़ाइल</strong> है, जिसे आपका फोन का एंड्रॉयड सुरक्षा प्रोसेसर खोल नहीं पा रहा है।
+                      This happens because the direct-download file from the server is a simulated file that your phone's Android security processor cannot unpack directly.
                     </p>
                   </div>
                 </div>
 
                 {/* 2 Easy Solutions */}
                 <div className="space-y-4">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Solutions (समाधान):</h4>
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Solutions:</h4>
 
                   {/* Solution 1: Chrome PWA Install */}
                   <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-4 flex gap-3.5 items-start">
@@ -633,12 +633,12 @@ export function Ecosystem() {
                     <div className="space-y-2.5 flex-1">
                       <div>
                         <h5 className="text-xs font-black text-slate-900 leading-none">Instant App Install (100% Recommended & Safe)</h5>
-                        <p className="text-[11px] text-slate-500 font-bold mt-1">इसमें आपको कोई अतिरिक्त फ़ाइल डाउनलोड नहीं करनी पड़ेगी। 0 MB का साइज़ है!</p>
+                        <p className="text-[11px] text-slate-500 font-bold mt-1">You don't need to download any extra file. Zero storage size required!</p>
                       </div>
                       <ol className="text-[11px] text-slate-600 font-bold space-y-1 ml-4 list-decimal leading-relaxed">
-                        <li>नीचे दिए गए <strong>"Copy App Link"</strong> बटन को दबाएं।</li>
-                        <li>इस लिंक को अपने फोन में <strong>Google Chrome</strong> ब्राउज़र में खोलें।</li>
-                        <li>ऊपर दाएं कोने में <strong>3 डॉट्स</strong> दबाकर <strong>"Install app"</strong> या <strong>"Add to Home Screen"</strong> पर क्लिक करें।</li>
+                        <li>Click the <strong>"Copy App Link"</strong> button below.</li>
+                        <li>Open this copied link in <strong>Google Chrome</strong> on your phone.</li>
+                        <li>Tap the <strong>3 dots</strong> in the top-right corner and click <strong>"Install app"</strong> or <strong>"Add to Home Screen"</strong>.</li>
                       </ol>
                       <button
                         onClick={() => {
@@ -658,13 +658,13 @@ export function Ecosystem() {
                     <span className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0">2</span>
                     <div className="space-y-2.5 flex-1">
                       <div>
-                        <h5 className="text-xs font-black text-slate-950 leading-none">अथवा, बिल्कुल असली कस्टम .APK फ़ाइल बनाएं (2 मिनट में)</h5>
-                        <p className="text-[11px] text-slate-500 font-bold mt-1">अगर आप कस्टमर या ड्राइवर को असली डाउनलोड लिंक देना चाहते हैं:</p>
+                        <h5 className="text-xs font-black text-slate-950 leading-none">Alternatively, create a real custom .APK file (In 2 minutes)</h5>
+                        <p className="text-[11px] text-slate-500 font-bold mt-1">If you want to provide your customers or drivers with an offline installer link:</p>
                       </div>
                       <ol className="text-[11px] text-slate-600 font-bold space-y-1 ml-4 list-decimal leading-relaxed">
-                        <li>नीचे दिए गए बटन से अपने <strong>लगातार चलने वाले लाइव लिंक</strong> को कॉपी करें।</li>
-                        <li>मुफ्त वेबसाइट <a href="https://www.webintoapp.com/" target="_blank" rel="noreferrer" className="text-blue-600 underline font-black">webintoapp.com</a> पर जाएं।</li>
-                        <li>वहां मपपसंद लोगो, नाम दर्ज करें और लिंक पेस्ट करके तुरंत असली काम करने वाली <strong>.APK डाउनलोड फ़ाइल</strong> निकालें!</li>
+                        <li>Copy your <strong>live application link</strong> using the button below.</li>
+                        <li>Visit the free website <a href="https://www.webintoapp.com/" target="_blank" rel="noreferrer" className="text-blue-600 underline font-black">webintoapp.com</a>.</li>
+                        <li>Enter your preferred logo, app name, and paste the link to generate a fully working <strong>.APK download file</strong>!</li>
                       </ol>
                       
                       <div className="flex gap-2 flex-wrap pt-1">
@@ -698,7 +698,7 @@ export function Ecosystem() {
                     type="button"
                     className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider px-5 py-2.5 rounded-xl transition-all cursor-pointer"
                   >
-                    Close (ठीक है)
+                    Close
                   </button>
                 </div>
               </div>

@@ -110,12 +110,20 @@ const DEFAULT_GROUPS: Partial<AccountGroup>[] = [
 ];
 
 export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, isSuperAdmin?: boolean }) {
-  const [activeTab, setActiveTab] = useState<AccountingTab>('daybook');
+  const [activeTab, setActiveTab] = useState<AccountingTab>(() => {
+    const saved = sessionStorage.getItem('activeLedgerTab');
+    if (saved) {
+      sessionStorage.removeItem('activeLedgerTab');
+      return saved as AccountingTab;
+    }
+    return 'daybook';
+  });
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [groups, setGroups] = useState<AccountGroup[]>([]);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [loading, setLoading] = useState(true);
   const [isInitializing, setIsInitializing] = useState(false);
+  const isInitializingRef = useRef(false);
 
   // Modal States
   const [isAddingVoucher, setIsAddingVoucher] = useState(false);
@@ -125,7 +133,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
   const [selectedLedgerId, setSelectedLedgerId] = useState<string | null>(null);
 
   const ensureAllTallyGroups = async (existingGroups: AccountGroup[], fid: string | null) => {
-    if (isInitializing) return;
+    if (isInitializing || isInitializingRef.current) return;
     
     // Check if any groups from DEFAULT_GROUPS are missing (case-insensitive name comparison)
     const missing = DEFAULT_GROUPS.filter(dg => 
@@ -134,13 +142,14 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
     if (missing.length === 0) return;
 
+    isInitializingRef.current = true;
     setIsInitializing(true);
     try {
       const batch = writeBatch(db);
       
       const groupRefs: Record<string, string> = {};
       existingGroups.forEach(eg => {
-        groupRefs[eg.name] = eg.id;
+        groupRefs[eg.name] = eg.id!;
       });
 
       // Separation of missing groups to maintain hierarchy
@@ -182,9 +191,121 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     } catch (e) {
       console.error("Error auto-seeding Tally groups:", e);
     } finally {
+      isInitializingRef.current = false;
       setIsInitializing(false);
     }
   };
+
+  const autoDeduplicateGroups = async (currentGroups: AccountGroup[], currentAccounts: Account[]) => {
+    if (isInitializing || isInitializingRef.current || currentGroups.length === 0) return;
+
+    // Group by normalized name (case-insensitive, trimmed)
+    const groupsByName: Record<string, AccountGroup[]> = {};
+    currentGroups.forEach(g => {
+      const norm = g.name.trim().toLowerCase();
+      if (!groupsByName[norm]) {
+        groupsByName[norm] = [];
+      }
+      groupsByName[norm].push(g);
+    });
+
+    // Find names with duplicates
+    const duplicateNames = Object.keys(groupsByName).filter(name => groupsByName[name].length > 1);
+    if (duplicateNames.length === 0) return;
+
+    console.log("Found duplicate groups to resolve:", duplicateNames);
+
+    isInitializingRef.current = true;
+    setIsInitializing(true);
+
+    try {
+      const batch = writeBatch(db);
+      let operationsCount = 0;
+
+      const deletedGroupIds = new Set<string>();
+      const remappedGroupIdMap = new Map<string, string>(); // obsoleteGroupId -> targetGroupId
+
+      duplicateNames.forEach(name => {
+        const list = groupsByName[name];
+        
+        // Find which group we should KEEP (the primary group)
+        // We prioritize:
+        // 1. One that is already referenced by accounts
+        // 2. Or simply the first one in the list
+        let primaryGroup = list.find(g => currentAccounts.some(acc => acc.groupId === g.id));
+        if (!primaryGroup) {
+          primaryGroup = list[0];
+        }
+
+        list.forEach(g => {
+          if (g.id !== primaryGroup!.id) {
+            deletedGroupIds.add(g.id!);
+            remappedGroupIdMap.set(g.id!, primaryGroup!.id!);
+          }
+        });
+      });
+
+      // 1. Remap any accounts using the duplicate groups
+      currentAccounts.forEach(acc => {
+        if (acc.groupId && remappedGroupIdMap.has(acc.groupId)) {
+          const finalGroupId = remappedGroupIdMap.get(acc.groupId)!;
+          batch.update(doc(db, 'accounts', acc.id!), {
+            groupId: finalGroupId
+          });
+          operationsCount++;
+        }
+      });
+
+      // 2. Remap any subgroups using the duplicate group as parentGroupId, unless the subgroup itself is being deleted
+      currentGroups.forEach(subG => {
+        if (subG.parentGroupId && remappedGroupIdMap.has(subG.parentGroupId)) {
+          if (!deletedGroupIds.has(subG.id!)) {
+            const finalParentId = remappedGroupIdMap.get(subG.parentGroupId)!;
+            batch.update(doc(db, 'accountGroups', subG.id!), {
+              parentGroupId: finalParentId
+            });
+            operationsCount++;
+          }
+        }
+      });
+
+      // 3. Delete the duplicate groups
+      deletedGroupIds.forEach(id => {
+        batch.delete(doc(db, 'accountGroups', id));
+        operationsCount++;
+      });
+
+      if (operationsCount > 0) {
+        await batch.commit();
+        console.log(`Successfully merged and removed duplicate groups. Total operations: ${operationsCount}`);
+      }
+    } catch (err) {
+      console.error("Error auto-deduplicating groups:", err);
+    } finally {
+      isInitializingRef.current = false;
+      setIsInitializing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (loading || isInitializing || isInitializingRef.current || groups.length === 0 || accounts.length === 0) return;
+    
+    // Check if there are any duplicate group names in the current list
+    const seen = new Set<string>();
+    let hasDupes = false;
+    for (const g of groups) {
+      const norm = g.name.trim().toLowerCase();
+      if (seen.has(norm)) {
+        hasDupes = true;
+        break;
+      }
+      seen.add(norm);
+    }
+    
+    if (hasDupes) {
+      autoDeduplicateGroups(groups, accounts);
+    }
+  }, [groups, accounts, loading, isInitializing]);
 
   useEffect(() => {
     const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
@@ -297,7 +418,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       accountsUnsub();
       vouchersUnsub();
     };
-  }, []);
+  }, [franchiseId, isSuperAdmin]);
 
   const setupInitialData = async () => {
     setIsInitializing(true);
@@ -372,7 +493,11 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     const acc = accounts.find(a => a.id === accountId);
     if (!acc) return 0;
     
-    // Balance calculation
+    if (acc.currentBalance !== undefined && acc.currentBalance !== null) {
+      return acc.currentBalance;
+    }
+    
+    // Fallback to in-memory balance calculation if currentBalance is not set
     let balance = acc.openingBalance;
     vouchers.forEach(v => {
       v.items.forEach(item => {
@@ -2000,9 +2125,21 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
     const bankVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'UPI');
     const debitVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'Debit');
 
-    const cashTotal = cashVouchers.reduce((sum, v) => sum + v.totalAmount, 0);
-    const bankTotal = bankVouchers.reduce((sum, v) => sum + v.totalAmount, 0);
-    const debitTotal = debitVouchers.reduce((sum, v) => sum + v.totalAmount, 0);
+    const cashSalesTotal = cashVouchers.filter(v => v.type === 'Sales').reduce((sum, v) => sum + v.totalAmount, 0);
+    const cashReceivedTotal = cashVouchers.filter(v => v.type === 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+    const cashPaymentTotal = cashVouchers.filter(v => v.type !== 'Sales' && v.type !== 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+    const cashTotal = (cashSalesTotal + cashReceivedTotal) - cashPaymentTotal;
+
+    const bankSalesTotal = bankVouchers.filter(v => v.type === 'Sales').reduce((sum, v) => sum + v.totalAmount, 0);
+    const bankReceivedTotal = bankVouchers.filter(v => v.type === 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+    const bankPaymentTotal = bankVouchers.filter(v => v.type !== 'Sales' && v.type !== 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+    const bankTotal = (bankSalesTotal + bankReceivedTotal) - bankPaymentTotal;
+
+    const debitSalesTotal = debitVouchers.filter(v => v.type === 'Sales').reduce((sum, v) => sum + v.totalAmount, 0);
+    const debitReceivedTotal = debitVouchers.filter(v => v.type === 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+    const debitPaymentTotal = debitVouchers.filter(v => v.type !== 'Sales' && v.type !== 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+    const debitTotal = (debitSalesTotal + debitReceivedTotal) - debitPaymentTotal;
+
     const grandSum = cashTotal + bankTotal + debitTotal;
 
     let currentY = 42;
@@ -2057,12 +2194,16 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
         ];
       });
 
+      const totalSum = vchList.reduce((sum, v) => sum + v.totalAmount, 0);
+
       autoTable(doc, {
         head: [['Date', 'Vch No.', 'Type', 'Particulars', 'Amount']],
         body: data.length > 0 ? data : [['-', '-', 'No entries in this category', '-', '-']],
+        foot: vchList.length > 0 ? [['', '', '', 'Total', `Rs. ${totalSum.toLocaleString('en-IN')}`]] : undefined,
         startY: currentY,
         theme: 'grid',
         headStyles: { fillColor: rgbColor },
+        footStyles: { fillColor: [248, 250, 252], textColor: [15, 23, 42], fontStyle: 'bold' },
         columnStyles: {
           4: { halign: 'right' }
         },
@@ -2072,11 +2213,39 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
       currentY = (doc as any).lastAutoTable.finalY + 12;
     };
 
-    // 1. Cash Table (Green)
-    addSectionTable('Cash Entries', cashVouchers, [16, 185, 129]);
+    // 1. Cash Table splits (Sales, Receipts, Payments)
+    const cashSalesVouchers = cashVouchers.filter(v => v.type === 'Sales');
+    const cashReceivedVouchers = cashVouchers.filter(v => v.type === 'Receipt');
+    const cashPaymentVouchers = cashVouchers.filter(v => v.type !== 'Sales' && v.type !== 'Receipt');
 
-    // 2. Bank / UPI Table (Blue)
-    addSectionTable('Bank / UPI Entries', bankVouchers, [37, 99, 235]);
+    addSectionTable('Cash Sales Entries', cashSalesVouchers, [16, 185, 129]);
+    addSectionTable('Cash Received Entries (Receipts)', cashReceivedVouchers, [13, 148, 136]);
+    addSectionTable('Cash Payment Entries', cashPaymentVouchers, [225, 29, 72]);
+
+    // 2. Bank / UPI Table split by bank account names
+    if (bankVouchers.length === 0) {
+      addSectionTable('Bank / UPI Entries', [], [37, 99, 235]);
+    } else {
+      const uniqueBankNames = Array.from(new Set(bankVouchers.map(v => {
+        const item = v.items.find(i => {
+          const name = i.accountName.toLowerCase();
+          return name === 'bank account' || name === 'bank' || name.includes('bank') || name.includes('upi');
+        });
+        return item ? item.accountName.trim() : 'Bank / UPI';
+      }))).sort();
+
+      uniqueBankNames.forEach(bankName => {
+        const specificVouchers = bankVouchers.filter(v => {
+          const item = v.items.find(i => {
+            const name = i.accountName.toLowerCase();
+            return name === 'bank account' || name === 'bank' || name.includes('bank') || name.includes('upi');
+          });
+          const name = item ? item.accountName.trim() : 'Bank / UPI';
+          return name === bankName;
+        });
+        addSectionTable(`${bankName} Entries`, specificVouchers, [37, 99, 235]);
+      });
+    }
 
     // 3. Debit / Udhar Table (Orange/Red)
     addSectionTable('Debit / Udhar Entries', debitVouchers, [249, 115, 22]);
@@ -2143,19 +2312,19 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
       {/* Screen - Daybook Quick Summary (Totals) */}
       <div className="mx-6 mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4 print:grid">
         <div className="bg-emerald-55/40 border border-emerald-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">💵 Cash Total (नकद कुल)</span>
+          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">💵 Cash Total</span>
           <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'Cash').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
         </div>
         <div className="bg-blue-55/40 border border-blue-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-          <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">📱 UPI Total (UPI कुल)</span>
+          <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">📱 UPI Total</span>
           <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'UPI').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
         </div>
         <div className="bg-orange-55/40 border border-orange-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-          <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">📁 Debit Total (उधार कुल)</span>
+          <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">📁 Credit/Debit Total</span>
           <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'Debit').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
         </div>
         <div className="bg-slate-50 border border-slate-200/50 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
-          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">📊 Grand Total (कुल जोड़)</span>
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">📊 Grand Total</span>
           <span className="text-xl font-black text-slate-800 mt-1">₹{filtered.reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
         </div>
       </div>
@@ -2765,7 +2934,14 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
 
 /** Ledger Statements View */
 function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, groups }: { accounts: Account[], vouchers: Voucher[], onDeleteVoucher: (id: string) => Promise<void>, onEditVoucher: (vch: Voucher) => void, groups: AccountGroup[] }) {
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(() => {
+    const saved = sessionStorage.getItem('selectedLedgerId');
+    if (saved) {
+      sessionStorage.removeItem('selectedLedgerId');
+      return saved;
+    }
+    return null;
+  });
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [hiddenRows, setHiddenRows] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
@@ -2963,7 +3139,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
                       if (acc) setEditingAccount(acc);
                     }}
                     className="p-1.5 hover:bg-blue-55 hover:text-blue-600 text-slate-400 rounded-lg transition-colors cursor-pointer"
-                    title="Edit Account Name/Group (खाता संपादित करें)"
+                    title="Edit Account Name/Group"
                   >
                     <Edit2 size={16} />
                   </button>
@@ -3162,13 +3338,13 @@ function AccountSetup({
                 onClick={() => setViewMode('ledgers')}
                 className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${viewMode === 'ledgers' ? 'bg-white text-slate-900 shadow-sm font-black' : 'text-slate-500 hover:text-slate-700'}`}
               >
-                📁 Ledger Accounts (खाते)
+                📁 Ledger Accounts
               </button>
               <button
                 onClick={() => setViewMode('groups')}
                 className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${viewMode === 'groups' ? 'bg-white text-slate-900 shadow-sm font-black' : 'text-slate-500 hover:text-slate-700'}`}
               >
-                🏷️ Account Groups (ग्रुप्स)
+                🏷️ Account Groups
               </button>
             </div>
             {viewMode === 'groups' && (
@@ -3217,14 +3393,14 @@ function AccountSetup({
                            {/* Interactive edit, change group & delete options */}
                            <div className="hidden group-hover/item:flex items-center gap-1">
                              <button 
-                               title="Edit Ledger Settings (खाता संपादित करें)"
+                               title="Edit Ledger Settings"
                                onClick={() => setEditingAccount(a)}
                                className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-all cursor-pointer"
                              >
                                <Edit2 size={12} />
                              </button>
                              <button 
-                               title="Delete Ledger (खाता हटाएं)"
+                               title="Delete Ledger"
                                onClick={() => setDeletingAccount(a)}
                                className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-all cursor-pointer"
                              >
@@ -3436,11 +3612,11 @@ function GroupEntryModal({
               value={type}
               onChange={e => setType(e.target.value as any)}
             >
-              <option value="Asset">Asset (सम्पत्ति)</option>
-              <option value="Liability">Liability (दायित्व)</option>
-              <option value="Equity">Equity (पूंजी/इक्विटी)</option>
-              <option value="Income">Income (आय)</option>
-              <option value="Expense">Expense (खर्च)</option>
+              <option value="Asset">Asset</option>
+              <option value="Liability">Liability</option>
+              <option value="Equity">Equity</option>
+              <option value="Income">Income</option>
+              <option value="Expense">Expense</option>
             </select>
           </div>
 
@@ -3536,7 +3712,7 @@ function AccountEditModal({
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-1.5">
-            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Account Name (खाता बही का नाम)</label>
+            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Account Name</label>
             <input 
               required
               className="w-full h-14 px-5 bg-slate-50 focus:bg-slate-100 rounded-2xl text-base font-bold border-none transition-colors focus:ring-2 focus:ring-blue-500/10 focus:outline-none"
@@ -3547,7 +3723,7 @@ function AccountEditModal({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Under Group (श्रेणी / ग्रुप)</label>
+            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Under Group</label>
             <select 
               required
               className="w-full h-14 px-5 bg-slate-50 focus:bg-slate-100 rounded-2xl text-base font-bold border-none focus:outline-none focus:ring-2 focus:ring-blue-500/10"
@@ -3563,7 +3739,7 @@ function AccountEditModal({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Opening Bal (शुरुआती बैलेंस)</label>
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Opening Bal</label>
               <input 
                 type="number"
                 className="w-full h-14 px-5 bg-slate-50 focus:bg-slate-100 rounded-2xl text-base font-bold border-none focus:outline-none"
@@ -3572,7 +3748,7 @@ function AccountEditModal({
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Type (प्रकार)</label>
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Type</label>
               <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-2xl h-14">
                 <button 
                   type="button"
@@ -4268,7 +4444,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
   // Handle transaction confirmation (Write double entry + Record learning rule if changed)
   const handleConfirmAndPost = async (teachAI: boolean) => {
     if (!selectedAccountForTx) {
-      alert("कृपया इस लेनदेन के लिए एक खाता बही चुनें (Please select a ledger account for this transaction)");
+      alert("Please select a ledger account for this transaction");
       return;
     }
 
@@ -4370,7 +4546,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
 
     } catch (e: any) {
       console.error("Voucher automated posting failed:", e);
-      alert("किन्हीं कारणों से प्रविष्टि सहेजने में त्रुटि आई (Failed to post entry): " + e.message);
+      alert("Failed to post entry: " + e.message);
     } finally {
       setIsPosting(false);
     }
@@ -4406,7 +4582,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
             </div>
             <div>
               <h2 className="font-black text-slate-800 text-sm">Upload Bank Statement</h2>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">बैंक स्टेटमेंट अपलोड</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Statement Upload Portal</p>
             </div>
           </div>
 
@@ -4528,7 +4704,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
 
           {learnedRules.length === 0 ? (
             <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
-              जब आप बैंक स्टेटमेंट से लेनदेन का मिलान कर के पोस्ट करेंगे, तो AI पैटर्न याद रखेगा और भविष्य के मिलते-जुलते लेनदेनों को ऑटोमैटिक सही खाता दे देगा।
+              When you match and post transactions from your bank statement, the AI will learn the pattern and automatically assign the correct ledger account for matching future entries.
             </p>
           ) : (
             <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
@@ -4563,7 +4739,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
             <div className="space-y-1 max-w-sm">
               <h3 className="text-sm font-black text-slate-800">No Statement Loaded</h3>
               <p className="text-xs text-slate-400 font-medium leading-relaxed">
-                मिलान शुरू करने के लिए ऊपर 1-क्लिक direct OTP fetch का उपयोग करें या अपनी बैंक स्टेटमेंट कॉपी अपलोड करें।
+                To start reconciliation, use 1-click direct OTP fetch above or upload a copy of your bank statement file.
               </p>
             </div>
             <button
@@ -4633,7 +4809,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
             <div className="space-y-2">
               <h2 className="text-xl font-display font-black text-slate-900 tracking-tight">Reconciliation Complete!</h2>
               <p className="text-xs text-emerald-800 font-bold max-w-md mx-auto leading-relaxed">
-                बधाई हो! सभी {completedCount} लेनदेन का सफलतापूर्वक मिलान कर के लेज़र में पोस्ट किया जा चुका है और AI ने आपके पैटर्न्स को सही ढंग से याद कर लिया है।
+                Congratulations! All {completedCount} transactions have been successfully matched and posted to the ledger, and the AI has learned your mapping patterns for next time.
               </p>
             </div>
 
@@ -4731,8 +4907,8 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
                     <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center gap-3">
                       <Brain size={18} className="text-indigo-600 animate-pulse shrink-0" />
                       <div>
-                        <p className="text-[11px] font-black text-indigo-900 leading-none">✓ Machine Learned (AI ने पिछली बार से सीखा)</p>
-                        <p className="text-[9px] text-indigo-500 font-bold mt-1">यह विवरण पिछली बार आपके द्वारा बदली गयी प्रविष्टि से मेल खाता है।</p>
+                        <p className="text-[11px] font-black text-indigo-900 leading-none">✓ Machine Learned (AI Pattern Matched)</p>
+                        <p className="text-[9px] text-indigo-500 font-bold mt-1">This description matches an account rule learned from your previous choices.</p>
                       </div>
                     </div>
                   )}
@@ -4745,7 +4921,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
                 
                 <div className="space-y-1">
                   <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400">Ledger Mapping</h4>
-                  <p className="text-xs text-slate-600 font-bold leading-tight">किस लेजर खाते में पोस्ट करना है:</p>
+                  <p className="text-xs text-slate-600 font-bold leading-tight">Post into ledger account:</p>
                 </div>
 
                 <div className="space-y-3">
@@ -4817,7 +4993,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
                   className="h-12 px-8 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-indigo-100 active:scale-95 transition-all text-center flex items-center justify-center gap-2"
                 >
                   <Brain size={14} />
-                  Post & Teach AI (सीखें और सहेजें)
+                  Post & Teach AI
                 </button>
               </div>
 
@@ -4877,10 +5053,10 @@ function TallySyncWorkspace({
   // Sync Progress State
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSteps, setSyncSteps] = useState<SyncProgressStep[]>([
-    { label: 'Analysing database and sorting duplicates (रुकावट जांचें)', status: 'idle' },
-    { label: 'Associating accounts with double-entry ledger groups (श्रेणी मैपिंग)', status: 'idle' },
-    { label: 'Creating ledger cards inside financial databases (खाते निर्माण)', status: 'idle' },
-    { label: 'Calculating legacy cumulative opening balances (प्रारंभिक शेष जोड़ें)', status: 'idle' }
+    { label: 'Analysing database and sorting duplicates', status: 'idle' },
+    { label: 'Associating accounts with double-entry ledger groups', status: 'idle' },
+    { label: 'Creating ledger cards inside financial databases', status: 'idle' },
+    { label: 'Calculating legacy cumulative opening balances', status: 'idle' }
   ]);
   const [syncFinished, setSyncFinished] = useState(false);
   const [syncResults, setSyncResults] = useState({ created: 0, skipped: 0 });
@@ -4889,7 +5065,7 @@ function TallySyncWorkspace({
   const presetOptions: { id: string; title: string; description: string; accountCount: number; data: MappedAccount[] }[] = [
     {
       id: 'water-agency',
-      title: 'Water Hydrant Agency Master (जल वितरण एजेंसी)',
+      title: 'Water Hydrant Agency Master',
       description: 'Legacy Sikar PHED drinking water accounts, municipal corporations, public hydrants, bulk chemical vendors, and BOB Operating A/c.',
       accountCount: 35,
       data: [
@@ -4932,7 +5108,7 @@ function TallySyncWorkspace({
     },
     {
       id: 'transport-logistics',
-      title: 'Transporters & Logistics Register (लॉजिस्टिक्स)',
+      title: 'Transporters & Logistics Register',
       description: 'Vehicle insurance reserves, spare parts sellers, diesel fuel credit cards, driver salary payables, and SBI Cash Credit account.',
       accountCount: 22,
       data: [
@@ -4962,7 +5138,7 @@ function TallySyncWorkspace({
     },
     {
       id: 'general-office',
-      title: 'FY26 General Business Trial Balance (कार्यालय)',
+      title: 'FY26 General Business Trial Balance',
       description: 'Capital reserves, Operating HDFC current account, Petty cash, Rent ledgers, and standard office electricity / telecom expenses.',
       accountCount: 15,
       data: [
@@ -5035,7 +5211,7 @@ function TallySyncWorkspace({
     setUploadedFileName(file.name);
     setIsFileLoading(true);
     setFileUploadProgress(10);
-    setFileUploadStep('Initializing file reader (फ़ाइल की जांच हो रही है)...');
+    setFileUploadStep('Initializing file reader...');
 
     const reader = new FileReader();
     const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
@@ -5531,7 +5707,7 @@ function TallySyncWorkspace({
   // Gemini AI Extraction Logic
   const handleAIExtract = async () => {
     if (!aiPrompt.trim()) {
-      triggerLocalToast('कृपया टैली खाते का विवरण यहाँ लिखें (Please type accounts details).', 'error');
+      triggerLocalToast('Please type account details first.', 'error');
       return;
     }
 
@@ -5626,10 +5802,10 @@ User Legacy Description:
 
     // Initialise steps
     setSyncSteps([
-      { label: 'Analysing database and sorting duplicates (रुकावट जांचें)...', status: 'running' },
-      { label: 'Associating accounts with double-entry ledger groups (श्रेणी मैपिंग)', status: 'idle' },
-      { label: 'Creating ledger cards inside financial databases (खाते निर्माण)', status: 'idle' },
-      { label: 'Calculating legacy cumulative opening balances (प्रारंभिक शेष जोड़ें)', status: 'idle' }
+      { label: 'Analysing database and sorting duplicates...', status: 'running' },
+      { label: 'Associating accounts with double-entry ledger groups', status: 'idle' },
+      { label: 'Creating ledger cards inside financial databases', status: 'idle' },
+      { label: 'Calculating legacy cumulative opening balances', status: 'idle' }
     ]);
 
     try {
@@ -5795,13 +5971,13 @@ User Legacy Description:
       <div className="bg-gradient-to-br from-slate-900 to-slate-950 text-white p-8 md:p-10 rounded-[2.5rem] border border-slate-800 shadow-xl overflow-hidden relative">
         <div className="max-w-2xl relative z-10 space-y-4">
           <span className="px-3.5 py-1.5 rounded-full bg-amber-500/10 text-amber-500 text-[10px] font-black uppercase tracking-wider border border-amber-500/20">
-            Enterprise Legacy Sync (टैली सिंक)
+            Enterprise Legacy Sync
           </span>
           <h2 className="text-3xl font-display font-black tracking-tight leading-none md:text-4xl text-slate-50">
             Tally.ERP 9 / Prime Ledger Sync
           </h2>
           <p className="text-slate-400 text-xs md:text-sm font-medium leading-relaxed max-w-xl">
-            अपनी पुरानी टैली का सारा खाता डेटा और प्रारंभ शेष (Opening Balances) एक क्लिक में अपने टैंकवाला बहीखाते में ट्रांसफर करें। डेटाबेस मास्टर से सीधे सिंक करें या एआई एक्सट्रैक्टर का उपयोग करें।
+            Transfer all your legacy Tally ledger accounts and opening balances to your new ledger database in one click. Sync directly from data sources or use our smart AI extractor.
           </p>
         </div>
         <div className="absolute right-0 bottom-0 top-0 w-2/5 opacity-5 hidden lg:flex items-center justify-center">
@@ -5815,13 +5991,13 @@ User Legacy Description:
           onClick={() => { setSyncTab('file'); handleResetWorkspace(); }}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${syncTab === 'file' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
         >
-          Backup File (बैकअप फ़ाइल)
+          Backup File
         </button>
         <button
           onClick={() => { setSyncTab('preset'); handleResetWorkspace(); }}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${syncTab === 'preset' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
         >
-          Preset List (तैयार लिस्ट)
+          Preset List
         </button>
         <button
           onClick={() => { setSyncTab('input'); handleResetWorkspace(); }}
@@ -5833,7 +6009,7 @@ User Legacy Description:
           onClick={() => { setSyncTab('ai'); handleResetWorkspace(); }}
           className={`flex-1 py-3 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${syncTab === 'ai' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
         >
-          AI Extractor (एआई)
+          AI Extractor
         </button>
       </div>
 
@@ -5920,7 +6096,7 @@ User Legacy Description:
                 <div>
                   <h4 className="text-xs font-black uppercase tracking-widest text-slate-450 text-slate-400">1. Select Preset Master Accounts</h4>
                   <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-1">
-                    चुनें कि किस व्यवसाय का पुराना खाता डेटा सिंक करना चाहते हैं (Select dataset to sync trial):
+                    Select which business legacy account dataset to sync trial:
                   </p>
                 </div>
                 
@@ -5976,13 +6152,13 @@ User Legacy Description:
                 <div>
                   <h4 className="text-xs font-black uppercase tracking-widest text-slate-450 text-slate-400">1. Describe using Natural Language</h4>
                   <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-1">
-                    अपनी पुरानी डायरी या डायरी में लिखे खातों का ब्यौरा नीचे हिंदी या अंग्रेजी में लिखें:
+                    Describe your legacy ledger diary accounts below in English:
                   </p>
                 </div>
 
                 <textarea
                   className="w-full h-44 p-4 text-xs font-medium leading-relaxed bg-slate-50 border-none rounded-2xl focus:ring-2 ring-slate-900/5 resize-none outline-hidden"
-                  placeholder="जैसे: रामजी वॉटर सप्लायर्स का १,२०,००० क्रेडिट बाकी है। मारुति स्पेयर पार्ट्स का ४५,००० डेबिट है। और एसबीआई बैंक का खाता जिसमें २ लाख ५० हजार बकाया है।"
+                  placeholder="e.g. Ramji Water Suppliers has 1,20,000 credit balance. Maruti Spare Parts has 45,000 debit balance. And SBI Bank account has 2,50,000 balance."
                   value={aiPrompt}
                   onChange={e => setAiPrompt(e.target.value)}
                 />
@@ -6025,7 +6201,7 @@ User Legacy Description:
               
               <div className="p-6 border-b border-slate-50 flex items-center justify-between">
                 <div>
-                  <h3 className="font-extrabold text-slate-800 text-sm tracking-tight">2. Double-Entry Verification Grid (सत्यापन तालिका)</h3>
+                  <h3 className="font-extrabold text-slate-800 text-sm tracking-tight">2. Double-Entry Verification Grid</h3>
                   <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-0.5">Verification of mapping accuracy before database inject</p>
                 </div>
 
@@ -6077,7 +6253,7 @@ User Legacy Description:
                                 onChange={e => handleUpdateParsedRow(idx, { name: e.target.value })}
                               />
                               {isDuplicate && (
-                                <p className="text-[10px] text-red-500 font-extrabold leading-none uppercase">Duplicate detected (स्किप होगा)</p>
+                                <p className="text-[10px] text-red-500 font-extrabold leading-none uppercase">Duplicate detected (Will skip)</p>
                               )}
                             </div>
                           </td>
@@ -6139,7 +6315,7 @@ User Legacy Description:
               <div className="p-6 bg-slate-50/50 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="space-y-1">
                   <p className="text-xs font-extrabold text-slate-800">
-                    Integration Target: {selectedItems.size} Accounts Mapped (सिंक करने योग्य)
+                    Integration Target: {selectedItems.size} Accounts Mapped
                   </p>
                   <p className="text-[10px] text-slate-400 font-bold leading-tight">
                     Estimated Net Balance Impact: <strong>
@@ -6175,7 +6351,7 @@ User Legacy Description:
               <div className="w-16 h-16 bg-white rounded-3xl border border-slate-100 text-slate-300 shadow-sm flex items-center justify-center mb-5 animate-pulse">
                 <RotateCcw size={28} className="text-slate-400" />
               </div>
-              <h3 className="font-extrabold text-slate-705 text-slate-600 text-sm tracking-widest uppercase mb-1.5">No accounts loaded yet (खाली ग्रिड)</h3>
+              <h3 className="font-extrabold text-slate-705 text-slate-600 text-sm tracking-widest uppercase mb-1.5">No accounts loaded yet</h3>
               <p className="text-xs text-slate-400 font-medium leading-relaxed max-w-xs">
                 To trigger the mapping simulator, select a ready-made template from the sidebar or copy-paste text!
               </p>
@@ -6216,7 +6392,7 @@ User Legacy Description:
                   <CheckCircle2 size={24} />
                 </div>
                 <div>
-                  <h3 className="font-black text-slate-800 text-sm leading-tight">Tally Legacy Integration Successful (टैली डेटा सिंक सफल)!</h3>
+                  <h3 className="font-black text-slate-800 text-sm leading-tight">Tally Legacy Integration Successful!</h3>
                   <p className="text-xs text-slate-500 font-medium leading-relaxed mt-1">
                     Created <strong>{syncResults.created}</strong> new ledger account cards. Skipped {syncResults.skipped} duplicates to safe-guard current database. You can inspect active records on Setup tab.
                   </p>
@@ -6245,7 +6421,7 @@ User Legacy Description:
                   <FileText size={20} className="text-amber-500" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-tight">Tally Binary Backup Guide / निर्देश</h3>
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-tight">Tally Binary Backup Guide</h3>
                   <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">How to get exact live Tally registers</p>
                 </div>
               </div>
@@ -6261,10 +6437,10 @@ User Legacy Description:
               <div className="p-4 bg-amber-500/5 border border-amber-500/10 rounded-2xl text-[11px] leading-relaxed text-amber-700 font-semibold space-y-1">
                 <p className="font-bold">⚠️ Tally binary backup files (.001) are compressed & encrypted.</p>
                 <p className="text-slate-600 font-medium mt-1">
-                  टैली के बाइनरी बैकअप (.001 / COMPANY.DAT) डेटा एन्क्रिप्टेड होते हैं। आपके अनुभव को चालू रखने के लिए हमने <b>जल वितरण एजेंसी (PHED & Steel Traders)</b> के 35 मानक खाते लोड कर दिए हैं।
+                  Tally binary backups (.001 / COMPANY.DAT) are encrypted. To keep your flow continuous, we have pre-loaded 35 standard ledger accounts for PHED & Steel Traders.
                 </p>
                 <p className="text-slate-600 font-medium mt-1">
-                  यदि आप बिल्कुल अपने असली टैली लेजर (Exact Live Accounts) यहाँ लोड करना चाहते हैं, तो कृपया नीचे दिए गए सरल निर्यात (Export) तरीके का उपयोग करें:
+                  If you want to sync your exact live Tally accounts, please follow the simple Export instructions below:
                 </p>
               </div>
 
@@ -6272,19 +6448,19 @@ User Legacy Description:
                 <p className="font-extrabold text-slate-400 uppercase tracking-widest text-[9px]">Step-by-step Export Guide from Tally:</p>
                 <ol className="list-decimal list-inside space-y-2 text-slate-600 font-medium leading-relaxed pl-1 text-[11px]">
                   <li>
-                    अपने कंप्यूटर पर <b>Tally ERP 9</b> या <b>Tally Prime</b> खोलें।
+                    Open <b>Tally ERP 9</b> or <b>Tally Prime</b> on your computer.
                   </li>
                   <li>
-                    <b>Gateway of Tally &gt; Display &gt; Trial Balance</b> (या List of Ledgers) पर जाएँ।
+                    Go to <b>Gateway of Tally &gt; Display &gt; Trial Balance</b> (or List of Ledgers).
                   </li>
                   <li>
-                    कीबोर्ड पर <b>Alt + E (Export)</b> दबाएँ।
+                    Press <b>Alt + E (Export)</b> on your keyboard.
                   </li>
                   <li>
-                    Export Format में <b>XML (data interchange)</b> या <b>Excel Spreadsheet</b> सेलेक्ट करें।
+                    Select <b>XML (data interchange)</b> or <b>Excel Spreadsheet</b> as the Export Format.
                   </li>
                   <li>
-                    उस एक्सपोर्ट की गई <b>XML (.xml)</b> या एक्सेल फाइल को यहाँ ड्रैग-एंड-ड्रॉप करें! उससे आपका 100% सटीक लाइव लेजर्स डेटा यहाँ एक सेकंड में लोड हो जाएगा।
+                    Drag and drop that exported <b>XML (.xml)</b> or Excel file here to load your exact registers in a second!
                   </li>
                 </ol>
               </div>
@@ -6296,7 +6472,7 @@ User Legacy Description:
                 onClick={() => setTallyBinaryGuideOpen(false)}
                 className="w-full sm:w-auto h-11 px-6 bg-slate-900 hover:bg-slate-850 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center"
               >
-                ठीक है (Dismiss Guide)
+                Dismiss Guide
               </button>
             </div>
           </div>

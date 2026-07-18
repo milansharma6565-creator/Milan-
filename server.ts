@@ -61,6 +61,49 @@ app.get("/api/health", (req, res) => {
     res.status(200).json({ status: "PROCESSED", received: true });
   });
 
+  // IoT Smart Motor state store for quick hardware sync
+  const motorStores: Record<string, {
+    targetState: "ON" | "OFF";
+    voltageL1: number;
+    currentL1: number;
+    isOn: boolean;
+    lastUpdated: string;
+  }> = {};
+
+  app.get("/api/motor/status", (req, res) => {
+    const fId = (req.query.franchiseId as string) || "default-motor";
+    if (!motorStores[fId]) {
+      motorStores[fId] = {
+        targetState: "OFF",
+        voltageL1: 425,
+        currentL1: 0,
+        isOn: false,
+        lastUpdated: new Date().toISOString()
+      };
+    }
+    res.json(motorStores[fId]);
+  });
+
+  app.post("/api/motor/update", (req, res) => {
+    const { franchiseId, targetState, voltageL1, currentL1, isOn } = req.body;
+    const fId = franchiseId || "default-motor";
+    if (!motorStores[fId]) {
+      motorStores[fId] = {
+        targetState: "OFF",
+        voltageL1: 425,
+        currentL1: 0,
+        isOn: false,
+        lastUpdated: new Date().toISOString()
+      };
+    }
+    if (targetState) motorStores[fId].targetState = targetState;
+    if (voltageL1 !== undefined) motorStores[fId].voltageL1 = Number(voltageL1);
+    if (currentL1 !== undefined) motorStores[fId].currentL1 = Number(currentL1);
+    if (isOn !== undefined) motorStores[fId].isOn = !!isOn;
+    motorStores[fId].lastUpdated = new Date().toISOString();
+    res.json({ success: true, state: motorStores[fId] });
+  });
+
   // Letterhead/AI Generation Endpoint
   app.post("/api/generate-letter", async (req, res) => {
     try {

@@ -26,7 +26,8 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
   // UPI Payment Link Customization
   const upiId = franchise?.upiId || "rajha94133@barodampay"; // Custom or Business UPI ID
   const franchiseName = franchise?.printName || franchise?.name || "TankerWala";
-  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(franchiseName)}&am=${bill.grandTotal}&cu=INR&tn=Bill%20${bill.billNumber}`;
+  const finalAmount = bill.includedPendingDues ? (bill.combinedTotalAmount || bill.grandTotal) : bill.grandTotal;
+  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(franchiseName)}&am=${finalAmount}&cu=INR&tn=Bill%20${bill.billNumber}`;
   const printPhone = franchise?.printMobile || franchise?.operatorMobile || "94133 39987";
   const printAddress = franchise?.printAddress || "Behind balaji dharm kanta, near puniya wines jaipur road sikar, Rajasthan 332001";
 
@@ -63,7 +64,6 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
             <span>Driver:</span> 
             <div className="text-right">
               <p className="font-bold uppercase leading-none">{bill.driverName}</p>
-              {bill.driverMobile && <p className="text-[9px] text-slate-500 font-medium">({bill.driverMobile})</p>}
             </div>
           </div>
         )}
@@ -110,9 +110,23 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
 
       <div className="border-t border-dashed pt-1.5 space-y-0.5 text-[11px]">
         <div className="flex justify-between items-center text-xs font-black text-slate-950">
-          <span>GRAND TOTAL:</span>
+          <span>{bill.includedPendingDues ? 'CURRENT BILL TOTAL:' : 'GRAND TOTAL:'}</span>
           <span>{formatCurrency(bill.grandTotal)}</span>
         </div>
+
+        {bill.includedPendingDues && (
+          <div className="my-1 border border-dashed border-slate-300 p-1.5 rounded bg-slate-50 text-[9px]">
+            <p className="font-extrabold text-slate-950 uppercase tracking-wide leading-none mb-1">Previous Pending Dues:</p>
+            <p className="text-slate-650 whitespace-pre-line leading-tight font-semibold mb-1.5">
+              {bill.previousPendingDuesDetails}
+            </p>
+            <div className="flex justify-between items-center font-extrabold text-[11px] text-slate-950 border-t border-dotted border-slate-300 pt-1">
+              <span>COMBINED TOTAL:</span>
+              <span>{formatCurrency(bill.combinedTotalAmount || 0)}</span>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-between items-center text-[10px] text-slate-600">
           <span>Payment:</span>
           <span className="font-extrabold uppercase text-slate-950">{bill.paymentMode}</span>

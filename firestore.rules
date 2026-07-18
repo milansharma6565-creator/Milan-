@@ -4,17 +4,16 @@ service cloud.firestore {
     // ---------------------------------------------------------
     // GLOBAL HELPERS
     // ---------------------------------------------------------
+    function getEmail() {
+      return request.auth.token.get('email', '').lower();
+    }
     function isSignedIn() { 
-      return request.auth != null && 
-             (request.auth.token.get('email_verified', false) == true || 
-              request.auth.token.get('firebase', {}).get('sign_in_provider', '') == 'google.com' ||
-              request.auth.token.email.lower() == 'milan.sharma6565@gmail.com' ||
-              request.auth.token.email.lower() == 'rajhanssikar@gmail.com');
+      return request.auth != null;
     }
     function isAuthorizedUser() {
       return isSignedIn() && 
-             (request.auth.token.email.lower() == 'rajhanssikar@gmail.com' || 
-              request.auth.token.email.lower() == 'milan.sharma6565@gmail.com' ||
+             (getEmail() == 'rajhanssikar@gmail.com' || 
+              getEmail() == 'milan.sharma6565@gmail.com' ||
               request.auth.uid == 'R3YQrAUh1tTGp0ghlwT7hgQ4Nm52'); 
     }
     function isAdmin() { 
@@ -22,16 +21,17 @@ service cloud.firestore {
     }
     function isSuperAdmin() {
       return request.auth != null && 
-             (request.auth.token.email.lower() == 'milan.sharma6565@gmail.com' ||
+             (getEmail() == 'milan.sharma6565@gmail.com' ||
               request.auth.uid == 'R3YQrAUh1tTGp0ghlwT7hgQ4Nm52');
     }
     function isFranchiseOwner(fId) {
       return isSignedIn() && 
              (isSuperAdmin() || 
-              (fId != null && fId != '' && fId != 'legacy-rajhans' && exists(/databases/$(database)/documents/franchises/$(fId)) && 
-               get(/databases/$(database)/documents/franchises/$(fId)).data.email.lower() == request.auth.token.email.lower() &&
+              (fId != null && fId != '' && fId != 'legacy-rajhans' && fId != 'legacy-pile' && exists(/databases/$(database)/documents/franchises/$(fId)) && 
+               get(/databases/$(database)/documents/franchises/$(fId)).data.email.lower() == getEmail() &&
                get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active') ||
-              ((fId == null || fId == '' || fId == 'legacy-rajhans' || fId == 'legacy-pile' || fId == 'rajhans') && request.auth.token.email.lower() == 'rajhanssikar@gmail.com'));
+              ((fId == null || fId == '' || fId == 'legacy-rajhans' || fId == 'legacy-pile' || fId == 'rajhans') && getEmail() == 'rajhanssikar@gmail.com') ||
+              (fId == 'legacy-pile' && getEmail() == 'rajhanspilefoundation@gmail.com'));
     }
     function isFranchiseActive(fId) {
       return fId == null || fId == '' || fId == 'legacy-rajhans' || fId == 'legacy-pile' ||
@@ -61,9 +61,10 @@ service cloud.firestore {
 
     match /franchises/{fId} {
       allow get: if true; 
-      allow list: if isSuperAdmin() || (isSignedIn() && (resource.data.status == 'Active' || resource.data.email.lower() == request.auth.token.email.lower()));
-      allow create, delete: if isSuperAdmin();
-      allow update: if isSuperAdmin() || (isSignedIn() && existing().email.lower() == request.auth.token.email.lower() && existing().status == 'Active');
+      allow list: if isSuperAdmin() || (isSignedIn() && (resource.data.status == 'Active' || resource.data.email.lower() == getEmail()));
+      allow create: if isSuperAdmin() || (isSignedIn() && incoming().email.lower() == getEmail());
+      allow delete: if isSuperAdmin();
+      allow update: if isSuperAdmin() || (isSignedIn() && existing().email.lower() == getEmail() && existing().status == 'Active');
     }
 
     // ---------------------------------------------------------
@@ -249,14 +250,14 @@ service cloud.firestore {
       allow list: if true; // Allowed for customer portal
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidBill(incoming());
       allow update: if true;
-      allow delete: if isFranchiseAuthorized(existing().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
+      allow delete: if isFranchiseAuthorized(existing().get('franchiseId', null)) || getEmail() == 'rajhanssikar@gmail.com';
     }
 
     match /trips/{tripId} {
       allow read: if true;
       allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidTrip(incoming());
       allow update: if true; // Both admin and driver might update status (delivered)
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
+      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null)) || getEmail() == 'rajhanssikar@gmail.com';
     }
 
     match /drivers/{driverId} {
@@ -310,7 +311,7 @@ service cloud.firestore {
     match /vouchers/{voucherId} {
       allow read: if true;
       allow create, update: if true;
-      allow delete: if isFranchiseAuthorized(existing().get('franchiseId', null)) || request.auth.token.email.lower() == 'rajhanssikar@gmail.com';
+      allow delete: if isFranchiseAuthorized(existing().get('franchiseId', null)) || getEmail() == 'rajhanssikar@gmail.com';
     }
 
     match /attendance/{atId} {
@@ -351,7 +352,11 @@ service cloud.firestore {
 
     match /settings/{docId} {
       allow read: if true;
-      allow write: if isSuperAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read, write: if true;
     }
 
     match /tenderBids/{bidId} {
@@ -375,6 +380,13 @@ service cloud.firestore {
 
     match /print_jobs/{jobId} {
       allow read, write: if true;
+    }
+
+    match /smartMotors/{motorId} {
+      allow read, write: if true;
+      match /logs/{logId} {
+        allow read, write: if true;
+      }
     }
   }
 }

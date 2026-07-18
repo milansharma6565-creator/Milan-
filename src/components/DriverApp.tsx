@@ -1568,7 +1568,7 @@ export function DriverApp() {
                     <p className="text-xs text-indigo-300 font-bold uppercase tracking-wider font-mono">+91 {driver.mobile}</p>
                     <div className="mt-1 flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-md text-[10px] font-bold w-max border border-emerald-500/20">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Active Driver (चालक)
+                      Active Driver
                     </div>
                   </div>
                 </div>
@@ -1583,7 +1583,7 @@ export function DriverApp() {
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Monthly Salary</p>
-                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(मासिक वेतन)</p>
+                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(Monthly Salary)</p>
                   </div>
                   <div className="mt-4">
                     <p className="text-xl font-black text-white">₹{(driver.monthlySalary || 0).toLocaleString()}</p>
@@ -1600,7 +1600,7 @@ export function DriverApp() {
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Account Balance</p>
-                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(खाता बैलेंस)</p>
+                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(Account Balance)</p>
                   </div>
                   <div className="mt-4">
                     <p className={`text-xl font-black ${
@@ -1611,7 +1611,7 @@ export function DriverApp() {
                     <p className={`text-[9px] font-bold uppercase mt-1 ${
                       driverAccount?.balanceType === 'Cr' ? 'text-emerald-500' : 'text-orange-400'
                     }`}>
-                      {driverAccount?.balanceType === 'Cr' ? 'Due to You (जमा)' : 'Advance (अग्रिम)'}
+                      {driverAccount?.balanceType === 'Cr' ? 'Due to You (Credit)' : 'Advance (Debit)'}
                     </p>
                   </div>
                 </div>
@@ -1623,7 +1623,7 @@ export function DriverApp() {
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Days Worked</p>
-                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(काम के दिन - चालू माह)</p>
+                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(Worked Days - Current Month)</p>
                   </div>
                   <div className="mt-4">
                     <p className="text-xl font-black text-white">{workedDaysCount} Days</p>
@@ -1638,7 +1638,7 @@ export function DriverApp() {
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Trips Completed</p>
-                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(कुल ट्रिप्स - चालू माह)</p>
+                    <p className="text-[10px] text-indigo-400 font-bold tracking-wide mt-0.5">(Total Trips - Current Month)</p>
                   </div>
                   <div className="mt-4">
                     <p className="text-xl font-black text-white">{thisMonthTripsCount} Trips</p>
@@ -1651,7 +1651,7 @@ export function DriverApp() {
               <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="font-bold text-white text-base">Attendance History (हाजिरी इतिहास)</h3>
+                    <h3 className="font-bold text-white text-base">Attendance History</h3>
                     <p className="text-[10px] text-slate-400 mt-0.5">Your record for current month ({format(new Date(), 'MMMM yyyy')})</p>
                   </div>
                   <div className="bg-slate-800 text-slate-300 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
@@ -1691,9 +1691,9 @@ export function DriverApp() {
                               att.status === 'Half Day' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
                               'bg-red-500/10 text-red-400 border border-red-500/20'
                             }`}>
-                              {att.status === 'Full Day' ? 'Full Day (पूरा दिन)' :
-                               att.status === 'Half Day' ? 'Half Day (आधा दिन)' :
-                               'Absent (अनुपस्थित)'}
+                              {att.status === 'Full Day' ? 'Full Day' :
+                               att.status === 'Half Day' ? 'Half Day' :
+                               'Absent'}
                             </span>
                           </div>
                         );
@@ -1708,7 +1708,7 @@ export function DriverApp() {
                   <div>
                     <h3 className="font-bold text-white text-base flex items-center gap-2">
                       <Trophy className="text-yellow-500 animate-bounce" size={18} />
-                      Trip Scoreboard (रैंकिंग बोर्ड)
+                      Trip Scoreboard
                     </h3>
                     <p className="text-[10px] text-slate-400 mt-0.5">Healthy competition to complete more trips!</p>
                   </div>
@@ -1762,7 +1762,7 @@ export function DriverApp() {
                                 {lbItem.name}
                                 {isCurrentUser && (
                                   <span className="bg-indigo-600/30 text-indigo-400 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">
-                                    YOU (आप)
+                                    YOU
                                   </span>
                                 )}
                               </p>
@@ -1787,7 +1787,7 @@ export function DriverApp() {
               <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="font-bold text-white text-base">Ledger Transactions (लेन-देन का विवरण)</h3>
+                    <h3 className="font-bold text-white text-base">Ledger Transactions</h3>
                     <p className="text-[10px] text-slate-400 mt-0.5">Details of salary advances, payments and penalties</p>
                   </div>
                   <div className="bg-slate-800 text-slate-300 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">

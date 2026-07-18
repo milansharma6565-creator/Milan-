@@ -1287,14 +1287,14 @@ export function TendersMarketplace({ franchiseId, currentFranchise, isSuperAdmin
                   <option value="">All Blocks / Tehsils</option>
                   {filterDistrict.toLowerCase() === 'sikar' ? (
                     <>
-                      <option value="Fatehpur">Fatehpur (फतेहपुर)</option>
-                      <option value="Laxmangarh">Laxmangarh (लक्ष्मणगढ़)</option>
-                      <option value="Dantaramgarh">Dantaramgarh (दांतारामगढ़)</option>
-                      <option value="Neem Ka Thana">Neem Ka Thana (नीमकाथाना)</option>
-                      <option value="Sri Madhopur">Sri Madhopur (श्रीमधोपुर)</option>
-                      <option value="Khandela">Khandela (खंडेला)</option>
-                      <option value="Dhod">Dhod (धोद)</option>
-                      <option value="Piprali">Piprali (पिपराली)</option>
+                      <option value="Fatehpur">Fatehpur</option>
+                      <option value="Laxmangarh">Laxmangarh</option>
+                      <option value="Dantaramgarh">Dantaramgarh</option>
+                      <option value="Neem Ka Thana">Neem Ka Thana</option>
+                      <option value="Sri Madhopur">Sri Madhopur</option>
+                      <option value="Khandela">Khandela</option>
+                      <option value="Dhod">Dhod</option>
+                      <option value="Piprali">Piprali</option>
                       <option value="Sikar">Sikar City</option>
                     </>
                   ) : (
@@ -1629,8 +1629,8 @@ export function TendersMarketplace({ franchiseId, currentFranchise, isSuperAdmin
                       onChange={(e) => setModalBlock(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-blue-500 focus:bg-white transition-all font-sans"
                     >
-                      <option value="Fatehpur">Fatehpur (फतेहपुर)</option>
-                      <option value="Laxmangarh">Laxmangarh (लक्ष्मणगढ़)</option>
+                      <option value="Fatehpur">Fatehpur</option>
+                      <option value="Laxmangarh">Laxmangarh</option>
                       <option value="Dantaramgarh">Dantaramgarh</option>
                       <option value="Neem Ka Thana">Neem Ka Thana</option>
                       <option value="Sri Madhopur">Sri Madhopur</option>

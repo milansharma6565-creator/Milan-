@@ -358,7 +358,6 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
       (
         a.name.toLowerCase().includes('advance') || 
         a.name.toLowerCase().includes('udhar') || 
-        a.name.toLowerCase().includes('उधार') || 
         a.group?.toLowerCase().includes('advance')
       )
     );
@@ -724,7 +723,6 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
                       (
                         a.name.toLowerCase().includes('advance') || 
                         a.name.toLowerCase().includes('udhar') || 
-                        a.name.toLowerCase().includes('उधार') || 
                         a.group?.toLowerCase().includes('advance')
                       )
                     );

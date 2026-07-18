@@ -61,6 +61,15 @@ import { X as LucideX } from 'lucide-react';
 import { SandboxSimulatorHub } from './SandboxSimulatorHub';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 
+const parseFirestoreDate = (val: any): Date => {
+  if (!val) return new Date();
+  if (val instanceof Date) return val;
+  if (typeof val.toDate === 'function') return val.toDate();
+  if (val.seconds !== undefined) return new Date(val.seconds * 1000);
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? new Date() : d;
+};
+
 function LiveChatAdminModal({ bill, onClose }: { bill: Bill, onClose: () => void }) {
    const [text, setText] = useState('');
    const [chatData, setChatData] = useState<any>(null);
@@ -343,8 +352,15 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vouchersList, setVouchersList] = useState<any[]>([]);
 
+  const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
+  const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+
   const stats = useMemo(() => {
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const todayStr = tokenFilter === 'Today' 
+      ? format(new Date(), 'yyyy-MM-dd') 
+      : tokenFilter === 'Yesterday' 
+        ? format(subDays(new Date(), 1), 'yyyy-MM-dd') 
+        : selectedTokenDate;
     const memoNow = new Date();
     const memoWeekStartObj = startOfWeek(memoNow, { weekStartsOn: 1 });
     memoWeekStartObj.setHours(0, 0, 0, 0);
@@ -360,7 +376,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         } catch (e) {}
       }
       try {
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         return format(bDate, 'yyyy-MM-dd') === todayStr;
       } catch (e) {
         return false;
@@ -433,7 +449,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const chartData = Array.from({ length: 7 }).map((_, i) => {
       const date = subDays(new Date(), 6 - i);
       const dayBills = bills.filter(b => {
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         return format(bDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') && 
                b.status !== 'Cancelled';
       });
@@ -488,12 +504,16 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       });
 
       return {
+        id: driver.id,
         name: driver.name,
         mobile: driver.mobile,
         tripCount: driverBills.length,
         todayTripCount: todayDriverBills.length,
         weekTripCount: weekDriverBills.length,
         monthTripCount: monthDriverBills.length,
+        todayBills: todayDriverBills,
+        weekBills: weekDriverBills,
+        monthBills: monthDriverBills,
         mostUsedTractor: Object.entries(tractorUsage).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A'
       };
     }).filter(d => d.tripCount > 0);
@@ -571,7 +591,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     monthStartObj.setHours(0, 0, 0, 0);
 
     const monthBillsList = bills.filter(b => {
-      const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+      const bDate = parseFirestoreDate(b.date);
       return bDate >= monthStartObj && b.status === 'Delivered';
     });
 
@@ -586,7 +606,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     weekStartObj.setHours(0, 0, 0, 0);
     const weekBillsList = bills.filter(b => {
       try {
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         return bDate >= weekStartObj && b.status === 'Delivered';
       } catch (e) {
         return false;
@@ -603,7 +623,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const yearStartObj = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
     const yearBillsList = bills.filter(b => {
       try {
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         return bDate >= yearStartObj && b.status === 'Delivered';
       } catch (e) {
         return false;
@@ -619,7 +639,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
     const monthBList = bills.filter(b => {
       try {
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         const now = new Date();
         return bDate.getMonth() === now.getMonth() && bDate.getFullYear() === now.getFullYear() && b.status !== 'Cancelled';
       } catch (e) {
@@ -655,7 +675,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
     const monthDeliveredSale = bills.filter(b => {
       try {
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         const now = new Date();
         return bDate.getMonth() === now.getMonth() && bDate.getFullYear() === now.getFullYear() && b.status === 'Delivered';
       } catch (e) {
@@ -698,9 +718,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       monthTankerTrips,
       recentBills: allBillsSorted.slice(0, 10)
     };
-  }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts, franchiseId, commissionPercentage]);
+  }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts, franchiseId, commissionPercentage, tokenFilter, selectedTokenDate]);
 
-  const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
   const [driverTripPeriod, setDriverTripPeriod] = useState<'Day' | 'Week' | 'Month'>('Day');
 
   const activeDriverStatsList = useMemo(() => {
@@ -710,16 +729,20 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           driverTripPeriod === 'Day' ? driver.todayTripCount :
           driverTripPeriod === 'Week' ? driver.weekTripCount :
           driver.monthTripCount;
+        const periodBills = 
+          driverTripPeriod === 'Day' ? driver.todayBills :
+          driverTripPeriod === 'Week' ? driver.weekBills :
+          driver.monthBills;
         return {
           ...driver,
-          activeTripCount: count
+          activeTripCount: count,
+          activeBills: periodBills || []
         };
       })
       .filter((d: any) => d.activeTripCount > 0)
       .sort((a: any, b: any) => b.activeTripCount - a.activeTripCount);
   }, [stats.driverStats, driverTripPeriod]);
   const [billSortOption, setBillSortOption] = useState<'Default' | 'Number' | 'Time'>('Default');
-  const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [quickVoucher, setQuickVoucher] = useState<{
     type: 'Receipt' | 'Payment';
     paymentMethod: 'Cash' | 'Bank';
@@ -730,6 +753,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [isSalesModalOpen, setIsSalesModalOpen] = useState(false);
   const [salesChartRange, setSalesChartRange] = useState<'weekly' | 'monthly' | 'half-yearly' | 'yearly'>('weekly');
   const [insuranceAlerts, setInsuranceAlerts] = useState<Tractor[]>([]);
+  const [selectedDriverDetails, setSelectedDriverDetails] = useState<{
+    name: string;
+    bills: any[];
+    period: 'Day' | 'Week' | 'Month';
+  } | null>(null);
 
   useEffect(() => {
     if (tractors.length > 0) {
@@ -1053,7 +1081,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           } catch (e) {}
         }
         
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         return format(bDate, 'yyyy-MM-dd') === todayStr;
       });
     } else if (tokenFilter === 'Yesterday') {
@@ -1067,7 +1095,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           } catch (e) {}
         }
 
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         return format(bDate, 'yyyy-MM-dd') === yesterdayStr;
       });
     } else {
@@ -1082,7 +1110,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           } catch (e) {}
         }
 
-        const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+        const bDate = parseFirestoreDate(b.date);
         return format(bDate, 'yyyy-MM-dd') === selectedTokenDate;
       });
     }
@@ -1216,6 +1244,435 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, number: string } | null>(null);
 
   const [isWiping, setIsWiping] = useState(false);
+  const [isSeedingDemo, setIsSeedingDemo] = useState(false);
+  const [isAutoSeeding, setIsAutoSeeding] = useState(false);
+
+  useEffect(() => {
+    const activeFid = franchiseId || currentFranchise?.id;
+    if (!activeFid || isAutoSeeding || isSeedingDemo) return;
+
+    const key = `autoseed_done_${activeFid}`;
+    if (localStorage.getItem(key)) return;
+
+    const runAutoSeed = async () => {
+      try {
+        const custSnap = await getDocs(query(collection(db, 'customers'), where('franchiseId', '==', activeFid), limit(1)));
+        const billsSnap = await getDocs(query(collection(db, 'bills'), where('franchiseId', '==', activeFid), limit(1)));
+        
+        if (custSnap.empty && billsSnap.empty) {
+          console.log("Database is empty, starting silent auto-seed...");
+          setIsAutoSeeding(true);
+          
+          const fName = currentFranchise?.name || activeFid;
+          
+          // 1. Ensure baseline ledgers are set up
+          await ledgerAutomation.setupFranchiseLedgers(activeFid, fName);
+
+          // 2. Create 3 Sample Customers
+          const demoCustomers = [
+            {
+              franchiseId: activeFid,
+              name: "Hotel Sikar Palace (Commercial)",
+              mobile: "9928374829",
+              address: "Piprali Bypass Rd, Sikar",
+              pendingAmount: 0,
+              category: "TANKER",
+              createdAt: serverTimestamp()
+            },
+            {
+              franchiseId: activeFid,
+              name: "Sharma Agriculture Farm",
+              mobile: "9414828109",
+              address: "Harsh Rd, Sikar",
+              pendingAmount: 1800,
+              category: "STANDBY_TANKER",
+              createdAt: serverTimestamp()
+            },
+            {
+              franchiseId: activeFid,
+              name: "Ambuja Cement Plant Site",
+              mobile: "9829011223",
+              address: "Industrial Area Phase I, Sikar",
+              pendingAmount: 0,
+              category: "TANKER",
+              createdAt: serverTimestamp()
+            }
+          ];
+
+          for (const cust of demoCustomers) {
+            await addDoc(collection(db, 'customers'), cust);
+          }
+
+          // 3. Create 2 Sample Drivers
+          const demoDrivers = [
+            {
+              franchiseId: activeFid,
+              name: "Rajesh Kumar Yadav",
+              mobile: "9988112233",
+              monthlySalary: 18000,
+              status: "Active",
+              pin: "1234",
+              email: "rajesh.driver@gmail.com",
+              createdAt: serverTimestamp()
+            },
+            {
+              franchiseId: activeFid,
+              name: "Amit Singh Shekhawat",
+              mobile: "9112233445",
+              monthlySalary: 16500,
+              status: "Active",
+              pin: "5678",
+              email: "amit.driver@gmail.com",
+              createdAt: serverTimestamp()
+            }
+          ];
+
+          for (const drv of demoDrivers) {
+            await addDoc(collection(db, 'drivers'), drv);
+          }
+
+          // 4. Create 2 Sample Tractors
+          const demoTractors = [
+            {
+              franchiseId: activeFid,
+              name: "Swaraj 855 FE (T-01)",
+              vehicleNumber: "RJ-23-RA-8291",
+              createdAt: serverTimestamp()
+            },
+            {
+              franchiseId: activeFid,
+              name: "Mahindra Arjun Ultra (T-02)",
+              vehicleNumber: "RJ-23-RA-1104",
+              createdAt: serverTimestamp()
+            }
+          ];
+
+          for (const trac of demoTractors) {
+            await addDoc(collection(db, 'tractors'), trac);
+          }
+
+          // 5. Create Sample Past Bills
+          const pastBills = [
+            {
+              franchiseId: activeFid,
+              billNumber: "BW-DEMO-001",
+              date: serverTimestamp(),
+              customerId: "temp-c1",
+              customerName: "Hotel Sikar Palace (Commercial)",
+              customerMobile: "9928374829",
+              customerAddress: "Piprali Bypass Rd, Sikar",
+              category: "TANKER",
+              tankerSize: "5000 Liters",
+              quantity: 2,
+              rate: 600,
+              totalAmount: 1200,
+              extraCharges: 0,
+              discount: 100,
+              grandTotal: 1100,
+              commissionAmount: 55,
+              paymentMode: "UPI",
+              status: "Delivered",
+              isSettled: true,
+              createdAt: serverTimestamp()
+            },
+            {
+              franchiseId: activeFid,
+              billNumber: "BW-DEMO-002",
+              date: serverTimestamp(),
+              customerId: "temp-c2",
+              customerName: "Sharma Agriculture Farm",
+              customerMobile: "9414828109",
+              customerAddress: "Harsh Rd, Sikar",
+              category: "STANDBY_TANKER",
+              tankerSize: "6000 Liters",
+              quantity: 1,
+              rate: 700,
+              totalAmount: 700,
+              extraCharges: 50,
+              discount: 0,
+              grandTotal: 750,
+              commissionAmount: 37.5,
+              paymentMode: "Cash",
+              status: "Delivered",
+              isSettled: true,
+              createdAt: serverTimestamp()
+            }
+          ];
+
+          for (const b of pastBills) {
+            await addDoc(collection(db, 'bills'), b);
+          }
+
+          // 6. Update Account Balances
+          const accountsSnap = await getDocs(collection(db, 'accounts'));
+          const cashAcc = accountsSnap.docs.find(d => d.data().name === 'Cash' && d.data().franchiseId === activeFid);
+          const bankAcc = accountsSnap.docs.find(d => d.data().name === 'Bank Account' && d.data().franchiseId === activeFid);
+          const serviceAcc = accountsSnap.docs.find(d => d.data().name === 'Sales' && d.data().franchiseId === activeFid);
+
+          if (cashAcc) {
+            await updateDoc(doc(db, 'accounts', cashAcc.id), { currentBalance: 750 });
+          }
+          if (bankAcc) {
+            await updateDoc(doc(db, 'accounts', bankAcc.id), { currentBalance: 1100 });
+          }
+          if (serviceAcc) {
+            await updateDoc(doc(db, 'accounts', serviceAcc.id), { currentBalance: 1850 });
+          }
+
+          // 7. Seed 2 Sample Ledger Entries for reports
+          const ledgEntries = [
+            {
+              franchiseId: activeFid,
+              date: serverTimestamp(),
+              type: 'Income',
+              category: 'Water Sales',
+              partyName: "Hotel Sikar Palace (Commercial)",
+              description: "Water Dispatched via invoice #BW-DEMO-001",
+              amount: 1100,
+              paymentMode: 'UPI',
+              createdAt: serverTimestamp()
+            },
+            {
+              franchiseId: activeFid,
+              date: serverTimestamp(),
+              type: 'Income',
+              category: 'Water Sales',
+              partyName: "Sharma Agriculture Farm",
+              description: "Water Dispatched via invoice #BW-DEMO-002",
+              amount: 750,
+              paymentMode: 'Cash',
+              createdAt: serverTimestamp()
+            }
+          ];
+
+          for (const ent of ledgEntries) {
+            await addDoc(collection(db, 'ledger'), ent);
+          }
+          
+          localStorage.setItem(key, 'true');
+          console.log("Auto-seeding complete!");
+          window.location.reload();
+        } else {
+          localStorage.setItem(key, 'true');
+        }
+      } catch (err) {
+        console.error("Silent auto-seed failed:", err);
+      } finally {
+        setIsAutoSeeding(false);
+      }
+    };
+
+    const timer = setTimeout(runAutoSeed, 1500);
+    return () => clearTimeout(timer);
+  }, [customers, bills, franchiseId, currentFranchise]);
+
+  const handleAutoSeedDemoData = async () => {
+    if (isSeedingDemo) return;
+    const activeFid = franchiseId || currentFranchise?.id;
+    if (!activeFid) {
+      alert("Error: Active franchise context is missing.");
+      return;
+    }
+    const fName = currentFranchise?.name || activeFid;
+
+    if (!confirm(`This will initialize sample data (Customers, Drivers, Tractors, Bills, and Ledger accounts) for your franchise "${fName}" so you can view a fully operational system. Would you like to proceed?`)) return;
+
+    setIsSeedingDemo(true);
+    try {
+      // 1. Ensure baseline ledgers are set up
+      await ledgerAutomation.setupFranchiseLedgers(activeFid, fName);
+
+      // 2. Create 3 Sample Customers
+      const demoCustomers = [
+        {
+          franchiseId: activeFid,
+          name: "Hotel Sikar Palace (Commercial)",
+          mobile: "9928374829",
+          address: "Piprali Bypass Rd, Sikar",
+          pendingAmount: 0,
+          category: "TANKER",
+          createdAt: serverTimestamp()
+        },
+        {
+          franchiseId: activeFid,
+          name: "Sharma Agriculture Farm",
+          mobile: "9414828109",
+          address: "Harsh Rd, Sikar",
+          pendingAmount: 1800,
+          category: "STANDBY_TANKER",
+          createdAt: serverTimestamp()
+        },
+        {
+          franchiseId: activeFid,
+          name: "Ambuja Cement Plant Site",
+          mobile: "9829011223",
+          address: "Industrial Area Phase I, Sikar",
+          pendingAmount: 0,
+          category: "TANKER",
+          createdAt: serverTimestamp()
+        }
+      ];
+
+      for (const cust of demoCustomers) {
+        await addDoc(collection(db, 'customers'), cust);
+      }
+
+      // 3. Create 2 Sample Drivers
+      const demoDrivers = [
+        {
+          franchiseId: activeFid,
+          name: "Rajesh Kumar Yadav",
+          mobile: "9988112233",
+          monthlySalary: 18000,
+          status: "Active",
+          pin: "1234",
+          email: "rajesh.driver@gmail.com",
+          createdAt: serverTimestamp()
+        },
+        {
+          franchiseId: activeFid,
+          name: "Amit Singh Shekhawat",
+          mobile: "9112233445",
+          monthlySalary: 16500,
+          status: "Active",
+          pin: "5678",
+          email: "amit.driver@gmail.com",
+          createdAt: serverTimestamp()
+        }
+      ];
+
+      for (const drv of demoDrivers) {
+        await addDoc(collection(db, 'drivers'), drv);
+      }
+
+      // 4. Create 2 Sample Tractors
+      const demoTractors = [
+        {
+          franchiseId: activeFid,
+          name: "Swaraj 855 FE (T-01)",
+          vehicleNumber: "RJ-23-RA-8291",
+          createdAt: serverTimestamp()
+        },
+        {
+          franchiseId: activeFid,
+          name: "Mahindra Arjun Ultra (T-02)",
+          vehicleNumber: "RJ-23-RA-1104",
+          createdAt: serverTimestamp()
+        }
+      ];
+
+      for (const trac of demoTractors) {
+        await addDoc(collection(db, 'tractors'), trac);
+      }
+
+      // 5. Create Sample Past Bills
+      const pastBills = [
+        {
+          franchiseId: activeFid,
+          billNumber: "BW-DEMO-001",
+          date: serverTimestamp(),
+          customerId: "temp-c1",
+          customerName: "Hotel Sikar Palace (Commercial)",
+          customerMobile: "9928374829",
+          customerAddress: "Piprali Bypass Rd, Sikar",
+          category: "TANKER",
+          tankerSize: "5000 Liters",
+          quantity: 2,
+          rate: 600,
+          totalAmount: 1200,
+          extraCharges: 0,
+          discount: 100,
+          grandTotal: 1100,
+          commissionAmount: 55,
+          paymentMode: "UPI",
+          status: "Delivered",
+          isSettled: true,
+          createdAt: serverTimestamp()
+        },
+        {
+          franchiseId: activeFid,
+          billNumber: "BW-DEMO-002",
+          date: serverTimestamp(),
+          customerId: "temp-c2",
+          customerName: "Sharma Agriculture Farm",
+          customerMobile: "9414828109",
+          customerAddress: "Harsh Rd, Sikar",
+          category: "STANDBY_TANKER",
+          tankerSize: "6000 Liters",
+          quantity: 1,
+          rate: 700,
+          totalAmount: 700,
+          extraCharges: 50,
+          discount: 0,
+          grandTotal: 750,
+          commissionAmount: 37.5,
+          paymentMode: "Cash",
+          status: "Delivered",
+          isSettled: true,
+          createdAt: serverTimestamp()
+        }
+      ];
+
+      for (const b of pastBills) {
+        await addDoc(collection(db, 'bills'), b);
+      }
+
+      // 6. Update Account Balances
+      const accountsSnap = await getDocs(collection(db, 'accounts'));
+      const cashAcc = accountsSnap.docs.find(d => d.data().name === 'Cash' && d.data().franchiseId === activeFid);
+      const bankAcc = accountsSnap.docs.find(d => d.data().name === 'Bank Account' && d.data().franchiseId === activeFid);
+      const serviceAcc = accountsSnap.docs.find(d => d.data().name === 'Sales' && d.data().franchiseId === activeFid);
+
+      if (cashAcc) {
+        await updateDoc(doc(db, 'accounts', cashAcc.id), { currentBalance: 750 });
+      }
+      if (bankAcc) {
+        await updateDoc(doc(db, 'accounts', bankAcc.id), { currentBalance: 1100 });
+      }
+      if (serviceAcc) {
+        await updateDoc(doc(db, 'accounts', serviceAcc.id), { currentBalance: 1850 });
+      }
+
+      // 7. Seed 2 Sample Ledger Entries for reports
+      const ledgEntries = [
+        {
+          franchiseId: activeFid,
+          date: serverTimestamp(),
+          type: 'Income',
+          category: 'Water Sales',
+          partyName: "Hotel Sikar Palace (Commercial)",
+          description: "Water Dispatched via invoice #BW-DEMO-001",
+          amount: 1100,
+          paymentMode: 'UPI',
+          createdAt: serverTimestamp()
+        },
+        {
+          franchiseId: activeFid,
+          date: serverTimestamp(),
+          type: 'Income',
+          category: 'Water Sales',
+          partyName: "Sharma Agriculture Farm",
+          description: "Water Dispatched via invoice #BW-DEMO-002",
+          amount: 750,
+          paymentMode: 'Cash',
+          createdAt: serverTimestamp()
+        }
+      ];
+
+      for (const ent of ledgEntries) {
+        await addDoc(collection(db, 'ledger'), ent);
+      }
+
+      alert("🎉 Sample Data seeded successfully! Your Tankerwala system is now pre-populated with realistic records.");
+      window.location.reload();
+    } catch (e: any) {
+      console.error("Seeding error:", e);
+      alert("Error seeding trial data: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setIsSeedingDemo(false);
+    }
+  };
+
   const isAdmin = isSuperAdmin || !!franchiseId;
   const isMilan = isSuperAdmin || (franchiseId === 'legacy-rajhans');
   // System maintenance is strictly restricted to Milan Sharma (Super Admin)
@@ -2951,6 +3408,40 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       </header>
 
 
+      {customers.length === 0 && bills.length === 0 && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-[2.5rem] p-6 mb-8 shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+            <div>
+              <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <Droplets className="text-blue-600 animate-bounce" />
+                Initialize your Rajhans Water Database!
+              </h3>
+              <p className="text-sm text-slate-600 mt-1 font-medium">
+                Your Firestore database is currently empty. You can add customers, drivers, and ledger entries manually, or click to load a standard set of Sikar sample records.
+              </p>
+            </div>
+            <button
+              onClick={handleAutoSeedDemoData}
+              disabled={isSeedingDemo}
+              className="px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-100 transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-50 cursor-pointer self-start md:self-auto"
+            >
+              {isSeedingDemo ? (
+                <>
+                  <RefreshCw className="animate-spin" size={18} />
+                  Seeding Sikar Data...
+                </>
+              ) : (
+                <>
+                  <Plus size={18} />
+                  Load Sample Sikar Data
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+
       {/* Interactive Sandbox Simulator Hub removed as requested */}
 
 
@@ -2996,6 +3487,22 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           whileHover={{ y: -6, scale: 1.02 }}
           transition={{ type: "spring", stiffness: 300, damping: 15 }}
           onClick={() => setQuickVoucher({ type: 'Receipt', paymentMethod: 'Cash' })}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            const cashAcc = accounts.find(a => {
+              const norm = a.name.trim().toLowerCase();
+              const grp = (a.group || '').trim().toLowerCase();
+              return norm === 'cash' || norm === 'cash in hand' || grp === 'cash-in-hand' || grp === 'cash in hand';
+            });
+            if (cashAcc?.id) {
+              sessionStorage.setItem('selectedLedgerId', cashAcc.id);
+              sessionStorage.setItem('activeLedgerTab', 'ledgers');
+              setActiveTab('ledger');
+            } else {
+              sessionStorage.setItem('activeLedgerTab', 'daybook');
+              setActiveTab('ledger');
+            }
+          }}
           className="relative bg-white p-6 rounded-[2.5rem] text-slate-900 border-t border-x border-slate-100 border-b-[8px] border-b-emerald-200 shadow-[0_20px_40px_rgba(16,185,129,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden group min-h-[200px] cursor-pointer"
           style={{
             background: "linear-gradient(135deg, #ffffff 0%, #f7fdfa 100%)"
@@ -3020,7 +3527,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 <Banknote size={24} />
               </div>
               <div className="text-right flex flex-col items-end bg-emerald-50 border border-emerald-100 rounded-2xl p-2 px-3 shadow-sm">
-                <span className="text-[9px] uppercase font-black text-emerald-600 tracking-wider">Today's Cash (आज का कैश)</span>
+                <span className="text-[9px] uppercase font-black text-emerald-600 tracking-wider">Today's Cash</span>
                 <span className="text-base font-black text-emerald-700 flex items-center gap-0.5 mt-0.5">
                   <span className="text-xs font-bold">₹</span>
                   {Number(stats.todayCashCollection || 0).toLocaleString()}
@@ -3029,7 +3536,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             </div>
 
             <div className="flex items-center gap-3 mb-1 justify-between">
-              <div className="text-[11px] uppercase font-black tracking-widest text-slate-500">Cash in Hand (कैश इन हैण्ड)</div>
+              <div className="text-[11px] uppercase font-black tracking-widest text-slate-500">Cash in Hand</div>
               <div className="flex gap-1.5">
                 <button 
                   onClick={(e) => {
@@ -3089,7 +3596,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 <Users size={24} />
               </div>
               <div className="text-right flex flex-col items-end bg-orange-50 border border-orange-100 rounded-2xl p-2 px-3 shadow-sm">
-                <span className="text-[9px] uppercase font-black text-orange-600 tracking-wider">Today's Pending (आज का बाकी)</span>
+                <span className="text-[9px] uppercase font-black text-orange-600 tracking-wider">Today's Pending</span>
                 <span className="text-base font-black text-orange-700 flex items-center gap-0.5 mt-0.5">
                   <span className="text-xs font-bold">₹</span>
                   {Number(stats.todayPendingCollection || 0).toLocaleString()}
@@ -3097,7 +3604,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               </div>
             </div>
             <div className="flex items-center justify-between mb-1">
-              <div className="text-[11px] uppercase font-black tracking-widest text-slate-400">Total Pending (कुल बाकी)</div>
+              <div className="text-[11px] uppercase font-black tracking-widest text-slate-400">Total Pending</div>
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
@@ -3169,7 +3676,15 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               animate={{ opacity: 1, y: 0 }}
               whileHover={{ y: -6, scale: 1.02 }}
               transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 + (index * 0.05) }}
-              className="bg-white p-6 rounded-[2.5rem] border-t border-x border-indigo-50 border-b-[8px] border-b-indigo-200/50 shadow-[0_20px_40px_rgba(99,102,241,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (bankAcc.id) {
+                  sessionStorage.setItem('selectedLedgerId', bankAcc.id);
+                  sessionStorage.setItem('activeLedgerTab', 'ledgers');
+                  setActiveTab('ledger');
+                }
+              }}
+              className="bg-white p-6 rounded-[2.5rem] border-t border-x border-indigo-50 border-b-[8px] border-b-indigo-200/50 shadow-[0_20px_40px_rgba(99,102,241,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative cursor-pointer"
               style={{
                 background: "linear-gradient(135deg, #ffffff 0%, #fbfbfe 100%)"
               }}
@@ -3952,7 +4467,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[9px] text-slate-400 font-medium">
-                        {bill.createdAt?.toDate ? format(bill.createdAt.toDate(), 'dd MMM, hh:mm a') : format(new Date(bill.date), 'dd MMM, hh:mm a')}
+                        {format(parseFirestoreDate(bill.createdAt || bill.date), 'dd MMM, hh:mm a')}
                       </span>
                       {(bill.tractorId || bill.driverName) && (
                         <div className="flex items-center gap-1.5 ml-1">
@@ -4033,7 +4548,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           {activeDriverStatsList.length === 0 ? (
             <div className="p-12 text-center text-slate-400 text-sm">
               <span className="font-medium italic block mb-1">No completed trips recorded for {
-                driverTripPeriod === 'Day' ? 'Today (Day)' :
+                driverTripPeriod === 'Day' ? (
+                  tokenFilter === 'Today' ? 'Today (Day)' :
+                  tokenFilter === 'Yesterday' ? 'Yesterday' :
+                  `Selected Date (${selectedTokenDate})`
+                ) :
                 driverTripPeriod === 'Week' ? 'This Week (Weekly)' :
                 'This Month (Monthly)'
               }.</span>
@@ -4042,7 +4561,16 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           ) : (
             <div className="divide-y divide-slate-50">
               {activeDriverStatsList.map((driver: any, index: number) => (
-                <div key={driver.name} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                <div 
+                  key={driver.id || `${driver.name}-${index}`} 
+                  onClick={() => setSelectedDriverDetails({
+                    name: driver.name,
+                    bills: driver.activeBills || [],
+                    period: driverTripPeriod
+                  })}
+                  className="p-4 flex items-center justify-between hover:bg-blue-50/50 hover:pl-5 hover:border-l-4 hover:border-blue-500 cursor-pointer transition-all duration-200"
+                  title="Click to view details"
+                >
                   <div className="flex items-center gap-4">
                     <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm select-none ${
                       index === 0 ? 'bg-yellow-100 text-yellow-600 border border-yellow-200' :
@@ -4209,6 +4737,115 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       </AnimatePresence>
 
       <AnimatePresence>
+        {selectedDriverDetails && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[95] flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              className="bg-white w-full max-w-2xl rounded-[2.5rem] p-6 sm:p-8 shadow-2xl relative border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-fade-in"
+            >
+              {/* Close Button */}
+              <button 
+                onClick={() => setSelectedDriverDetails(null)}
+                className="absolute top-6 right-6 w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-800 cursor-pointer transition-all z-10"
+              >
+                <X size={20} />
+              </button>
+
+              {/* Header */}
+              <div className="mb-6">
+                <span className="px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-widest bg-blue-50 text-blue-600 rounded-lg">
+                  {selectedDriverDetails.period === 'Day' ? 'Today' : selectedDriverDetails.period === 'Week' ? 'This Week' : 'This Month'} Trip Board
+                </span>
+                <h3 className="text-2xl font-black text-slate-900 mt-2 flex items-center gap-2">
+                  <Truck className="text-blue-600 shrink-0" size={24} />
+                  {selectedDriverDetails.name} (Driver Trip Details)
+                </h3>
+                <p className="text-xs text-slate-400 font-bold mt-1 uppercase tracking-wide">
+                  Total Delivery: {selectedDriverDetails.bills.length} Tankers (Total Delivery)
+                </p>
+              </div>
+
+              {/* List Wrapper with scroll */}
+              <div className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-[250px]">
+                {selectedDriverDetails.bills.length === 0 ? (
+                  <div className="text-center py-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+                    <p className="text-sm font-medium text-slate-400">No trip records found for this period.</p>
+                  </div>
+                ) : (
+                  selectedDriverDetails.bills.map((bill: any, idx: number) => {
+                    // Parse payment mode
+                    let modeColor = 'bg-slate-100 text-slate-800 border-slate-200';
+                    let modeText = bill.paymentMode || 'Unknown';
+                    
+                    if (bill.paymentMode === 'Cash') {
+                      modeColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                      modeText = '💵 Cash';
+                    } else if (bill.paymentMode === 'Pending') {
+                      modeColor = 'bg-amber-100 text-amber-800 border-amber-200';
+                      modeText = '📝 Credit';
+                    } else if (bill.paymentMode === 'UPI' || bill.paymentMode === 'Bank Transfer' || bill.paymentMode === 'Bank') {
+                      modeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+                      modeText = '🏦 Bank/UPI';
+                    } else if (bill.paymentMode === 'Split') {
+                      modeColor = 'bg-indigo-100 text-indigo-800 border-indigo-200';
+                      modeText = '✂️ Split';
+                    }
+
+                    return (
+                      <div 
+                        key={bill.id || idx} 
+                        className="bg-slate-50 hover:bg-slate-100/70 border border-slate-100/80 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors"
+                      >
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-black bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-100">
+                              #{bill.billNumber || 'N/A'}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400">
+                              📅 {bill.date ? (typeof bill.date === 'string' ? format(new Date(bill.date), 'dd MMM yyyy') : format(bill.date, 'dd MMM yyyy')) : '--'}
+                            </span>
+                          </div>
+                          <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5 mt-1">
+                            <span className="text-slate-400 text-xs">Customer:</span>
+                            <span className="text-slate-900">{bill.customerName || 'Standard Delivery'}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between sm:justify-end gap-4 border-t border-slate-200/55 sm:border-0 pt-2 sm:pt-0">
+                          {/* Payment Mode Badge */}
+                          <span className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg border tracking-wider ${modeColor}`}>
+                            {modeText}
+                          </span>
+                          {/* Amount */}
+                          <div className="text-right">
+                            <div className="text-base font-black text-slate-900 font-mono">
+                              {formatCurrency(bill.grandTotal)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end">
+                <button
+                  onClick={() => setSelectedDriverDetails(null)}
+                  className="px-6 py-2.5 bg-slate-950 hover:bg-slate-900 rounded-xl text-white font-black text-xs uppercase tracking-widest transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {promptSettleMode && editingBill && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[95] flex items-center justify-center p-6">
             <motion.div
@@ -4317,7 +4954,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     </div>
                     
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Rate (दर - ₹)</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Rate (₹)</label>
                       <input 
                         type="number"
                         value={editRate === 0 ? '' : editRate}
@@ -4327,7 +4964,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Quantity (मात्रा)</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Quantity</label>
                       <input 
                         type="number"
                         value={editQuantity === 0 ? '' : editQuantity}
@@ -4337,7 +4974,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Extra Charges (अतिरिक्त शुल्क - ₹)</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Extra Charges (₹)</label>
                       <input 
                         type="number"
                         value={editExtraCharges === 0 ? '' : editExtraCharges}
@@ -4347,7 +4984,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Discount (छूट - ₹)</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Discount (₹)</label>
                       <input 
                         type="number"
                         value={editDiscount === 0 ? '' : editDiscount}
@@ -4357,7 +4994,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Site Location (ग्राहक का पता)</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Site Location</label>
                       <input 
                         type="text"
                         value={editCustomAddress}
@@ -4367,7 +5004,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Remarks (टिप्पणी)</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Remarks</label>
                       <textarea 
                         value={editRemarks}
                         onChange={(e) => setEditRemarks(e.target.value)}
@@ -4377,11 +5014,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
                     <div className="pt-3 border-t-2 border-dashed border-slate-200/60 mt-3">
                       <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
-                        <span>Total Amount (दर × मात्रा)</span>
+                        <span>Total Amount</span>
                         <span className="font-mono">₹{(editQuantity * editRate).toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between items-center text-xs font-black text-slate-800 uppercase tracking-wider">
-                        <span>Grand Total (कुल योग)</span>
+                        <span>Grand Total</span>
                         <span className="text-blue-600 font-black font-mono">₹{(editQuantity * editRate + Number(editExtraCharges) - Number(editDiscount)).toLocaleString()}</span>
                       </div>
                     </div>
@@ -4502,9 +5139,6 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                             <div className="p-3 bg-red-50 rounded-2xl border border-red-100 text-center animate-pulse">
                               <p className="text-[11px] font-black uppercase tracking-wider text-red-600">
                                 ⚠️ First select driver and tractor then click Delivered
-                              </p>
-                              <p className="text-[9px] text-red-400 font-extrabold mt-0.5">
-                                (पहले ड्राइवर और ट्रैक्टर चुनें, उसके बाद ही Delivered चुनें)
                               </p>
                             </div>
                           )}
@@ -5066,7 +5700,7 @@ function SalesAnalyticsModal({
         const dateStr = format(d, 'yyyy-MM-dd');
         const dayBills = bills.filter(b => {
           if (b.status === 'Cancelled') return false;
-          const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+          const bDate = parseFirestoreDate(b.date);
           return format(bDate, 'yyyy-MM-dd') === dateStr;
         });
         const sales = dayBills.reduce((sum, b) => sum + b.grandTotal, 0);
@@ -5088,7 +5722,7 @@ function SalesAnalyticsModal({
         const dateStr = format(d, 'yyyy-MM-dd');
         const dayBills = bills.filter(b => {
           if (b.status === 'Cancelled') return false;
-          const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+          const bDate = parseFirestoreDate(b.date);
           return format(bDate, 'yyyy-MM-dd') === dateStr;
         });
         const sales = dayBills.reduce((sum, b) => sum + b.grandTotal, 0);
@@ -5110,7 +5744,7 @@ function SalesAnalyticsModal({
         const monthStr = format(d, 'yyyy-MM');
         const monthBills = bills.filter(b => {
           if (b.status === 'Cancelled') return false;
-          const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+          const bDate = parseFirestoreDate(b.date);
           return format(bDate, 'yyyy-MM') === monthStr;
         });
         const sales = monthBills.reduce((sum, b) => sum + b.grandTotal, 0);
@@ -5132,7 +5766,7 @@ function SalesAnalyticsModal({
         const monthStr = format(d, 'yyyy-MM');
         const monthBills = bills.filter(b => {
           if (b.status === 'Cancelled') return false;
-          const bDate = b.date instanceof Date ? b.date : new Date(b.date);
+          const bDate = parseFirestoreDate(b.date);
           return format(bDate, 'yyyy-MM') === monthStr;
         });
         const sales = monthBills.reduce((sum, b) => sum + b.grandTotal, 0);
@@ -5204,10 +5838,10 @@ function SalesAnalyticsModal({
             <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 gap-1 animate-fadeIn">
               {(['weekly', 'monthly', 'half-yearly', 'yearly'] as const).map((range) => {
                 const labels = {
-                  'weekly': 'Weekly (हफ्तावार)',
-                  'monthly': 'Monthly (मासिक)',
-                  'half-yearly': '6 Months (छमाही)',
-                  'yearly': 'Yearly (सालाना)'
+                  'weekly': 'Weekly',
+                  'monthly': 'Monthly',
+                  'half-yearly': '6 Months',
+                  'yearly': 'Yearly'
                 };
                 const active = salesChartRange === range;
                 return (
@@ -5234,19 +5868,19 @@ function SalesAnalyticsModal({
           {/* Quick Metrics Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             <div className="bg-gradient-to-tr from-blue-50 to-blue-100/30 border border-blue-100 p-6 rounded-[2rem] shadow-sm">
-              <div className="text-[10px] uppercase font-black text-blue-600 tracking-wider mb-1">Total Sales (कुल बिक्री)</div>
+              <div className="text-[10px] uppercase font-black text-blue-600 tracking-wider mb-1">Total Sales</div>
               <div className="text-3xl font-display font-black text-slate-900 tracking-tight">₹{summary.totalSales.toLocaleString()}</div>
               <p className="text-[10px] text-blue-500 font-bold uppercase mt-1">Sum of all bills generated</p>
             </div>
 
             <div className="bg-gradient-to-tr from-emerald-50 to-emerald-100/30 border border-emerald-100 p-6 rounded-[2rem] shadow-sm">
-              <div className="text-[10px] uppercase font-black text-emerald-600 tracking-wider mb-1">Average Sales (औसत बिक्री)</div>
+              <div className="text-[10px] uppercase font-black text-emerald-600 tracking-wider mb-1">Average Sales</div>
               <div className="text-3xl font-display font-black text-slate-900 tracking-tight">₹{summary.avgSales.toLocaleString()}</div>
               <p className="text-[10px] text-emerald-500 font-bold uppercase mt-1">Average bill throughput</p>
             </div>
 
             <div className="bg-gradient-to-tr from-orange-50 to-orange-100/30 border border-orange-100 p-6 rounded-[2rem] shadow-sm">
-              <div className="text-[10px] uppercase font-black text-orange-600 tracking-wider mb-1">Pending Amount (बकाया राशि)</div>
+              <div className="text-[10px] uppercase font-black text-orange-600 tracking-wider mb-1">Pending Amount</div>
               <div className="text-3xl font-display font-black text-slate-900 tracking-tight">₹{summary.totalPending.toLocaleString()}</div>
               <p className="text-[10px] text-orange-500 font-bold uppercase mt-1">Unreleased dues in period</p>
             </div>

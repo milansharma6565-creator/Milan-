@@ -27,6 +27,7 @@ import {
   doc,
   updateDoc,
   getDocs,
+  getDoc,
   orderBy,
   setDoc,
   limit
@@ -93,15 +94,16 @@ export function FranchiseManagement({ onSelectFranchise }: { onSelectFranchise?:
     
     const seedLegacyFranchises = async () => {
       try {
-        const snap = await getDocs(collection(db, 'franchises'));
-        if (snap.empty) {
-          const legacy = [
-            { id: "legacy-rajhans", name: "Rajhans Steel and Water", email: "rajhanssikar@gmail.com", location: "Sikar" },
-            { id: "legacy-pile", name: "Rajhans Pile Foundation", email: "rajhanspilefoundation@gmail.com", location: "Sikar" }
-          ];
+        const legacy = [
+          { id: "legacy-rajhans", name: "Rajhans Steel and Water", email: "rajhanssikar@gmail.com", location: "Sikar" },
+          { id: "legacy-pile", name: "Rajhans Pile Foundation", email: "rajhanspilefoundation@gmail.com", location: "Sikar" }
+        ];
 
-          for (const leg of legacy) {
-            await setDoc(doc(db, 'franchises', leg.id), {
+        for (const leg of legacy) {
+          const docRef = doc(db, 'franchises', leg.id);
+          const docSnap = await getDoc(docRef);
+          if (!docSnap.exists()) {
+            await setDoc(docRef, {
               name: leg.name,
               email: leg.email,
               location: leg.location,

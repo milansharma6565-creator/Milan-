@@ -15,15 +15,16 @@ import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-const databaseId = (firebaseConfig as any).firestoreDatabaseId || '(default)';
+const configDbId = (firebaseConfig as any).firestoreDatabaseId;
+const databaseId = configDbId && configDbId !== '(default)' ? configDbId : undefined;
 
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  useFetchStreams: false, // Disables fetch streams of fetch-polling to prevent blocks in proxy/iframe setups
-} as any, databaseId);
+export const db = databaseId 
+  ? initializeFirestore(app, {} as any, databaseId)
+  : initializeFirestore(app, {} as any);
 
-// Enable offline persistent caching for offline use and sync
-if (typeof window !== 'undefined') {
+// Enable offline persistent caching for offline use and sync (only if not in an iframe)
+const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+if (typeof window !== 'undefined' && !isIframe) {
   enableMultiTabIndexedDbPersistence(db).then(() => {
     console.log("Firestore multi-tab offline cache enabled successfully.");
   }).catch((err) => {
@@ -40,6 +41,8 @@ if (typeof window !== 'undefined') {
       console.warn("Firestore offline caching configuration:", err);
     }
   });
+} else if (isIframe) {
+  console.log("Firestore offline caching disabled because the app is running inside an iframe.");
 }
 export const storage = getStorage(app);
 

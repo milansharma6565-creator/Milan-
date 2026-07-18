@@ -28,6 +28,9 @@ export function LetterheadGenerator({ currentFranchise }: LetterheadGeneratorPro
   
   const letterRef = useRef<HTMLDivElement>(null);
 
+  const [letterDate, setLetterDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const parsedDate = letterDate ? new Date(letterDate + 'T00:00:00') : new Date();
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -147,13 +150,13 @@ ${billData.splitPayments?.pending ? `Pending Amount: ₹${billData.splitPayments
 
   const handlePrint = useReactToPrint({
     contentRef: letterRef,
-    documentTitle: `Letterpad_${format(new Date(), 'dd_MMM_yyyy')}`,
+    documentTitle: `Letterpad_${format(parsedDate, 'dd_MMM_yyyy')}`,
   });
 
   const downloadPdf = async () => {
     if (!letterRef.current) return;
     try {
-      await generatePDF(letterRef.current, `Letterhead_${format(new Date(), "dd_MM_yyyy")}`);
+      await generatePDF(letterRef.current, `Letterhead_${format(parsedDate, "dd_MM_yyyy")}`);
     } catch (err: any) {
       console.error("Error exporting PDF:", err);
       alert("Error generating PDF: " + err.message);
@@ -182,6 +185,14 @@ ${billData.splitPayments?.pending ? `Pending Amount: ₹${billData.splitPayments
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           ></textarea>
+
+          <label className="block text-sm font-bold text-slate-700 mb-2">Letter Date</label>
+          <input
+            type="date"
+            value={letterDate}
+            onChange={(e) => setLetterDate(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all mb-4 font-bold text-slate-800"
+          />
 
           <label className="block text-sm font-bold text-slate-700 mb-2">Reference Document (Optional)</label>
           <div className="flex items-center gap-3 mb-4">
@@ -338,7 +349,7 @@ ${billData.splitPayments?.pending ? `Pending Amount: ₹${billData.splitPayments
                   {currentFranchise?.gstNumber && <p className="font-medium text-slate-700">GSTIN: <span className="font-bold text-slate-900">{currentFranchise.gstNumber}</span></p>}
                   {currentFranchise?.aadharNumber && <p className="font-medium text-slate-700">Aadhar: <span className="font-bold text-slate-900">{currentFranchise.aadharNumber}</span></p>}
                 </div>
-                <p className="font-black text-blue-900 pt-1.5 text-xs">Date: {format(new Date(), 'dd/MM/yyyy')}</p>
+                <p className="font-black text-blue-900 pt-1.5 text-xs">Date: {format(parsedDate, 'dd/MM/yyyy')}</p>
               </div>
             </div>
           )}
@@ -369,7 +380,7 @@ ${billData.splitPayments?.pending ? `Pending Amount: ₹${billData.splitPayments
                   {currentFranchise?.gstNumber && <p>GSTIN: <span className="font-mono text-emerald-800 font-bold">{currentFranchise.gstNumber}</span></p>}
                   {currentFranchise?.aadharNumber && <p>UIDAI: <span className="font-mono text-emerald-800 font-bold">{currentFranchise.aadharNumber}</span></p>}
                 </div>
-                <p className="font-extrabold text-emerald-800 pt-1.5 text-xs">Dated: {format(new Date(), 'dd/MM/yyyy')}</p>
+                <p className="font-extrabold text-emerald-800 pt-1.5 text-xs">Dated: {format(parsedDate, 'dd/MM/yyyy')}</p>
               </div>
             </div>
           )}
@@ -396,7 +407,7 @@ ${billData.splitPayments?.pending ? `Pending Amount: ₹${billData.splitPayments
                 {currentFranchise?.gstNumber && <p className="text-slate-500">GST: {currentFranchise.gstNumber}</p>}
                 <div className="pt-2 text-[11px] font-sans text-slate-950 font-black flex items-center justify-end gap-1">
                   <span>DATE:</span>
-                  <span className="underline decoration-slate-800 decoration-2">{format(new Date(), 'dd/MM/yyyy')}</span>
+                  <span className="underline decoration-slate-800 decoration-2">{format(parsedDate, 'dd/MM/yyyy')}</span>
                 </div>
               </div>
             </div>
@@ -428,7 +439,7 @@ ${billData.splitPayments?.pending ? `Pending Amount: ₹${billData.splitPayments
                   {currentFranchise?.gstNumber && <p>GST: <span className="font-black text-amber-900">{currentFranchise.gstNumber}</span></p>}
                   {currentFranchise?.aadharNumber && <p>Aadhar: <span className="font-black text-amber-900">{currentFranchise.aadharNumber}</span></p>}
                 </div>
-                <p className="font-black text-amber-700 pt-1.5 text-xs">Date: {format(new Date(), 'dd/MM/yyyy')}</p>
+                <p className="font-black text-amber-700 pt-1.5 text-xs">Date: {format(parsedDate, 'dd/MM/yyyy')}</p>
               </div>
             </div>
           )}

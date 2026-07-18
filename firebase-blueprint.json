@@ -339,6 +339,31 @@
         "billData": { "type": "object" }
       },
       "required": ["billNumber", "customerName", "status", "createdAt"]
+    },
+    "SmartMotor": {
+      "title": "Smart Motor",
+      "description": "Smart IoT motor controller for 15 HP pump with metrics",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "isOn": { "type": "boolean" },
+        "targetState": { "type": "string" },
+        "voltageL1": { "type": "number" },
+        "voltageL2": { "type": "number" },
+        "voltageL3": { "type": "number" },
+        "currentL1": { "type": "number" },
+        "currentL2": { "type": "number" },
+        "currentL3": { "type": "number" },
+        "powerFactor": { "type": "number" },
+        "activePowerKw": { "type": "number" },
+        "flowRateLpm": { "type": "number" },
+        "totalWaterPumpedLiters": { "type": "number" },
+        "isSimulating": { "type": "boolean" },
+        "lastTriggeredBy": { "type": "string" },
+        "lastTriggeredAt": { "type": "string", "format": "date-time" },
+        "tripReason": { "type": "string" },
+        "franchiseId": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -360,6 +385,7 @@
     "dieselRequests": { "schema": "DieselRequest", "description": "Fuel requests from drivers" },
     "franchises": { "schema": "Franchise", "description": "Collection of franchise partners" },
     "bankStatementRules": { "schema": "BankStatementRule", "description": "Machine learning rules for bank statement mapping" },
-    "print_jobs": { "schema": "PrintJob", "description": "Remote print jobs queued for desktop thermal printing" }
+    "print_jobs": { "schema": "PrintJob", "description": "Remote print jobs queued for desktop thermal printing" },
+    "smartMotors": { "schema": "SmartMotor", "description": "Collection of smart IoT 15HP motor controllers" }
   }
 }

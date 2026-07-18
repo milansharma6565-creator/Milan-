@@ -128,6 +128,10 @@ export interface Bill {
   remarks?: string;
   createdAt: any;
   completedAt?: any;
+  includedPendingDues?: boolean;
+  previousPendingDuesAmount?: number;
+  previousPendingDuesDetails?: string;
+  combinedTotalAmount?: number;
 }
 
 export interface Trip {

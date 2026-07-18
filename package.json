@@ -25,6 +25,7 @@
     "esbuild": "^0.28.0",
     "express": "^5.2.1",
     "firebase": "^10.13.2",
+    "firebase-admin": "^14.2.0",
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
