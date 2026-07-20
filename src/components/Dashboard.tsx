@@ -762,7 +762,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .sort((a: any, b: any) => b.activeTripCount - a.activeTripCount);
   }, [stats.driverStats, driverTripPeriod]);
   const [billSortOption, setBillSortOption] = useState<'Default' | 'Number' | 'Time'>('Default');
-  const [billStatusTab, setBillStatusTab] = useState<'Recent' | 'Delivered'>('Recent');
+  const [billStatusTab, setBillStatusTab] = useState<'Recent' | 'Delivered' | 'Cancelled' | 'All'>('Recent');
   const [quickVoucher, setQuickVoucher] = useState<{
     type: 'Receipt' | 'Payment';
     paymentMethod: 'Cash' | 'Bank';
@@ -1140,6 +1140,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       result = result.filter(b => b.status !== 'Delivered' && b.status !== 'Cancelled');
     } else if (billStatusTab === 'Delivered') {
       result = result.filter(b => b.status === 'Delivered');
+    } else if (billStatusTab === 'Cancelled') {
+      result = result.filter(b => b.status === 'Cancelled');
     }
 
     return result;
@@ -4412,7 +4414,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         >
           {[
             { id: 'Recent', label: 'Recent Bills 🚛' },
-            { id: 'Delivered', label: 'Delivered Bills ✅' }
+            { id: 'Delivered', label: 'Delivered Bills ✅' },
+            { id: 'Cancelled', label: 'Cancelled Bills ❌' },
+            { id: 'All', label: 'All Bills 📦' }
           ].map((tab) => {
             const isActive = billStatusTab === tab.id;
             return (
