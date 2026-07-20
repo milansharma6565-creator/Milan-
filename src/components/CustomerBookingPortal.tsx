@@ -3545,7 +3545,7 @@ export function CustomerBookingPortal() {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     window.open(
-                                      `https://www.google.com/maps/search/?api=1&query=${driverLocations[bill.driverId!].latitude},${driverLocations[bill.driverId!].longitude}`,
+                                      `https://www.openstreetmap.org/?mlat=${driverLocations[bill.driverId!].latitude}&mlon=${driverLocations[bill.driverId!].longitude}&zoom=16`,
                                     );
                                   }}
                                   className="mt-2 text-[9px] font-black text-cyan-400 uppercase border-b border-cyan-500/20 cursor-pointer"

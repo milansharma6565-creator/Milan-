@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc, query, where, setDoc } from 'firebase/firestore';
 import { VoucherItem, Account } from '../types';
 
 export const ledgerAutomation = {
@@ -151,26 +151,52 @@ export const ledgerAutomation = {
 
       if (isDirectPayment) {
         const isCash = bill.paymentMode === 'Cash' || bill.paymentMethod === 'Cash';
-        const debitAccName = isCash ? 'Cash' : 'Bank Account';
+        const debitAccName = isCash ? 'Cash' : 'Bank of Baroda Operating A/c';
+        
+        // Find existing account robustly
         debitAcc = accounts.find(a => a.name.toLowerCase() === debitAccName.toLowerCase());
+        if (!debitAcc && !isCash) {
+          debitAcc = accounts.find(a => a.name === 'Bank Account') ||
+                     accounts.find(a => a.group === 'Bank Accounts' || a.name.toLowerCase().includes('bank'));
+        }
 
         if (!debitAcc) {
           try {
             const groupsSnap = await getDocs(collection(db, 'accountGroups'));
-            let assetsGroup = groupsSnap.docs.find(d => d.data().name === 'Current Assets');
-            let assetsGroupId = assetsGroup?.id;
-            if (!assetsGroupId) {
-              const newGrp = await addDoc(collection(db, 'accountGroups'), {
-                name: 'Current Assets',
+            const targetGroupName = isCash ? 'Cash-in-hand' : 'Bank Accounts';
+            
+            // Find specific subgroup or fallback to Current Assets parent
+            let targetGroup = groupsSnap.docs.find(d => d.data().name === targetGroupName);
+            let targetGroupId = targetGroup?.id;
+            
+            if (!targetGroupId) {
+              // Try finding 'Current Assets'
+              let assetsGroup = groupsSnap.docs.find(d => d.data().name === 'Current Assets');
+              let assetsGroupId = assetsGroup?.id;
+              if (!assetsGroupId) {
+                const newGrp = await addDoc(collection(db, 'accountGroups'), {
+                  name: 'Current Assets',
+                  type: 'Asset',
+                  franchiseId: bill.franchiseId || null,
+                  createdAt: serverTimestamp()
+                });
+                assetsGroupId = newGrp.id;
+              }
+              
+              // Create the specific subgroup
+              const newSubGrp = await addDoc(collection(db, 'accountGroups'), {
+                name: targetGroupName,
+                parentGroupId: assetsGroupId,
                 type: 'Asset',
                 franchiseId: bill.franchiseId || null,
                 createdAt: serverTimestamp()
               });
-              assetsGroupId = newGrp.id;
+              targetGroupId = newSubGrp.id;
             }
+            
             const newAccRef = await addDoc(collection(db, 'accounts'), {
               name: debitAccName,
-              groupId: assetsGroupId,
+              groupId: targetGroupId,
               openingBalance: 0,
               balanceType: 'Dr',
               currentBalance: 0,
@@ -180,7 +206,7 @@ export const ledgerAutomation = {
             debitAcc = {
               id: newAccRef.id,
               name: debitAccName,
-              groupId: assetsGroupId,
+              groupId: targetGroupId,
               openingBalance: 0,
               balanceType: 'Dr',
               currentBalance: 0,
@@ -335,7 +361,7 @@ export const ledgerAutomation = {
       const vchSnap = await getDocs(collection(db, 'vouchers'));
       const vchNumber = `SLS-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
 
-      await addDoc(collection(db, 'vouchers'), {
+      await setDoc(doc(db, 'vouchers', `VCH-${bill.id}-SALE`), {
         type: 'Sales',
         voucherNumber: vchNumber,
         date: bill.date,
@@ -397,36 +423,53 @@ export const ledgerAutomation = {
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       const accounts = accountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Account));
 
-      const paymentAccName = mode === 'Cash' ? 'Cash' : 'Bank Account';
+      const paymentAccName = mode === 'Cash' ? 'Cash' : 'Bank of Baroda Operating A/c';
       let paymentAcc = accounts.find(a => a.name.toLowerCase() === paymentAccName.toLowerCase());
       
-      // Secondary check for specific bank names if 'Bank Account' is not found
-      if ((mode === 'UPI' || mode === 'Bank') && !paymentAcc) {
-          paymentAcc = accounts.find(a => a.name === 'BARODA129') || 
-                       accounts.find(a => a.name.toLowerCase().includes('bank'));
+      // Secondary check for other bank names
+      if ((mode === 'UPI' || mode === 'Bank' || mode === 'Bank Transfer') && !paymentAcc) {
+          paymentAcc = accounts.find(a => a.name === 'Bank Account') ||
+                       accounts.find(a => a.group === 'Bank Accounts' || a.name.toLowerCase().includes('bank'));
       }
       
       const customerAcc = accounts.find(a => a.id === customerAccId) || 
                           accounts.find(a => a.name.toLowerCase() === bill.customerName.toLowerCase());
 
       if (!paymentAcc) {
-        // Create Cash/Bank Account if missing under Current Assets
+        // Create Cash/Bank Account if missing under proper subgroups
         try {
           const groupsSnap = await getDocs(collection(db, 'accountGroups'));
-          let assetsGroup = groupsSnap.docs.find(d => d.data().name === 'Current Assets');
-          let assetsGroupId = assetsGroup?.id;
-          if (!assetsGroupId) {
-            const newGrp = await addDoc(collection(db, 'accountGroups'), {
-              name: 'Current Assets',
+          const targetGroupName = mode === 'Cash' ? 'Cash-in-hand' : 'Bank Accounts';
+          
+          let targetGroup = groupsSnap.docs.find(d => d.data().name === targetGroupName);
+          let targetGroupId = targetGroup?.id;
+          
+          if (!targetGroupId) {
+            let assetsGroup = groupsSnap.docs.find(d => d.data().name === 'Current Assets');
+            let assetsGroupId = assetsGroup?.id;
+            if (!assetsGroupId) {
+              const newGrp = await addDoc(collection(db, 'accountGroups'), {
+                name: 'Current Assets',
+                type: 'Asset',
+                franchiseId: bill.franchiseId || null,
+                createdAt: serverTimestamp()
+              });
+              assetsGroupId = newGrp.id;
+            }
+            
+            const newSubGrp = await addDoc(collection(db, 'accountGroups'), {
+              name: targetGroupName,
+              parentGroupId: assetsGroupId,
               type: 'Asset',
               franchiseId: bill.franchiseId || null,
               createdAt: serverTimestamp()
             });
-            assetsGroupId = newGrp.id;
+            targetGroupId = newSubGrp.id;
           }
+
           const newAccRef = await addDoc(collection(db, 'accounts'), {
             name: paymentAccName,
-            groupId: assetsGroupId,
+            groupId: targetGroupId,
             openingBalance: 0,
             balanceType: 'Dr',
             currentBalance: 0,
@@ -436,7 +479,7 @@ export const ledgerAutomation = {
           paymentAcc = {
             id: newAccRef.id,
             name: paymentAccName,
-            groupId: assetsGroupId,
+            groupId: targetGroupId,
             openingBalance: 0,
             balanceType: 'Dr',
             currentBalance: 0
@@ -466,7 +509,7 @@ export const ledgerAutomation = {
       const vchSnap = await getDocs(collection(db, 'vouchers'));
       const vchNumber = `RCP-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
 
-      await addDoc(collection(db, 'vouchers'), {
+      await setDoc(doc(db, 'vouchers', `VCH-${bill.id}-RECPT`), {
         type: 'Receipt',
         voucherNumber: vchNumber,
         date: new Date().toISOString().slice(0, 10),
@@ -510,14 +553,15 @@ export const ledgerAutomation = {
       
       let creditAccName = '';
       if (mode === 'Cash') creditAccName = 'Cash';
-      else if (mode === 'Bank') creditAccName = 'Bank Account'; 
+      else if (mode === 'Bank') creditAccName = 'Bank of Baroda Operating A/c'; 
       else if (mode === 'Penalty') creditAccName = 'Penalty Recovery';
 
       let creditAcc = accounts.find(a => a.name.toLowerCase() === creditAccName.toLowerCase());
 
-      // Fallback for Bank 934 or general Penalty
+      // Fallback for Bank or general Penalty
       if (mode === 'Bank' && !creditAcc) {
-          creditAcc = accounts.find(a => a.name.toLowerCase().includes('bank'));
+          creditAcc = accounts.find(a => a.name === 'Bank Account') ||
+                      accounts.find(a => a.group === 'Bank Accounts' || a.name.toLowerCase().includes('bank'));
       }
       if (mode === 'Penalty' && !creditAcc) {
           creditAcc = accounts.find(a => a.name.toLowerCase().includes('penalty'));
@@ -606,7 +650,40 @@ export const ledgerAutomation = {
         assetsGroupId = newAssetsGroupRef.id;
       }
 
-      // 2. Create Cash ledger under Current Assets
+      // Create or Find 'Cash-in-hand' and 'Bank Accounts' subgroups under Current Assets
+      let cashInHandGroup = groupsSnap.docs.find(d => {
+        const data = d.data();
+        return data.name === 'Cash-in-hand' && data.franchiseId === franchiseId;
+      });
+      let cashInHandGroupId = cashInHandGroup?.id;
+      if (!cashInHandGroupId) {
+        const ref = await addDoc(collection(db, 'accountGroups'), {
+          name: 'Cash-in-hand',
+          parentGroupId: assetsGroupId,
+          type: 'Asset',
+          franchiseId: franchiseId,
+          createdAt: serverTimestamp()
+        });
+        cashInHandGroupId = ref.id;
+      }
+
+      let bankAccountsGroup = groupsSnap.docs.find(d => {
+        const data = d.data();
+        return data.name === 'Bank Accounts' && data.franchiseId === franchiseId;
+      });
+      let bankAccountsGroupId = bankAccountsGroup?.id;
+      if (!bankAccountsGroupId) {
+        const ref = await addDoc(collection(db, 'accountGroups'), {
+          name: 'Bank Accounts',
+          parentGroupId: assetsGroupId,
+          type: 'Asset',
+          franchiseId: franchiseId,
+          createdAt: serverTimestamp()
+        });
+        bankAccountsGroupId = ref.id;
+      }
+
+      // 2. Create Cash ledger under Cash-in-hand
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       let cashAcc = accountsSnap.docs.find(d => {
         const data = d.data();
@@ -615,7 +692,7 @@ export const ledgerAutomation = {
       if (!cashAcc) {
         await addDoc(collection(db, 'accounts'), {
           name: 'Cash',
-          groupId: assetsGroupId,
+          groupId: cashInHandGroupId,
           openingBalance: 0,
           currentBalance: 0,
           balanceType: 'Dr',
@@ -624,15 +701,15 @@ export const ledgerAutomation = {
         });
       }
 
-      // 3. Create Bank Account ledger under Current Assets
+      // 3. Create Bank of Baroda Operating A/c ledger under Bank Accounts
       let bankAcc = accountsSnap.docs.find(d => {
         const data = d.data();
-        return data.name === 'Bank Account' && data.franchiseId === franchiseId;
+        return (data.name === 'Bank of Baroda Operating A/c' || data.name === 'Bank Account') && data.franchiseId === franchiseId;
       });
       if (!bankAcc) {
         await addDoc(collection(db, 'accounts'), {
-          name: 'Bank Account',
-          groupId: assetsGroupId,
+          name: 'Bank of Baroda Operating A/c',
+          groupId: bankAccountsGroupId,
           openingBalance: 0,
           currentBalance: 0,
           balanceType: 'Dr',
@@ -674,7 +751,7 @@ export const ledgerAutomation = {
         });
       }
 
-      console.log(`Successfully initialized default ledgers (Cash, Bank Account, Sales) for franchise: ${franchiseName}`);
+      console.log(`Successfully initialized default ledgers (Cash, Bank of Baroda Operating A/c, Sales) for franchise: ${franchiseName}`);
     } catch (e) {
       console.error('Error setupFranchiseLedgers:', e);
     }

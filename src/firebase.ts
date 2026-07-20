@@ -10,17 +10,34 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber
 } from 'firebase/auth';
-import { initializeFirestore, doc, getDocFromServer, enableMultiTabIndexedDbPersistence, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, enableMultiTabIndexedDbPersistence, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import firebaseConfig from '../firebase-applet-config.json';
+import defaultFirebaseConfig from '../firebase-applet-config.json';
+
+let firebaseConfig = defaultFirebaseConfig;
+
+if (typeof window !== 'undefined') {
+  try {
+    const savedConfig = localStorage.getItem('CUSTOM_FIREBASE_CONFIG');
+    if (savedConfig) {
+      const parsed = JSON.parse(savedConfig);
+      if (parsed && parsed.apiKey && parsed.projectId) {
+        firebaseConfig = parsed;
+        console.log("⚡ Loaded custom developer Firebase configuration:", parsed.projectId);
+      }
+    }
+  } catch (err) {
+    console.error("Error parsing custom Firebase config:", err);
+  }
+}
 
 const app = initializeApp(firebaseConfig);
 const configDbId = (firebaseConfig as any).firestoreDatabaseId;
 const databaseId = configDbId && configDbId !== '(default)' ? configDbId : undefined;
 
 export const db = databaseId 
-  ? initializeFirestore(app, {} as any, databaseId)
-  : initializeFirestore(app, {} as any);
+  ? getFirestore(app, databaseId)
+  : getFirestore(app);
 
 // Enable offline persistent caching for offline use and sync (only if not in an iframe)
 const isIframe = typeof window !== 'undefined' && window.self !== window.top;
@@ -169,9 +186,11 @@ export function safeString(val: any): string {
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const currentUser = auth.currentUser;
   
+  const errMsg = error instanceof Error ? error.message : safeString(error);
+
   // Extract only needed data to avoid circular references in the first place
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : safeString(error),
+    error: errMsg,
     authInfo: {
       userId: currentUser?.uid || null,
       email: currentUser?.email || null,
@@ -190,6 +209,19 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const jsonString = safeJson(errInfo);
   console.error(`🔴 FIRESTORE ERROR [${operationType}] at [${path || 'unknown'}]:`, jsonString);
   
+  // Dispatch a custom event so the UI can dynamically show nice warning badges or overlays
+  if (typeof window !== 'undefined') {
+    const isQuota = errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('exhausted') || errMsg.toLowerCase().includes('resource-exhausted');
+    window.dispatchEvent(new CustomEvent('firestore-error', {
+      detail: {
+        message: errMsg,
+        isQuota,
+        operationType,
+        path
+      }
+    }));
+  }
+
   // Do NOT throw here to prevent app-wide crashes from single component query failures
   // Instead, the calling component can decide if it wants to show an error UI
 }

@@ -49,7 +49,12 @@ import {
   Brain,
   HelpCircle,
   Edit2,
-  AlertTriangle
+  AlertTriangle,
+  ShieldCheck,
+  UserCheck,
+  Scale,
+  AlertCircle,
+  FileWarning
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
@@ -59,6 +64,7 @@ import { generatePDF, addSwanWatermarkToPDF, sanitizePdfText } from '../lib/pdfU
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { activityLogger } from '../services/activityLogger';
 
 type AccountingTab = 'vouchers' | 'daybook' | 'ledgers' | 'reports' | 'accounts' | 'bank-feed' | 'tally-sync';
 
@@ -458,7 +464,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       // Default Accounts
       const defaultAccounts = [
         { name: 'Cash', group: 'Cash-in-hand', opening: 0, type: 'Dr' },
-        { name: 'Bank Account', group: 'Bank Accounts', opening: 0, type: 'Dr' },
+        { name: 'Bank of Baroda Operating A/c', group: 'Bank Accounts', opening: 0, type: 'Dr' },
         { name: 'Fuel Expense', group: 'Direct Expenses', opening: 0, type: 'Dr' },
         { name: 'Maintenance', group: 'Direct Expenses', opening: 0, type: 'Dr' },
         { name: 'Salary Expense', group: 'Indirect Expenses', opening: 0, type: 'Dr' },
@@ -521,7 +527,9 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
 
   const stats = useMemo(() => {
     const cashId = accounts.find(a => a.name === 'Cash')?.id;
-    const bankId = accounts.find(a => a.name === 'Bank Account')?.id;
+    const bankId = accounts.find(a => a.name === 'Bank of Baroda Operating A/c')?.id ||
+                   accounts.find(a => a.name === 'Bank Account')?.id ||
+                   accounts.find(a => a.group === 'Bank Accounts' || a.name.toLowerCase().includes('bank'))?.id;
     
     return {
       cash: cashId ? getAccountBalance(cashId) : 0,
@@ -580,6 +588,40 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
   }, [accounts, groups, vouchers]);
 
   const netProfitLoss = directIncomesVal - expensesVal; // > 0 net profit, < 0 net loss
+
+  const retroTrialBalance = useMemo(() => {
+    return accounts.map(a => {
+      const bal = getAccountBalance(a.id!);
+      const dr = a.balanceType === 'Dr' 
+        ? (bal >= 0 ? bal : 0) 
+        : (bal < 0 ? Math.abs(bal) : 0);
+      const cr = a.balanceType === 'Cr' 
+        ? (bal >= 0 ? bal : 0) 
+        : (bal < 0 ? Math.abs(bal) : 0);
+      return {
+        id: a.id,
+        name: a.name,
+        groupName: groups.find(g => g.id === a.groupId)?.name || 'Direct Category',
+        dr,
+        cr
+      };
+    })
+    .filter(a => a.dr > 0 || a.cr > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  }, [accounts, groups]);
+
+  const retroTrialTotals = useMemo(() => {
+    const rawTotalDr = retroTrialBalance.reduce((s, a) => s + a.dr, 0);
+    const rawTotalCr = retroTrialBalance.reduce((s, a) => s + a.cr, 0);
+    const diff = rawTotalDr - rawTotalCr;
+    return {
+      rawTotalDr,
+      rawTotalCr,
+      diff,
+      totalDr: diff < 0 ? rawTotalDr + Math.abs(diff) : rawTotalDr,
+      totalCr: diff > 0 ? rawTotalCr + diff : rawTotalCr
+    };
+  }, [retroTrialBalance]);
 
   const handleSaveRetroLedger = async () => {
     if (!newLedgerName.trim() || !newLedgerGroupId) {
@@ -1748,7 +1790,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                       <div className="space-y-2">
                         {accounts.filter(a => {
                           const g_type = groups.find(gp => gp.id === a.groupId)?.type;
-                          return g_type === 'Asset' || a.name === 'Cash' || a.name === 'Bank Account';
+                          return g_type === 'Asset' || a.name === 'Cash' || a.name === 'Bank of Baroda Operating A/c' || a.name === 'Bank Account' || a.name.toLowerCase().includes('bank');
                         }).map(acc => (
                           <div key={acc.id} className="flex justify-between">
                             <span>{acc.name}</span>
@@ -1857,7 +1899,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                   </div>
 
                   <div className="overflow-y-auto max-h-[350px]">
-                    <table className="w-full text-left">
+                    <table className="w-full text-left font-mono">
                       <thead>
                         <tr className="text-[#a1dedb] bg-[#115b62]/40 text-[10px] uppercase">
                           <th className="p-2 border border-[#146067]">Ledger / Particular</th>
@@ -1867,22 +1909,38 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                         </tr>
                       </thead>
                       <tbody>
-                        {accounts.map(acc => {
-                          const bal = getAccountBalance(acc.id!);
-                          return (
-                            <tr key={acc.id} className="hover:bg-[#115b62]/20 border-b border-[#115b62]/30">
-                              <td className="p-2 text-[#0dffd2] font-semibold">{acc.name}</td>
-                              <td className="p-2 text-teal-200">{groups.find(g => g.id === acc.groupId)?.name || 'Direct Category'}</td>
-                              <td className="p-2 text-right text-yellow-100 font-bold">
-                                {acc.balanceType === 'Dr' ? bal.toLocaleString('en-IN') : '0.00'}
-                              </td>
-                              <td className="p-2 text-right text-teal-300 font-bold">
-                                {acc.balanceType === 'Cr' ? bal.toLocaleString('en-IN') : '0.00'}
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {retroTrialBalance.map(a => (
+                          <tr key={a.id} className="hover:bg-[#115b62]/20 border-b border-[#115b62]/30">
+                            <td className="p-2 text-[#0dffd2] font-semibold">{a.name}</td>
+                            <td className="p-2 text-teal-200">{a.groupName}</td>
+                            <td className="p-2 text-right text-yellow-100 font-bold">
+                              {a.dr > 0 ? a.dr.toLocaleString('en-IN') : '0.00'}
+                            </td>
+                            <td className="p-2 text-right text-teal-300 font-bold">
+                              {a.cr > 0 ? a.cr.toLocaleString('en-IN') : '0.00'}
+                            </td>
+                          </tr>
+                        ))}
+                        {retroTrialTotals.diff !== 0 && (
+                          <tr className="bg-[#5c4013]/30 hover:bg-[#5c4013]/50 border-b border-[#115b62]/30 italic">
+                            <td className="p-2 text-yellow-300 font-bold">Difference in Opening Balances (Suspense)</td>
+                            <td className="p-2 text-[#9af3f0]">Suspense</td>
+                            <td className="p-2 text-right text-yellow-100 font-bold">
+                              {retroTrialTotals.diff < 0 ? Math.abs(retroTrialTotals.diff).toLocaleString('en-IN') : '0.00'}
+                            </td>
+                            <td className="p-2 text-right text-teal-300 font-bold">
+                              {retroTrialTotals.diff > 0 ? retroTrialTotals.diff.toLocaleString('en-IN') : '0.00'}
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
+                      <tfoot>
+                        <tr className="bg-[#115b62]/50 font-bold text-yellow-400">
+                          <td className="p-2 border border-[#146067]" colSpan={2}>Grand Totals</td>
+                          <td className="p-2 border border-[#146067] text-right">{retroTrialTotals.totalDr.toLocaleString('en-IN')}</td>
+                          <td className="p-2 border border-[#146067] text-right">{retroTrialTotals.totalCr.toLocaleString('en-IN')}</td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 </div>
@@ -2010,7 +2068,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         {activeTab === 'daybook' && <Daybook vouchers={vouchers} onAddVoucher={() => setIsAddingVoucher(true)} onDeleteVoucher={handleDeleteVoucher} onEditVoucher={setEditingVoucher} />}
         {activeTab === 'vouchers' && <VoucherManager vouchers={vouchers} onAdd={() => setIsAddingVoucher(true)} />}
         {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} onDeleteVoucher={handleDeleteVoucher} onEditVoucher={setEditingVoucher} groups={groups} />}
-        {activeTab === 'reports' && <FinancialReports accounts={accounts} vouchers={vouchers} groups={groups} />}
+        {activeTab === 'reports' && <FinancialReports accounts={accounts} vouchers={vouchers} groups={groups} franchiseId={franchiseId} />}
         {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} vouchers={vouchers} onAddAccount={() => setIsAddingAccount(true)} franchiseId={franchiseId} />}
       </div>
 
@@ -2077,6 +2135,22 @@ function getVoucherPaymentMode(v: Voucher): 'Cash' | 'UPI' | 'Debit' {
   if (hasBank) return 'UPI';
 
   return 'Debit';
+}
+
+/** Parse customer name from trip or filling narration */
+function getCustomerNameFromNarration(narration?: string): string {
+  if (!narration) return '';
+  // 1. Trip #00095 - damodar padosi (5000) 
+  const tripMatch = narration.match(/Trip\s*#\d+\s*-\s*([^(]+)/i);
+  if (tripMatch) {
+    return tripMatch[1].trim();
+  }
+  // 2. Hydrant filling for sapana enterprise  () [Token: IN-287928]
+  const hydrantMatch = narration.match(/Hydrant\s+filling\s+for\s+([^(|\[]+)/i);
+  if (hydrantMatch) {
+    return hydrantMatch[1].trim();
+  }
+  return '';
 }
 
 /** Daybook View */
@@ -2184,7 +2258,47 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
       currentY += 4;
 
       const data = vchList.map(v => {
-        const part = v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName || '';
+        let part = '';
+        const narrationCust = getCustomerNameFromNarration(v.narration);
+
+        if (v.type === 'Sales') {
+          const customerItem = v.items.find(i => i.type === 'Dr');
+          const incomeItem = v.items.find(i => i.type === 'Cr');
+          
+          const displayCust = narrationCust || (customerItem && customerItem.accountName !== 'Cash' && customerItem.accountName !== 'Bank Account' && !customerItem.accountName.toLowerCase().includes('bank') ? customerItem.accountName : '');
+          const displayIncome = incomeItem ? incomeItem.accountName : '';
+
+          if (displayCust && displayIncome) {
+            part = `${displayCust} (${displayIncome})`;
+          } else if (displayCust) {
+            part = displayCust;
+          } else if (customerItem && incomeItem) {
+            part = `${customerItem.accountName} (${incomeItem.accountName})`;
+          } else {
+            part = v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && !i.accountName.toLowerCase().includes('bank') && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName || '';
+          }
+        } else {
+          if (narrationCust) {
+            const otherItem = v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && !i.accountName.toLowerCase().includes('bank') && i.accountName !== 'Petrol Pump');
+            if (otherItem) {
+              part = `${narrationCust} (${otherItem.accountName})`;
+            } else {
+              part = narrationCust;
+            }
+          } else {
+            part = v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && !i.accountName.toLowerCase().includes('bank') && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName || '';
+          }
+        }
+
+        const hasDrawing = v.items.some(i => i.accountName.toLowerCase().includes('drawing'));
+        if (v.type === 'Payment' && hasDrawing && v.narration) {
+          if (part.toLowerCase().includes('drawing')) {
+            part = `${part} (${v.narration})`;
+          } else {
+            part = `${part} - Drawing (${v.narration})`;
+          }
+        }
+
         return [
           format(v.date, 'dd/MM/yyyy'),
           sanitizePdfText(v.voucherNumber),
@@ -2254,6 +2368,27 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
     doc.save(`Daybook_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
   };
 
+  const uiCashVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'Cash');
+  const uiBankVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'UPI');
+  const uiDebitVouchers = filtered.filter(v => getVoucherPaymentMode(v) === 'Debit');
+
+  const uiCashSalesTotal = uiCashVouchers.filter(v => v.type === 'Sales').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiCashReceivedTotal = uiCashVouchers.filter(v => v.type === 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiCashPaymentTotal = uiCashVouchers.filter(v => v.type !== 'Sales' && v.type !== 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiCashTotal = (uiCashSalesTotal + uiCashReceivedTotal) - uiCashPaymentTotal;
+
+  const uiBankSalesTotal = uiBankVouchers.filter(v => v.type === 'Sales').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiBankReceivedTotal = uiBankVouchers.filter(v => v.type === 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiBankPaymentTotal = uiBankVouchers.filter(v => v.type !== 'Sales' && v.type !== 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiBankTotal = (uiBankSalesTotal + uiBankReceivedTotal) - uiBankPaymentTotal;
+
+  const uiDebitSalesTotal = uiDebitVouchers.filter(v => v.type === 'Sales').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiDebitReceivedTotal = uiDebitVouchers.filter(v => v.type === 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiDebitPaymentTotal = uiDebitVouchers.filter(v => v.type !== 'Sales' && v.type !== 'Receipt').reduce((sum, v) => sum + v.totalAmount, 0);
+  const uiDebitTotal = (uiDebitSalesTotal + uiDebitReceivedTotal) - uiDebitPaymentTotal;
+
+  const uiGrandSum = uiCashTotal + uiBankTotal + uiDebitTotal;
+
   return (
     <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
       <div className="p-6 border-b border-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
@@ -2313,19 +2448,19 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
       <div className="mx-6 mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4 print:grid">
         <div className="bg-emerald-55/40 border border-emerald-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
           <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">💵 Cash Total</span>
-          <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'Cash').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
+          <span className="text-xl font-black text-slate-900 mt-1">₹{uiCashTotal.toLocaleString('en-IN')}</span>
         </div>
         <div className="bg-blue-55/40 border border-blue-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
           <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">📱 UPI Total</span>
-          <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'UPI').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
+          <span className="text-xl font-black text-slate-900 mt-1">₹{uiBankTotal.toLocaleString('en-IN')}</span>
         </div>
         <div className="bg-orange-55/40 border border-orange-100/70 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
           <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">📁 Credit/Debit Total</span>
-          <span className="text-xl font-black text-slate-900 mt-1">₹{filtered.filter(v => getVoucherPaymentMode(v) === 'Debit').reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
+          <span className="text-xl font-black text-slate-900 mt-1">₹{uiDebitTotal.toLocaleString('en-IN')}</span>
         </div>
         <div className="bg-slate-50 border border-slate-200/50 rounded-2xl p-4 flex flex-col justify-between shadow-xs">
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">📊 Grand Total</span>
-          <span className="text-xl font-black text-slate-800 mt-1">₹{filtered.reduce((sum, v) => sum + v.totalAmount, 0).toLocaleString('en-IN')}</span>
+          <span className="text-xl font-black text-slate-800 mt-1">₹{uiGrandSum.toLocaleString('en-IN')}</span>
         </div>
       </div>
 
@@ -2383,7 +2518,49 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
                 <td className="p-4">
                   <div className="max-w-md">
                     <p className="text-sm font-bold text-slate-900 line-clamp-1">
-                      {v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName}
+                      {(() => {
+                        let partName = '';
+                        const narrationCust = getCustomerNameFromNarration(v.narration);
+
+                        if (v.type === 'Sales') {
+                          const customerItem = v.items.find(i => i.type === 'Dr');
+                          const incomeItem = v.items.find(i => i.type === 'Cr');
+                          
+                          const displayCust = narrationCust || (customerItem && customerItem.accountName !== 'Cash' && customerItem.accountName !== 'Bank Account' && !customerItem.accountName.toLowerCase().includes('bank') ? customerItem.accountName : '');
+                          const displayIncome = incomeItem ? incomeItem.accountName : '';
+
+                          if (displayCust && displayIncome) {
+                            partName = `${displayCust} (${displayIncome})`;
+                          } else if (displayCust) {
+                            partName = displayCust;
+                          } else if (customerItem && incomeItem) {
+                            partName = `${customerItem.accountName} (${incomeItem.accountName})`;
+                          } else {
+                            partName = v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && !i.accountName.toLowerCase().includes('bank') && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName || '';
+                          }
+                        } else {
+                          if (narrationCust) {
+                            const otherItem = v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && !i.accountName.toLowerCase().includes('bank') && i.accountName !== 'Petrol Pump');
+                            if (otherItem) {
+                              partName = `${narrationCust} (${otherItem.accountName})`;
+                            } else {
+                              partName = narrationCust;
+                            }
+                          } else {
+                            partName = v.items.find(i => i.accountName !== 'Cash' && i.accountName !== 'Bank Account' && !i.accountName.toLowerCase().includes('bank') && i.accountName !== 'Petrol Pump')?.accountName || v.items[0]?.accountName || '';
+                          }
+                        }
+
+                        const hasDrawing = v.items.some(i => i.accountName.toLowerCase().includes('drawing'));
+                        if (v.type === 'Payment' && hasDrawing && v.narration) {
+                          if (partName.toLowerCase().includes('drawing')) {
+                            partName = `${partName} (${v.narration})`;
+                          } else {
+                            partName = `${partName} - Drawing (${v.narration})`;
+                          }
+                        }
+                        return partName;
+                      })()}
                       {v.items.length > 2 && ` & others`}
                     </p>
                     <p className="text-[10px] text-slate-400 font-medium truncate">{v.narration}</p>
@@ -2522,7 +2699,7 @@ function VoucherEntryModal({ onClose, accounts, franchiseId, editingVoucher }: {
           const accData = accDocMap[accId].data;
           const newBalance = balanceUpdates[accId];
           
-          if (accData.balanceType === 'Dr' && (accData.name === 'Cash' || accData.name === 'Bank Account' || accData.name === 'Petrol Pump')) {
+          if (accData.balanceType === 'Dr' && (accData.name === 'Cash' || accData.name === 'Bank of Baroda Operating A/c' || accData.name === 'Bank Account' || accData.name.toLowerCase().includes('bank') || accData.name === 'Petrol Pump')) {
             if (newBalance < 0) {
               throw new Error(`INSUFFICIENT_FUNDS:${accData.name}:${accData.currentBalance || 0}`);
             }
@@ -3865,18 +4042,28 @@ function AccountDeleteConfirmationModal({
 }
 
 /** Reporting View */
-function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[], vouchers: Voucher[], groups: AccountGroup[] }) {
-  const [reportType, setReportType] = useState<'trial' | 'pl' | 'bs'>('trial');
+function FinancialReports({ accounts, vouchers, groups, franchiseId }: { accounts: Account[], vouchers: Voucher[], groups: AccountGroup[], franchiseId?: string }) {
+  const [reportType, setReportType] = useState<'trial' | 'pl' | 'bs' | 'audit'>('trial');
+  const [greenFlagGranted, setGreenFlagGranted] = useState<boolean>(() => {
+    return localStorage.getItem('ledger_audit_green_flag_milan') === 'true';
+  });
   
   const getBal = (accountId: string) => {
     const acc = accounts.find(a => a.id === accountId);
     if (!acc) return 0;
-    let balance = acc.balanceType === 'Dr' ? acc.openingBalance : -acc.openingBalance;
+    
+    if (acc.currentBalance !== undefined && acc.currentBalance !== null) {
+      return acc.balanceType === 'Dr' ? acc.currentBalance : -acc.currentBalance;
+    }
+    
+    const opening = Number(acc.openingBalance || 0);
+    let balance = acc.balanceType === 'Dr' ? opening : -opening;
     vouchers.forEach(v => {
-      v.items.forEach(item => {
+      v.items?.forEach(item => {
         if (item.accountId === accountId) {
-          if (item.type === 'Dr') balance += item.amount;
-          else balance -= item.amount;
+          const amt = Number(item.amount || 0);
+          if (item.type === 'Dr') balance += amt;
+          else balance -= amt;
         }
       });
     });
@@ -3888,7 +4075,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
       const bal = getBal(a.id!);
       return {
         name: a.name,
-        dr: bal >= 0 ? Math.abs(bal) : 0,
+        dr: bal >= 0 ? bal : 0,
         cr: bal < 0 ? Math.abs(bal) : 0
       };
     })
@@ -3896,18 +4083,43 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
     .sort((a, b) => a.name.localeCompare(b.name));
   }, [accounts, vouchers]);
 
+  const trialBalanceTotals = useMemo(() => {
+    const rawTotalDr = trialBalance.reduce((s, a) => s + a.dr, 0);
+    const rawTotalCr = trialBalance.reduce((s, a) => s + a.cr, 0);
+    const diff = rawTotalDr - rawTotalCr;
+    return {
+      rawTotalDr,
+      rawTotalCr,
+      diff,
+      totalDr: diff < 0 ? rawTotalDr + Math.abs(diff) : rawTotalDr,
+      totalCr: diff > 0 ? rawTotalCr + diff : rawTotalCr
+    };
+  }, [trialBalance]);
+
   const plData = useMemo(() => {
     const incomeGroups = groups.filter(g => g.type === 'Income').map(g => g.id);
     const expenseGroups = groups.filter(g => g.type === 'Expense').map(g => g.id);
     
     const incomes = accounts
       .filter(a => incomeGroups.includes(a.groupId))
-      .map(a => ({ name: a.name, amount: Math.abs(getBal(a.id!)) }))
+      .map(a => {
+        const bal = getBal(a.id!);
+        // For incomes, Cr balance is positive, Dr is negative.
+        // Since getBal is positive for Dr and negative for Cr, we negate it.
+        return { name: a.name, amount: -bal };
+      })
+      .filter(a => a.amount !== 0)
       .sort((a, b) => a.name.localeCompare(b.name));
     
     const expenses = accounts
       .filter(a => expenseGroups.includes(a.groupId))
-      .map(a => ({ name: a.name, amount: Math.abs(getBal(a.id!)) }))
+      .map(a => {
+        const bal = getBal(a.id!);
+        // For expenses, Dr balance is positive, Cr is negative.
+        // Since getBal is positive for Dr and negative for Cr, we use it directly.
+        return { name: a.name, amount: bal };
+      })
+      .filter(a => a.amount !== 0)
       .sort((a, b) => a.name.localeCompare(b.name));
     
     const totalIncome = incomes.reduce((s, i) => s + i.amount, 0);
@@ -3915,6 +4127,180 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
     
     return { incomes, expenses, totalIncome, totalExpense, net: totalIncome - totalExpense };
   }, [accounts, vouchers, groups]);
+
+  const bsTotals = useMemo(() => {
+    const rawLiabEqu = groups.filter(g => g.type === 'Liability' || g.type === 'Equity')
+      .reduce((s, g) => {
+        const grpAccs = accounts.filter(a => a.groupId === g.id);
+        const sum = grpAccs.reduce((s2, a) => s2 + getBal(a.id!), 0);
+        return s + (-sum);
+      }, 0) + Math.max(0, plData.net);
+
+    const rawAssets = groups.filter(g => g.type === 'Asset')
+      .reduce((s, g) => {
+        const grpAccs = accounts.filter(a => a.groupId === g.id);
+        const sum = grpAccs.reduce((s2, a) => s2 + getBal(a.id!), 0);
+        return s + sum;
+      }, 0) + Math.abs(Math.min(0, plData.net));
+
+    const diff = rawAssets - rawLiabEqu;
+
+    return {
+      rawLiabEqu,
+      rawAssets,
+      diff,
+      totalLiabEqu: diff > 0 ? rawLiabEqu + diff : rawLiabEqu,
+      totalAssets: diff < 0 ? rawAssets + Math.abs(diff) : rawAssets
+    };
+  }, [accounts, vouchers, groups, plData.net]);
+
+  const auditResult = useMemo(() => {
+    const anomalies: {
+      id: string;
+      type: 'critical' | 'warning' | 'info';
+      title: string;
+      message: string;
+      suggestion: string;
+      category: 'Trial Balance' | 'Cash Book' | 'Double Entry' | 'Voucher Sequence' | 'Transaction Volume';
+    }[] = [];
+
+    let criticalCount = 0;
+    let warningCount = 0;
+    let infoCount = 0;
+
+    // 1. Trial Balance Check
+    const diff = bsTotals.diff;
+    if (diff !== 0) {
+      criticalCount++;
+      anomalies.push({
+        id: 'trial_balance_mismatch',
+        type: 'critical',
+        title: 'Trial Balance Mismatch / ट्रायल बैलेंस विसंगति',
+        message: `Total debits do not match total credits. There is a discrepancy of ${formatCurrency(Math.abs(diff))} (${diff > 0 ? 'Debit Excess' : 'Credit Excess'}).`,
+        suggestion: 'Ensure that opening balances of all ledger accounts are correct, or post an adjusting entry to Suspense Account (सस्पेंस खाता) to balance the trial ledger temporarily.',
+        category: 'Trial Balance'
+      });
+    }
+
+    // 2. Negative Cash or Bank Accounts
+    accounts.forEach(acc => {
+      const grp = groups.find(g => g.id === acc.groupId);
+      const grpName = grp ? grp.name.toLowerCase() : '';
+      const isCashOrBank = grpName.includes('cash') || grpName.includes('bank') || acc.name.toLowerCase().includes('cash') || acc.name.toLowerCase().includes('bank');
+      
+      if (isCashOrBank) {
+        const bal = getBal(acc.id!);
+        if (bal < 0) {
+          warningCount++;
+          anomalies.push({
+            id: `negative_cash_${acc.id}`,
+            type: 'warning',
+            title: `Negative Cash/Bank Balance in "${acc.name}" / ऋणात्मक रोकड़ शेष`,
+            message: `The account has a net Credit balance of ${formatCurrency(Math.abs(bal))}. Physical cash accounts or overdraft-free bank accounts cannot have negative balances under standard accounting rules.`,
+            suggestion: 'Check if any cash receipt or sales voucher was missed, or if a payment entry was double-posted or posted with an incorrect amount.',
+            category: 'Cash Book'
+          });
+        }
+      }
+    });
+
+    // 3. Unbalanced Vouchers
+    vouchers.forEach(vch => {
+      let drSum = 0;
+      let crSum = 0;
+      vch.items?.forEach(item => {
+        const amt = Number(item.amount || 0);
+        if (item.type === 'Dr') drSum += amt;
+        else crSum += amt;
+      });
+
+      if (Math.abs(drSum - crSum) > 0.01) {
+        criticalCount++;
+        anomalies.push({
+          id: `unbalanced_vch_${vch.id}`,
+          type: 'critical',
+          title: `Unbalanced Double-Entry in Voucher #${vch.voucherNumber} / असंतुलित वाउचर`,
+          message: `Voucher #${vch.voucherNumber} is unbalanced. Total Debits (₹${drSum.toLocaleString('en-IN')}) do not equal Total Credits (₹${crSum.toLocaleString('en-IN')}). Discrepancy is ₹${Math.abs(drSum - crSum).toLocaleString('en-IN')}.`,
+          suggestion: `Edit Voucher #${vch.voucherNumber} and verify that the debit and credit rows are balanced correctly.`,
+          category: 'Double Entry'
+        });
+      }
+    });
+
+    // 4. Missing Voucher Narrations
+    let emptyNarrationCount = 0;
+    vouchers.forEach(vch => {
+      if (!vch.narration || vch.narration.trim() === '') {
+        emptyNarrationCount++;
+      }
+    });
+    if (emptyNarrationCount > 0) {
+      infoCount++;
+      anomalies.push({
+        id: 'missing_narrations',
+        type: 'info',
+        title: 'Missing Voucher Narrations / वाउचर नरेशन गायब',
+        message: `${emptyNarrationCount} transactions do not have any narration or description notes.`,
+        suggestion: 'Add clear description/narration to vouchers during entry to ensure traceability during external GST or income tax audits.',
+        category: 'Voucher Sequence'
+      });
+    }
+
+    // 5. Section 40A(3) Compliance Check (payments exceeding 10k in cash)
+    let highCashCount = 0;
+    vouchers.forEach(vch => {
+      const isPayment = vch.type === 'Payment';
+      let isCash = false;
+      vch.items?.forEach(item => {
+        if (item.accountName?.toLowerCase().includes('cash')) {
+          isCash = true;
+        }
+      });
+
+      if (isPayment && isCash) {
+        vch.items?.forEach(item => {
+          if (item.type === 'Dr' && item.amount > 10000) {
+            highCashCount++;
+          }
+        });
+      }
+    });
+
+    if (highCashCount > 0) {
+      warningCount++;
+      anomalies.push({
+        id: 'high_cash_payment',
+        type: 'warning',
+        title: 'High-Value Cash Payment Violation (Section 40A(3)) / उच्च नकद भुगतान नियम',
+        message: `Detected ${highCashCount} cash payment transactions exceeding ₹10,000. Under Section 40A(3) of the Income Tax Act, business payments exceeding ₹10,000 per day in cash are not allowed as deductible expenditure.`,
+        suggestion: 'Convert future high-value payments to bank transfers, UPI, or other digital modes to ensure complete tax audit compliance.',
+        category: 'Transaction Volume'
+      });
+    }
+
+    const indicators = [
+      { name: 'Trial Balance Equation Check', passed: diff === 0 },
+      { name: 'Double Entry Integrity Check', passed: !vouchers.some(v => {
+          let dr = 0, cr = 0;
+          v.items?.forEach(item => { if(item.type === 'Dr') dr += item.amount; else cr += item.amount; });
+          return Math.abs(dr - cr) > 0.01;
+        })
+      },
+      { name: 'Cash Register Overdraft Prevention', passed: !anomalies.some(a => a.id.startsWith('negative_cash')) },
+      { name: 'Tax Section 40A(3) Compliance', passed: highCashCount === 0 },
+      { name: 'Audit Narration Standards Check', passed: emptyNarrationCount === 0 },
+      { name: 'Valid Chart of Accounts Mappings', passed: accounts.every(a => groups.some(g => g.id === a.groupId)) }
+    ];
+
+    return {
+      anomalies,
+      criticalCount,
+      warningCount,
+      infoCount,
+      indicators,
+      score: Math.max(0, 100 - (criticalCount * 25) - (warningCount * 10) - (infoCount * 2))
+    };
+  }, [accounts, vouchers, groups, bsTotals.diff]);
 
   const componentRef = useRef<HTMLDivElement>(null);
   const handlePrint = async () => {
@@ -3924,6 +4310,53 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
     } catch (e) {
       console.error('jsPDF failed:', e instanceof Error ? e.message : String(e));
       alert('PDF generation is not supported in this browser.');
+      return;
+    }
+
+    if (reportType === 'audit') {
+      doc.setFontSize(22);
+      doc.setTextColor(5, 150, 105); // emerald green
+      doc.text('AUDIT COMPLIANCE CERTIFICATE', 14, 25);
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Certificate Date: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 32);
+      
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, 36, 196, 36);
+      
+      doc.setFontSize(14);
+      doc.setTextColor(15, 23, 42);
+      doc.text('To Whomsoever It May Concern', 14, 46);
+      
+      doc.setFontSize(11);
+      doc.setTextColor(51, 65, 85);
+      const introText = `This is to certify that the financial ledger, journal accounts, double-entry vouchers, and sales bookings for Rajhans Steel & Water have been audited under standard operating compliance rules.`;
+      doc.text(doc.splitTextToSize(introText, 180), 14, 54);
+      
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.text('AUDIT SUMMARY:', 14, 74);
+      doc.setFontSize(10);
+      doc.text(`• Audit Score: ${auditResult.score}/100`, 18, 82);
+      doc.text(`• Critical Accounting Discrepancies: ${auditResult.criticalCount}`, 18, 88);
+      doc.text(`• Compliance Warnings: ${auditResult.warningCount}`, 18, 94);
+      doc.text(`• Information Flags: ${auditResult.infoCount}`, 18, 100);
+      doc.text(`• Digital Green Flag Status: ${greenFlagGranted ? 'GRANTED & APPROVED BY PROPRIETOR' : 'PENDING APPROVAL'}`, 18, 106);
+
+      doc.setFontSize(12);
+      doc.text('COMPLIANCE SUMMARY:', 14, 120);
+      let currentY = 128;
+      auditResult.indicators.forEach((ind) => {
+        doc.text(`[${ind.passed ? 'PASS' : 'FAIL'}]  ${ind.name}`, 18, currentY);
+        currentY += 6;
+      });
+
+      doc.setFontSize(9);
+      doc.setTextColor(148, 163, 184);
+      doc.text('This is an automated system-generated audit certificate compiled on cloud accounting ledger databases.', 14, currentY + 15);
+      
+      addSwanWatermarkToPDF(doc);
+      doc.save(`CA_Audit_Certificate_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
       return;
     }
     doc.setFontSize(20);
@@ -3945,10 +4378,19 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
         a.cr > 0 ? a.cr.toLocaleString('en-IN') : ''
       ]);
       
-      const totalDr = trialBalance.reduce((s, a) => s + a.dr, 0);
-      const totalCr = trialBalance.reduce((s, a) => s + a.cr, 0);
+      if (trialBalanceTotals.diff !== 0) {
+        tableData.push([
+          'Difference in Opening Balances (Suspense)',
+          trialBalanceTotals.diff < 0 ? Math.abs(trialBalanceTotals.diff).toLocaleString('en-IN') : '',
+          trialBalanceTotals.diff > 0 ? trialBalanceTotals.diff.toLocaleString('en-IN') : ''
+        ]);
+      }
       
-      tableData.push(['Grand Total', totalDr.toLocaleString('en-IN'), totalCr.toLocaleString('en-IN')]);
+      tableData.push([
+        'Grand Total', 
+        trialBalanceTotals.totalDr.toLocaleString('en-IN'), 
+        trialBalanceTotals.totalCr.toLocaleString('en-IN')
+      ]);
 
       autoTable(doc, {
         head: [['Account Name', 'Debit (Dr)', 'Credit (Cr)']],
@@ -4011,6 +4453,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
         if (bal !== 0) libItems.push({ name: g.name, bal });
       });
       if (plData.net > 0) libItems.push({ name: 'Profit & Loss A/c (Profit)', bal: plData.net });
+      if (bsTotals.diff > 0) libItems.push({ name: 'Difference in Opening Balances', bal: bsTotals.diff });
       
       const assetItems: any[] = [];
       assets.forEach(g => {
@@ -4018,6 +4461,7 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
         if (bal !== 0) assetItems.push({ name: g.name, bal });
       });
       if (plData.net < 0) assetItems.push({ name: 'Profit & Loss A/c (Loss)', bal: Math.abs(plData.net) });
+      if (bsTotals.diff < 0) assetItems.push({ name: 'Difference in Opening Balances', bal: Math.abs(bsTotals.diff) });
       
       const maxLength = Math.max(libItems.length, assetItems.length);
       const tableData = [];
@@ -4030,10 +4474,12 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
         ]);
       }
       
-      const totalLib = libItems.reduce((s, i) => s + i.bal, 0);
-      const totalAssets = assetItems.reduce((s, i) => s + i.bal, 0);
-      
-      tableData.push(['Total Liabilities', totalLib.toLocaleString('en-IN'), 'Total Assets', totalAssets.toLocaleString('en-IN')]);
+      tableData.push([
+        'Total Liabilities', 
+        bsTotals.totalLiabEqu.toLocaleString('en-IN'), 
+        'Total Assets', 
+        bsTotals.totalAssets.toLocaleString('en-IN')
+      ]);
 
       autoTable(doc, {
         head: [['Liabilities', 'Amount', 'Assets', 'Amount']],
@@ -4052,13 +4498,58 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
     doc.save(`${reportType.toUpperCase()}_Report_${format(new Date(), 'dd_MMM_yyyy')}.pdf`);
   };
 
+  const handleGrantGreenFlag = async () => {
+    localStorage.setItem('ledger_audit_green_flag_milan', 'true');
+    setGreenFlagGranted(true);
+    try {
+      await activityLogger.log({
+        franchiseId: franchiseId || 'global',
+        franchiseName: 'Rajhans Steel and Water',
+        userEmail: 'milan.sharma6565@gmail.com',
+        actionType: 'CA_AUDIT_GREEN_FLAG_GRANTED',
+        description: `CA Audit Green Flag granted by Proprietor (Milan Sharma) with Ledger Audit Score of ${auditResult.score}%`,
+        details: {
+          auditScore: auditResult.score,
+          criticalCount: auditResult.criticalCount,
+          warningCount: auditResult.warningCount,
+          infoCount: auditResult.infoCount,
+          approvedAt: new Date().toISOString()
+        }
+      });
+    } catch (err) {
+      console.error("Failed to log activity log:", err);
+    }
+  };
+
+  const handleRevokeGreenFlag = async () => {
+    localStorage.removeItem('ledger_audit_green_flag_milan');
+    setGreenFlagGranted(false);
+    try {
+      await activityLogger.log({
+        franchiseId: franchiseId || 'global',
+        franchiseName: 'Rajhans Steel and Water',
+        userEmail: 'milan.sharma6565@gmail.com',
+        actionType: 'CA_AUDIT_GREEN_FLAG_REVOKED',
+        description: `CA Audit Green Flag revoked by Proprietor (Milan Sharma) for ledger re-evaluation`,
+        details: {
+          revokedAt: new Date().toISOString()
+        }
+      });
+    } catch (err) {
+      console.error("Failed to log activity log:", err);
+    }
+  };
+
   return (
     <div className="space-y-6">
-       <div className="flex justify-between items-center print:hidden">
-         <div className="flex bg-slate-100 p-1 rounded-2xl w-fit">
-            <button onClick={() => setReportType('trial')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'trial' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Trial Balance</button>
-            <button onClick={() => setReportType('pl')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'pl' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Profit & Loss</button>
-            <button onClick={() => setReportType('bs')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${reportType === 'bs' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Balance Sheet</button>
+       <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center print:hidden">
+         <div className="flex flex-wrap bg-slate-100 p-1 rounded-2xl w-fit gap-1">
+            <button onClick={() => setReportType('trial')} className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${reportType === 'trial' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'}`}>Trial Balance</button>
+            <button onClick={() => setReportType('pl')} className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${reportType === 'pl' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'}`}>Profit & Loss</button>
+            <button onClick={() => setReportType('bs')} className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${reportType === 'bs' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-900'}`}>Balance Sheet</button>
+            <button onClick={() => setReportType('audit')} className={`px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-1.5 ${reportType === 'audit' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-emerald-600'}`}>
+              <ShieldCheck size={16} /> CA Audit
+            </button>
          </div>
          <button onClick={async () => {
            try {
@@ -4066,8 +4557,16 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
            } catch (err) {
              alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
            }
-         }} className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold shadow-lg shadow-slate-200 text-sm active:scale-95 transition-all">
-           <Printer size={18} /> Print Report
+         }} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold shadow-lg text-sm active:scale-95 transition-all ${reportType === 'audit' ? 'bg-emerald-600 text-white shadow-emerald-200' : 'bg-slate-900 text-white shadow-slate-200'}`}>
+           {reportType === 'audit' ? (
+             <>
+               <ShieldCheck size={18} /> Print Certificate
+             </>
+           ) : (
+             <>
+               <Printer size={18} /> Print Report
+             </>
+           )}
          </button>
        </div>
 
@@ -4192,18 +4691,16 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
                   <span>Profit & Loss A/c (Net Profit)</span>
                   <span>{formatCurrency(Math.max(0, plData.net))}</span>
                 </div>
+                {bsTotals.diff > 0 && (
+                  <div className="flex justify-between text-sm font-bold text-amber-600 pt-2 border-t border-slate-50 border-dashed italic">
+                    <span>Difference in Opening Balances</span>
+                    <span>{formatCurrency(bsTotals.diff)}</span>
+                  </div>
+                )}
               </div>
               <div className="pt-4 border-t border-slate-900 flex justify-between text-lg font-display font-black text-slate-900">
                 <span>Total Liabilities</span>
-                <span>{formatCurrency(
-                  groups.filter(g => g.type === 'Liability' || g.type === 'Equity')
-                    .reduce((s, g) => {
-                      const grpAccs = accounts.filter(a => a.groupId === g.id);
-                      const sum = grpAccs.reduce((s2, a) => s2 + getBal(a.id!), 0);
-                      return s + (-sum);
-                    }, 0) + 
-                  Math.max(0, plData.net)
-                )}</span>
+                <span>{formatCurrency(bsTotals.totalLiabEqu)}</span>
               </div>
             </div>
 
@@ -4237,22 +4734,211 @@ function FinancialReports({ accounts, vouchers, groups }: { accounts: Account[],
                   <span>Profit & Loss A/c (Net Loss)</span>
                   <span>{formatCurrency(Math.abs(Math.min(0, plData.net)))}</span>
                 </div>
+                {bsTotals.diff < 0 && (
+                  <div className="flex justify-between text-sm font-bold text-amber-600 pt-2 border-t border-slate-50 border-dashed italic">
+                    <span>Difference in Opening Balances</span>
+                    <span>{formatCurrency(Math.abs(bsTotals.diff))}</span>
+                  </div>
+                )}
               </div>
               <div className="pt-4 border-t border-slate-900 flex justify-between text-lg font-display font-black text-slate-900">
                 <span>Total Assets</span>
-                <span>{formatCurrency(
-                  groups.filter(g => g.type === 'Asset')
-                    .reduce((s, g) => {
-                      const grpAccs = accounts.filter(a => a.groupId === g.id);
-                      const sum = grpAccs.reduce((s2, a) => s2 + getBal(a.id!), 0);
-                      return s + sum;
-                    }, 0) + 
-                  Math.abs(Math.min(0, plData.net))
-                )}</span>
+                <span>{formatCurrency(bsTotals.totalAssets)}</span>
               </div>
             </div>
          </div>
        )}
+
+        {reportType === 'audit' && (
+          <div className="space-y-8 animate-fadeIn">
+            {/* CA Desk Header Banner */}
+            <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-[2.5rem] text-white p-8 md:p-10 shadow-xl relative overflow-hidden">
+              <div className="absolute right-0 top-0 opacity-10 pointer-events-none transform translate-x-12 -translate-y-12">
+                <UserCheck size={300} />
+              </div>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-400 text-xs font-black uppercase tracking-widest bg-emerald-500/10 px-3 py-1.5 rounded-full w-fit">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    CA Certified Compliance Diagnostics / सी.ए. ऑडिट रिपोर्ट
+                  </div>
+                  <h3 className="text-3xl font-display font-black tracking-tight">CA Sandeep Soni & Associates</h3>
+                  <p className="text-slate-300 text-sm max-w-xl">
+                    Comprehensive ledger verification, transaction trail testing, double-entry verification, and Income Tax act compliance reporting for <strong>Rajhans Steel & Water</strong>.
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-6 bg-white/5 border border-white/10 p-6 rounded-[2rem]">
+                  <div className="text-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Audit Score</span>
+                    <span className={`text-4xl font-black ${auditResult.score >= 90 ? 'text-emerald-400' : auditResult.score >= 70 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {auditResult.score}<span className="text-lg text-slate-400">/100</span>
+                    </span>
+                  </div>
+                  <div className="h-12 w-px bg-white/10"></div>
+                  <div>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1 font-mono">Ledger Health</span>
+                    <span className={`text-xs font-black uppercase px-2.5 py-1 rounded-md tracking-wider ${
+                      auditResult.score >= 90 ? 'bg-emerald-500/20 text-emerald-400' :
+                      auditResult.score >= 70 ? 'bg-amber-500/20 text-amber-400' :
+                      'bg-red-500/20 text-red-400'
+                    }`}>
+                      {auditResult.score >= 90 ? 'Excellent' : auditResult.score >= 70 ? 'Satisfactory' : 'Critical Review'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Proprietor's Green Flag Desk */}
+            <div className={`p-8 rounded-[2.5rem] border transition-all ${
+              greenFlagGranted 
+                ? 'bg-emerald-50/50 border-emerald-100 shadow-emerald-50/50' 
+                : 'bg-amber-50/50 border-amber-100 shadow-amber-50/50'
+            } shadow-md`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="flex items-start gap-4">
+                  <div className={`p-4 rounded-2xl ${greenFlagGranted ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
+                    <ShieldCheck size={28} className={greenFlagGranted ? "animate-bounce" : "animate-pulse"} />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-lg font-black text-slate-900">
+                      Proprietor Green Flag Clearance / मालिक का हरा झंडा
+                    </h4>
+                    <p className="text-sm text-slate-600 max-w-xl">
+                      {greenFlagGranted 
+                        ? 'Green Flag is GRANTED by Proprietor (Milan Sharma). The ledger state is certified as reviewed and approved.' 
+                        : 'Review the identified accounting discrepancies (कमियाँ) listed below. Once satisfied, click to grant a Green Flag to approve these accounts.'
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  {greenFlagGranted ? (
+                    <button 
+                      onClick={handleRevokeGreenFlag} 
+                      className="px-6 py-3 bg-red-100 text-red-700 hover:bg-red-200 rounded-xl font-bold text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center gap-1.5"
+                    >
+                      Revoke Green Flag / झंडा वापस लें
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={handleGrantGreenFlag} 
+                      className="px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm uppercase tracking-wider shadow-lg shadow-emerald-200 active:scale-95 transition-all flex items-center gap-2 animate-pulse"
+                    >
+                      Grant Green Flag / हरा झंडा प्रदान करें 🟢
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Discrepancies Matrix / कमियाँ */}
+            <div className="space-y-6">
+              <h4 className="text-xl font-display font-black text-slate-900 flex items-center gap-2">
+                <FileWarning className="text-slate-500" />
+                Ledger Shortcomings & Audit Findings / खाता बही की कमियाँ
+              </h4>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Left Column: Critical Anomalies */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-xs font-black text-red-600 uppercase tracking-widest">
+                    <span>Critical Anomalies ({auditResult.criticalCount}) / गंभीर त्रुटियाँ</span>
+                  </div>
+                  
+                  {auditResult.anomalies.filter(a => a.type === 'critical').length === 0 ? (
+                    <div className="bg-emerald-50/20 border border-emerald-100 p-8 rounded-[2rem] text-center space-y-2">
+                      <span className="text-3xl">🎉</span>
+                      <h5 className="font-bold text-emerald-800 text-sm">Perfect Structural Double-Entry</h5>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                        No critical mismatches or unbalanced vouchers detected. The ledger equation Dr = Cr is holding perfectly!
+                      </p>
+                    </div>
+                  ) : (
+                    auditResult.anomalies.filter(a => a.type === 'critical').map(a => (
+                      <div key={a.id} className="bg-red-50/40 border border-red-100 p-6 rounded-[2rem] space-y-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="text-xs font-black uppercase text-red-700 bg-red-100 px-2.5 py-0.5 rounded-full">{a.category}</span>
+                          <span className="text-[10px] text-red-500 font-bold font-mono">CRITICAL</span>
+                        </div>
+                        <h5 className="font-bold text-slate-900 text-sm">{a.title}</h5>
+                        <p className="text-xs text-slate-600 leading-relaxed">{a.message}</p>
+                        <div className="bg-white/80 border border-red-100/50 p-3.5 rounded-xl text-[11px] text-red-800 leading-relaxed">
+                          <strong>Correction Prevention Plan:</strong> {a.suggestion}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Right Column: Warnings & Quality Notes */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-xs font-black text-amber-600 uppercase tracking-widest">
+                    <span>Compliance & Traceability ({auditResult.warningCount + auditResult.infoCount}) / चेतावनी व सुझाव</span>
+                  </div>
+
+                  {auditResult.anomalies.filter(a => a.type !== 'critical').length === 0 ? (
+                    <div className="bg-blue-50/20 border border-blue-100 p-8 rounded-[2rem] text-center space-y-2">
+                      <span className="text-3xl">📋</span>
+                      <h5 className="font-bold text-slate-800 text-sm">Outstanding Compliance</h5>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                        No secondary warning flags, overdraft cash, or section 40A(3) digital violations were found in this verification session.
+                      </p>
+                    </div>
+                  ) : (
+                    auditResult.anomalies.filter(a => a.type !== 'critical').map(a => (
+                      <div key={a.id} className={`p-6 rounded-[2rem] space-y-3 border ${
+                        a.type === 'warning' ? 'bg-amber-50/30 border-amber-100' : 'bg-slate-50/50 border-slate-100'
+                      }`}>
+                        <div className="flex justify-between items-start gap-2">
+                          <span className={`text-xs font-black uppercase px-2.5 py-0.5 rounded-full ${
+                            a.type === 'warning' ? 'text-amber-700 bg-amber-100' : 'text-slate-700 bg-slate-100'
+                          }`}>{a.category}</span>
+                          <span className={`text-[10px] font-bold font-mono ${
+                            a.type === 'warning' ? 'text-amber-500' : 'text-slate-400'
+                          }`}>{a.type.toUpperCase()}</span>
+                        </div>
+                        <h5 className="font-bold text-slate-900 text-sm">{a.title}</h5>
+                        <p className="text-xs text-slate-600 leading-relaxed">{a.message}</p>
+                        <div className="bg-white/80 border border-slate-100 p-3.5 rounded-xl text-[11px] text-slate-800 leading-relaxed">
+                          <strong>Recommendation:</strong> {a.suggestion}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Audit Checklist Status */}
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 space-y-6">
+              <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-4 flex items-center gap-2">
+                <Scale size={16} /> Standard Accounting Checks Performed / ऑडिट चेकलिस्ट
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {auditResult.indicators.map((ind, i) => (
+                  <div key={i} className="flex items-center gap-3 p-4 bg-slate-50/50 rounded-2xl border border-slate-100">
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold font-mono ${
+                      ind.passed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {ind.passed ? '✓' : '!'}
+                    </span>
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-bold text-slate-800 block leading-tight">{ind.name}</span>
+                      <span className={`text-[9px] font-bold font-mono ${
+                        ind.passed ? 'text-emerald-600' : 'text-amber-600'
+                      }`}>
+                        {ind.passed ? 'PASS' : 'FLAGGED'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
        </div>
     </div>
   );
@@ -4326,7 +5012,7 @@ function BankFeedWorkspace({ accounts, franchiseId, isSuperAdmin }: { accounts: 
   const [searchAccountToken, setSearchAccountToken] = useState<string>('');
 
   // Find general Bank Account to debit/credit from
-  const bankAccount = accounts.find(a => a.name === 'Bank Account' || a.name.toLowerCase().includes('bank')) || accounts[0];
+  const bankAccount = accounts.find(a => a.name === 'Bank of Baroda Operating A/c' || a.name === 'Bank Account' || a.name.toLowerCase().includes('bank')) || accounts[0];
 
   // Fetch previous learned rules on mount
   useEffect(() => {

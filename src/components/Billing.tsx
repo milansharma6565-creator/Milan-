@@ -81,60 +81,90 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           const remaining: any[] = [];
           for (const billData of arr) {
             try {
-              // Save sticky rate to customer
+              const currentFid = franchiseId || billData.franchiseId || null;
+
+              // 1. One-time query of highest bill number to avoid duplicate assignments
+              let highestQueryNum = 0;
               try {
-                await updateDoc(doc(db, 'customers', billData.customerId), { 
+                let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
+                if (currentFid) {
+                  q = query(collection(db, 'bills'), where('franchiseId', '==', currentFid), orderBy('billNumber', 'desc'), limit(1));
+                }
+                const snapshot = await getDocs(q);
+                if (!snapshot.empty) {
+                  const lastNumStr = snapshot.docs[0].data().billNumber;
+                  const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
+                  if (!isNaN(parsed)) highestQueryNum = parsed;
+                }
+              } catch (e) {
+                console.warn("Soft fail querying highest bill number before sync transaction:", e);
+              }
+
+              const counterRef = doc(db, 'counters', currentFid ? `bill_sequence_${currentFid}` : 'bill_sequence_global');
+
+              let finalSyncedBillNumber = '';
+              let syncedBillId = '';
+              let finalBillDataStore: any = null;
+
+              // 2. Perform atomic transaction
+              await runTransaction(db, async (transaction) => {
+                const counterSnap = await transaction.get(counterRef);
+                let lastSequence = 0;
+                if (counterSnap.exists()) {
+                  lastSequence = counterSnap.data().lastSequence || 0;
+                }
+
+                const nextSeq = Math.max(highestQueryNum, lastSequence) + 1;
+                finalSyncedBillNumber = generateBillNumber(nextSeq);
+
+                // Update counter
+                transaction.set(counterRef, { lastSequence: nextSeq }, { merge: true });
+
+                // Update customer rate
+                const customerRef = doc(db, 'customers', billData.customerId);
+                transaction.update(customerRef, {
                   lastRate: billData.rate,
                   updatedAt: serverTimestamp()
                 });
-              } catch (custErr) {
-                console.error("Failed to update customer sticky rate under sync:", custErr);
-              }
 
-              // Save bill with duplicate check
-              let finalSyncedBillNumber = billData.billNumber;
-              let isDupSync = true;
-              let dupSyncAttempts = 0;
-              while (isDupSync && dupSyncAttempts < 10) {
-                const qDup = query(
-                  collection(db, 'bills'),
-                  where('franchiseId', '==', (franchiseId || billData.franchiseId || null)),
-                  where('billNumber', '==', finalSyncedBillNumber)
-                );
-                const dupSnap = await getDocs(qDup);
-                if (dupSnap.empty) {
-                  isDupSync = false;
-                } else {
-                  const currentSeq = parseInt(finalSyncedBillNumber.replace(/\D/g, ''), 10);
-                  const nextSeq = (isNaN(currentSeq) ? 1001 : currentSeq) + 1;
-                  finalSyncedBillNumber = generateBillNumber(nextSeq);
-                  dupSyncAttempts++;
+                // Prepare actual Firestore server timestamps
+                const finalBillData = {
+                  ...billData,
+                  billNumber: finalSyncedBillNumber,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp()
+                };
+                delete finalBillData.isOffline;
+                delete finalBillData.id;
+
+                const newBillRef = doc(collection(db, 'bills'));
+                transaction.set(newBillRef, finalBillData);
+                syncedBillId = newBillRef.id;
+                finalBillDataStore = { ...finalBillData, id: newBillRef.id };
+
+                // Create Driver Trip if set
+                if (billData.driverId) {
+                  const newTripRef = doc(collection(db, 'trips'));
+                  transaction.set(newTripRef, {
+                    billId: newBillRef.id,
+                    franchiseId: currentFid,
+                    billNumber: finalSyncedBillNumber,
+                    driverId: billData.driverId,
+                    driverName: billData.driverName,
+                    customerName: billData.customerName,
+                    customerMobile: billData.customerMobile,
+                    siteLocation: billData.customerAddress,
+                    category: billData.category,
+                    remarks: billData.remarks,
+                    quantity: billData.quantity,
+                    tankerSize: billData.category === 'TANKER' ? billData.tankerSize : null,
+                    bottleSize: billData.category === 'BOTTLE' ? billData.bottleSize : null,
+                    tractorId: 'T-01',
+                    status: 'Active',
+                    createdAt: serverTimestamp()
+                  });
                 }
-              }
-
-              // Prepare actual Firestore server timestamps
-              const finalBillData = {
-                ...billData,
-                billNumber: finalSyncedBillNumber,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-              };
-              // Remove our temporary offline indicators to store cleanly
-              delete finalBillData.isOffline;
-              delete finalBillData.id;
-
-              // Save bill
-              const docRef = await addDoc(collection(db, 'bills'), finalBillData);
-              const bookedBillWithId = { ...finalBillData, id: docRef.id };
-
-              const seqCount = parseInt(finalBillData.billNumber.replace(/\D/g, ''), 10);
-              if (!isNaN(seqCount)) {
-                try {
-                  await setDoc(doc(db, 'counters', (franchiseId || finalBillData.franchiseId) ? `bill_sequence_${franchiseId || finalBillData.franchiseId}` : 'bill_sequence_global'), { lastSequence: seqCount }, { merge: true });
-                } catch (errSeq) {
-                  console.error("Soft fail saving counter during offline sync:", errSeq);
-                }
-              }
+              });
 
               // Log invoice generation activity
               try {
@@ -144,37 +174,15 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                   userEmail: '',
                   actionType: 'NEW_BILL',
                   description: `[Offline Sync] Generated invoice #${finalSyncedBillNumber} for Customer "${billData.customerName}" with total ₹${billData.grandTotal}`,
-                  details: { billId: docRef.id, billNumber: finalSyncedBillNumber, total: billData.grandTotal }
+                  details: { billId: syncedBillId, billNumber: finalSyncedBillNumber, total: billData.grandTotal }
                 });
               } catch (logErr) {
                 console.error("Failed to log synced activity:", logErr);
               }
 
               // Post to Ledger
-              if (bookedBillWithId.status === 'Delivered') {
-                await ledgerAutomation.postBillToLedger(bookedBillWithId);
-              }
-
-              // Create Driver Trip if set
-              if (billData.driverId) {
-                await addDoc(collection(db, 'trips'), {
-                  billId: docRef.id,
-                  franchiseId: franchiseId || null,
-                  billNumber: finalSyncedBillNumber,
-                  driverId: billData.driverId,
-                  driverName: billData.driverName,
-                  customerName: billData.customerName,
-                  customerMobile: billData.customerMobile,
-                  siteLocation: billData.customerAddress,
-                  category: billData.category,
-                  remarks: billData.remarks,
-                  quantity: billData.quantity,
-                  tankerSize: billData.category === 'TANKER' ? billData.tankerSize : null,
-                  bottleSize: billData.category === 'BOTTLE' ? billData.bottleSize : null,
-                  tractorId: 'T-01',
-                  status: 'Active',
-                  createdAt: serverTimestamp()
-                });
+              if (finalBillDataStore && finalBillDataStore.status === 'Delivered') {
+                await ledgerAutomation.postBillToLedger(finalBillDataStore);
               }
 
             } catch (singleErr) {
@@ -283,7 +291,9 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   }, [franchiseId, isSuperAdmin]);
 
   useEffect(() => {
+    let active = true;
     async function initBillNumber() {
+      if (!isSuperAdmin && !franchiseId) return;
       try {
         let highestBillNum = 0;
         try {
@@ -292,7 +302,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
             q = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), orderBy('billNumber', 'desc'), limit(1));
           }
           const snapshot = await getDocs(q);
-          if (!snapshot.empty) {
+          if (active && !snapshot.empty) {
             const lastNumStr = snapshot.docs[0].data().billNumber;
             const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
             if (!isNaN(parsed)) highestBillNum = parsed;
@@ -305,12 +315,14 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
               fallbackQ = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), limit(100));
             }
             const snap = await getDocs(fallbackQ);
-            snap.docs.forEach(doc => {
-              const val = parseInt((doc.data().billNumber || '').replace(/\D/g, ''));
-              if (!isNaN(val) && val > highestBillNum) {
-                highestBillNum = val;
-              }
-            });
+            if (active) {
+              snap.docs.forEach(doc => {
+                const val = parseInt((doc.data().billNumber || '').replace(/\D/g, ''));
+                if (!isNaN(val) && val > highestBillNum) {
+                  highestBillNum = val;
+                }
+              });
+            }
           } catch (fErr) {
             console.error("Sequence fallback scan failed:", fErr);
           }
@@ -319,20 +331,27 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
         let counterNum = 0;
         try {
           const counterSnap = await getDoc(doc(db, 'counters', franchiseId ? `bill_sequence_${franchiseId}` : 'bill_sequence_global'));
-          if (counterSnap.exists()) {
+          if (active && counterSnap.exists()) {
             counterNum = counterSnap.data().lastSequence || 0;
           }
         } catch (err) {
           console.error("Error fetching bill counter:", err);
         }
 
-        const nextNum = Math.max(highestBillNum, counterNum) + 1;
-        setForm(prev => ({ ...prev, billNumber: generateBillNumber(nextNum) }));
+        if (active) {
+          const nextNum = Math.max(highestBillNum, counterNum) + 1;
+          setForm(prev => ({ ...prev, billNumber: generateBillNumber(nextNum) }));
+        }
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'bills-init-number');
+        if (active) {
+          handleFirestoreError(error, OperationType.GET, 'bills-init-number');
+        }
       }
     }
     initBillNumber();
+    return () => {
+      active = false;
+    };
   }, [franchiseId, isSuperAdmin]);
 
   const safeFormatDate = (dateVal: any) => {
@@ -600,7 +619,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   const sendDriverWhatsApp = (bill: any, driver: Driver) => {
     if (!deliveryLocation) return;
     
-    const mapLink = `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`;
+    const mapLink = `https://www.openstreetmap.org/?mlat=${deliveryLocation.lat}&mlon=${deliveryLocation.lng}&zoom=16`;
     const message = `*New Trip Assigned - TankerWala* 🚛\n\n` +
       `Token: #${bill.billNumber}\n` +
       `Customer: ${bill.customerName}\n` +
@@ -654,7 +673,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       ...(deliveryLocation && {
         deliveryLocation: {
           ...deliveryLocation,
-          mapLink: `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`
+          mapLink: `https://www.openstreetmap.org/?mlat=${deliveryLocation.lat}&mlon=${deliveryLocation.lng}&zoom=16`
         }
       }),
       tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
@@ -724,54 +743,93 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
     }
 
     try {
-      const dbPromise = (async () => {
-        try {
-          await updateDoc(doc(db, 'customers', selectedCustomer.id!), { 
-            lastRate: form.rate,
-            updatedAt: serverTimestamp()
-          });
-        } catch (cE) {
-          console.warn("Soft fail updating customer rate:", cE);
+      let highestQueryNum = 0;
+      try {
+        let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
+        if (!isSuperAdmin && franchiseId) {
+          q = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), orderBy('billNumber', 'desc'), limit(1));
+        }
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          const lastNumStr = snapshot.docs[0].data().billNumber;
+          const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
+          if (!isNaN(parsed)) highestQueryNum = parsed;
+        }
+      } catch (e) {
+        console.warn("Soft fail querying highest bill number before transaction:", e);
+      }
+
+      const counterRef = doc(db, 'counters', franchiseId ? `bill_sequence_${franchiseId}` : 'bill_sequence_global');
+
+      let finalBillNumber = '';
+      let bookedBillWithId: any = null;
+      let billDocId = '';
+
+      // Perform transaction to generate next sequential bill number and commit changes atomically
+      await runTransaction(db, async (transaction) => {
+        const counterSnap = await transaction.get(counterRef);
+        let lastSequence = 0;
+        if (counterSnap.exists()) {
+          lastSequence = counterSnap.data().lastSequence || 0;
         }
 
-        let finalBillNumber = form.billNumber;
-        let isDuplicate = true;
-        let checkAttempts = 0;
-        
-        while (isDuplicate && checkAttempts < 10) {
-          const qDup = query(
-            collection(db, 'bills'),
-            where('franchiseId', '==', (franchiseId || null)),
-            where('billNumber', '==', finalBillNumber)
-          );
-          const dupSnap = await getDocs(qDup);
-          if (dupSnap.empty) {
-            isDuplicate = false;
-          } else {
-            const currentSeq = parseInt(finalBillNumber.replace(/\D/g, ''), 10);
-            const nextSeq = (isNaN(currentSeq) ? 1001 : currentSeq) + 1;
-            finalBillNumber = generateBillNumber(nextSeq);
-            checkAttempts++;
-          }
-        }
+        const nextSeq = Math.max(highestQueryNum, lastSequence) + 1;
+        finalBillNumber = generateBillNumber(nextSeq);
+
+        // Update the sequence counter
+        transaction.set(counterRef, { lastSequence: nextSeq }, { merge: true });
+
+        // Update customer's last rate
+        const customerRef = doc(db, 'customers', selectedCustomer.id!);
+        transaction.update(customerRef, {
+          lastRate: form.rate,
+          updatedAt: serverTimestamp()
+        });
+
+        // Add bill doc
+        const newBillRef = doc(collection(db, 'bills'));
+        billDocId = newBillRef.id;
 
         const storeData = {
           ...billData,
           billNumber: finalBillNumber,
-          createdAt: serverTimestamp()
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
         };
+        transaction.set(newBillRef, storeData);
+        bookedBillWithId = { ...storeData, id: newBillRef.id };
 
-        const docRef = await addDoc(collection(db, 'bills'), storeData);
-        const bookedBillWithId = { ...storeData, id: docRef.id };
-
-        const seq = parseInt(storeData.billNumber.replace(/\D/g, ''), 10);
-        if (!isNaN(seq)) {
-          try {
-            await setDoc(doc(db, 'counters', (franchiseId || storeData.franchiseId) ? `bill_sequence_${franchiseId || storeData.franchiseId}` : 'bill_sequence_global'), { lastSequence: seq }, { merge: true });
-          } catch (errSeq) {
-            console.error("Soft fail saving counter:", errSeq);
-          }
+        // Create driver trip if driver is selected
+        if (form.driverId) {
+          const newTripRef = doc(collection(db, 'trips'));
+          transaction.set(newTripRef, {
+            billId: newBillRef.id,
+            franchiseId: franchiseId || null,
+            billNumber: finalBillNumber,
+            driverId: form.driverId,
+            driverName: form.driverName,
+            customerName: selectedCustomer.name,
+            customerMobile: selectedCustomer.mobile,
+            siteLocation: form.customAddress || selectedCustomer.address,
+            category: form.category,
+            remarks: form.remarks.trim(),
+            ...(deliveryLocation && {
+              deliveryLocation: {
+                ...deliveryLocation,
+                mapLink: `https://www.openstreetmap.org/?mlat=${deliveryLocation.lat}&mlon=${deliveryLocation.lng}&zoom=16`
+              }
+            }),
+            quantity: form.quantity,
+            tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
+            bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
+            tractorId: 'T-01',
+            status: 'Active',
+            createdAt: serverTimestamp()
+          });
         }
+      });
+
+      if (bookedBillWithId) {
         setBookedBill(bookedBillWithId);
 
         try {
@@ -780,8 +838,8 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
             franchiseName: currentFranchise?.name || 'Franchise',
             userEmail: '',
             actionType: 'NEW_BILL',
-            description: `Generated invoice #${storeData.billNumber} for Customer "${selectedCustomer.name}" with total ₹${grandTotal}`,
-            details: { billId: docRef.id, billNumber: storeData.billNumber, total: grandTotal }
+            description: `Generated invoice #${finalBillNumber} for Customer "${selectedCustomer.name}" with total ₹${grandTotal}`,
+            details: { billId: billDocId, billNumber: finalBillNumber, total: grandTotal }
           });
         } catch (logErr) {
           console.error("Failed to log activity:", logErr);
@@ -793,68 +851,21 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
         if (form.driverId) {
           const driver = drivers.find(d => d.id === form.driverId);
-          await addDoc(collection(db, 'trips'), {
-            billId: docRef.id,
-            franchiseId: franchiseId || null,
-            billNumber: storeData.billNumber,
-            driverId: form.driverId,
-            driverName: form.driverName,
-            customerName: selectedCustomer.name,
-            customerMobile: selectedCustomer.mobile,
-            siteLocation: form.customAddress || selectedCustomer.address,
-            category: form.category,
-            remarks: form.remarks.trim(),
-            ...(deliveryLocation && {
-              deliveryLocation: {
-                ...deliveryLocation,
-                mapLink: `https://www.google.com/maps/dir/?api=1&destination=${deliveryLocation.lat},${deliveryLocation.lng}`
-              }
-            }),
-            quantity: form.quantity,
-            tankerSize: form.category === 'TANKER' ? form.tankerSize : null,
-            bottleSize: form.category === 'BOTTLE' ? form.bottleSize : null,
-            tractorId: 'T-01',
-            status: 'Active',
-            createdAt: serverTimestamp()
-          });
-
           if (driver) {
             sendDriverWhatsApp(bookedBillWithId, driver);
           }
         }
-      })();
-
-      await dbPromise;
+      }
 
       setShowBookingSuccess(true);
 
-      let highestBillNum = 0;
-      try {
-        let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
-        if (!isSuperAdmin && franchiseId) {
-          q = query(collection(db, 'bills'), where('franchiseId', '==', franchiseId), orderBy('billNumber', 'desc'), limit(1));
-        }
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          const lastNumStr = snapshot.docs[0].data().billNumber;
-          const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
-          if (!isNaN(parsed)) highestBillNum = parsed;
-        }
-      } catch (e) {}
-
-      let counterNum = 0;
-      try {
-        const counterSnap = await getDoc(doc(db, 'counters', franchiseId ? `bill_sequence_${franchiseId}` : 'bill_sequence_global'));
-        if (counterSnap.exists()) {
-          counterNum = counterSnap.data().lastSequence || 0;
-        }
-      } catch (e) {}
-
-      const nextNum = Math.max(highestBillNum, counterNum) + 1;
+      // Determine next sequential bill number for the form (immediately after submission)
+      const numericSeq = parseInt(finalBillNumber.replace(/\D/g, ''), 10);
+      const nextFormSeq = (isNaN(numericSeq) ? 1001 : numericSeq) + 1;
 
       setForm(prev => ({
         ...prev,
-        billNumber: generateBillNumber(nextNum),
+        billNumber: generateBillNumber(nextFormSeq),
         quantity: 1,
         extraCharges: 0,
         discount: 0,

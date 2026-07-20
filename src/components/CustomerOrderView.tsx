@@ -6,6 +6,113 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Truck, CheckCircle2, XCircle, Clock, RefreshCw, Phone, MapPin } from 'lucide-react';
 import { formatCurrency } from '../constants';
 import { Logo } from './Logo';
+import { MapContainer, TileLayer, Marker as LeafletMarker, Polyline as LeafletPolyline } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+
+// Custom icons for the live tracking map
+const driverIcon = L.divIcon({
+  html: `
+    <div class="relative flex items-center justify-center w-10 h-10">
+      <div class="absolute inset-0 bg-blue-500 rounded-full opacity-20 animate-ping"></div>
+      <div class="relative w-8 h-8 bg-blue-600 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg);"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+      </div>
+    </div>
+  `,
+  className: '',
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+});
+
+const customerIcon = L.divIcon({
+  html: `
+    <div class="relative flex items-center justify-center w-10 h-10">
+      <div class="absolute w-10 h-10 bg-emerald-500/20 rounded-full animate-pulse"></div>
+      <div class="w-8 h-8 rounded-full bg-emerald-500 border-2 border-white shadow-lg flex items-center justify-center text-white">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.54 20.193 4 14.99 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+      </div>
+    </div>
+  `,
+  className: '',
+  iconSize: [40, 40],
+  iconAnchor: [20, 32],
+});
+
+// Beautiful Leaflet Component to handle programmatic fitting bounds of both locations
+function CustomerLiveMap({ driverLoc, customerLoc }: { driverLoc: { lat: number; lng: number }; customerLoc?: { lat: number; lng: number } }) {
+  const [map, setMap] = useState<L.Map | null>(null);
+  const [route, setRoute] = useState<[number, number][]>([]);
+
+  // Automatically fit bounds whenever coordinates change
+  useEffect(() => {
+    if (!map) return;
+    if (customerLoc) {
+      const bounds = L.latLngBounds(
+        [driverLoc.lat, driverLoc.lng],
+        [customerLoc.lat, customerLoc.lng]
+      );
+      map.fitBounds(bounds, { padding: [40, 40] });
+    } else {
+      map.setView([driverLoc.lat, driverLoc.lng], 15);
+    }
+  }, [map, driverLoc.lat, driverLoc.lng, customerLoc?.lat, customerLoc?.lng]);
+
+  // Fetch real-time OSRM route line connecting driver and customer
+  useEffect(() => {
+    if (!customerLoc) return;
+    fetch(`https://router.project-osrm.org/route/v1/driving/${driverLoc.lng},${driverLoc.lat};${customerLoc.lng},${customerLoc.lat}?overview=full&geometries=geojson`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.routes && data.routes.length > 0) {
+          const coords = data.routes[0].geometry.coordinates.map((c: any) => [c[1], c[0]] as [number, number]);
+          setRoute(coords);
+        } else {
+          setRoute([[driverLoc.lat, driverLoc.lng], [customerLoc.lat, customerLoc.lng]]);
+        }
+      })
+      .catch(err => {
+        console.warn("OSRM Customer route query failed:", err);
+        setRoute([[driverLoc.lat, driverLoc.lng], [customerLoc.lat, customerLoc.lng]]);
+      });
+  }, [driverLoc.lat, driverLoc.lng, customerLoc?.lat, customerLoc?.lng]);
+
+  return (
+    <div className="w-full h-full relative z-0">
+      <MapContainer
+        center={[driverLoc.lat, driverLoc.lng]}
+        zoom={14}
+        ref={setMap}
+        zoomControl={false}
+        style={{ height: '100%', width: '100%' }}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        />
+
+        <LeafletMarker position={[driverLoc.lat, driverLoc.lng]} icon={driverIcon} />
+
+        {customerLoc && (
+          <LeafletMarker position={[customerLoc.lat, customerLoc.lng]} icon={customerIcon} />
+        )}
+
+        {route.length > 0 && (
+          <LeafletPolyline
+            positions={route}
+            pathOptions={{
+              color: '#3b82f6', // Premium bright blue polyline
+              weight: 5,
+              opacity: 0.8,
+              lineJoin: 'round',
+              lineCap: 'round',
+            }}
+          />
+        )}
+      </MapContainer>
+    </div>
+  );
+}
 
 export function CustomerOrderView({ billId }: { billId: string }) {
   const [bill, setBill] = useState<Bill | null>(null);
@@ -209,17 +316,11 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                    </div>
                 </div>
 
-                <div className="h-40 bg-slate-200 rounded-2xl overflow-hidden relative border-2 border-white shadow-inner">
-                   <div className="absolute inset-0 bg-blue-50 flex flex-col items-center justify-center">
-                      <MapPin className="text-blue-500 animate-bounce mb-2" size={32} />
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tanker is on the way</p>
-                      <button 
-                        onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${driverLocation.latitude},${driverLocation.longitude}`)}
-                        className="mt-2 text-[10px] font-black text-blue-600 uppercase border-b-2 border-blue-200 pb-0.5"
-                      >
-                        Open Real-time Map
-                      </button>
-                   </div>
+                <div className="h-56 rounded-2xl overflow-hidden relative border-2 border-white shadow-lg bg-slate-100">
+                  <CustomerLiveMap
+                    driverLoc={{ lat: driverLocation.latitude, lng: driverLocation.longitude }}
+                    customerLoc={bill.deliveryLocation && bill.deliveryLocation.lat && bill.deliveryLocation.lng ? { lat: bill.deliveryLocation.lat, lng: bill.deliveryLocation.lng } : undefined}
+                  />
                 </div>
               </div>
             )}

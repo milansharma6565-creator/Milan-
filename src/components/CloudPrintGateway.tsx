@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import { Printer, Volume2, VolumeX, History, CheckCircle, RefreshCw, X, CloudLightning, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -92,6 +92,7 @@ export default function CloudPrintGateway({ franchiseId, userName }: CloudPrintG
       setPendingJobs(jobs);
     }, (err) => {
       console.error("Cloud Print Listener Error:", err);
+      handleFirestoreError(err, OperationType.LIST, 'print_jobs?status=pending');
     });
 
     return () => unsub();
@@ -120,6 +121,7 @@ export default function CloudPrintGateway({ franchiseId, userName }: CloudPrintG
       setHistoryJobs(jobs.slice(0, 10));
     }, (err) => {
       console.error("Cloud Print History Listener Error:", err);
+      handleFirestoreError(err, OperationType.LIST, 'print_jobs?status=completed');
     });
 
     return () => unsub();

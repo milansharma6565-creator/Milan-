@@ -504,7 +504,7 @@ export function DriverApp() {
         }
       },
       (err: any) => {
-        console.error("Geolocation Error:", err?.message || String(err));
+        console.warn("Geolocation Notice:", err?.message || String(err));
         setIsTracking(false);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
@@ -906,9 +906,38 @@ export function DriverApp() {
             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16" />
             <div className="relative z-10">
               <div className="flex items-center justify-between mb-8">
-                <span className="bg-white/20 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest text-white">
+                <motion.span 
+                  key={activeTrip.status}
+                  initial={{ opacity: 0, scale: 0.85, y: -8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ 
+                    type: "spring", 
+                    stiffness: 380, 
+                    damping: 22,
+                    opacity: { duration: 0.25 }
+                  }}
+                  className="bg-white/20 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest text-white inline-flex items-center gap-1.5 shadow-inner border border-white/5"
+                >
+                  <span className="relative flex h-2 w-2">
+                    <motion.span 
+                      animate={{ scale: [1, 2, 1], opacity: [0.8, 0.15, 0.8] }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                      className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                        activeTrip.status === 'On the way' ? 'bg-emerald-400' :
+                        activeTrip.status === 'Reached' ? 'bg-rose-400' :
+                        activeTrip.status === 'Filling' ? 'bg-sky-400' :
+                        'bg-amber-400'
+                      }`}
+                    />
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                      activeTrip.status === 'On the way' ? 'bg-emerald-400' :
+                      activeTrip.status === 'Reached' ? 'bg-rose-400' :
+                      activeTrip.status === 'Filling' ? 'bg-sky-400' :
+                      'bg-amber-400'
+                    }`} />
+                  </span>
                   Active Mission • {activeTrip.status}
-                </span>
+                </motion.span>
                 <span className="text-indigo-100 font-bold text-sm">#TRIP-{activeTrip.billNumber}</span>
               </div>
 
@@ -1056,12 +1085,12 @@ export function DriverApp() {
                           : (activeTrip.customerLat && activeTrip.customerLng)
                             ? `${activeTrip.customerLat},${activeTrip.customerLng}`
                             : encodeURIComponent(activeTrip.siteLocation || activeTrip.customerName);
-                        window.open(`https://www.google.com/maps/search/?api=1&query=${targetLoc}`);
+                        window.open(`https://www.openstreetmap.org/search?query=${targetLoc}`);
                       }}
                       className="w-full bg-white/20 text-white h-14 rounded-2xl flex items-center justify-center gap-2 font-black text-sm active:scale-95 transition-all mb-1"
                     >
                       <Navigation size={18} fill="currentColor" />
-                      Google Maps
+                      OpenStreetMap
                     </button>
                     <button 
                       onClick={async () => {
@@ -1151,7 +1180,7 @@ export function DriverApp() {
                          : (activeTrip.customerLat && activeTrip.customerLng)
                            ? `${activeTrip.customerLat},${activeTrip.customerLng}`
                            : encodeURIComponent(activeTrip.siteLocation || activeTrip.customerName);
-                       window.open(`https://www.google.com/maps/search/?api=1&query=${targetLoc}`);
+                       window.open(`https://www.openstreetmap.org/search?query=${targetLoc}`);
                      }}
                     className="w-full bg-white/10 text-white h-12 rounded-xl flex items-center justify-center gap-2 font-bold text-xs active:scale-95 transition-all mt-2"
                   >

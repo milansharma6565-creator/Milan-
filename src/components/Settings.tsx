@@ -49,7 +49,7 @@ interface BannerTemplate {
 }
 
 export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: SettingsProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'print' | 'drivers' | 'fleet' | 'pricing' | 'apps'>('print');
+  const [activeSubTab, setActiveSubTab] = useState<'print' | 'drivers' | 'fleet' | 'pricing' | 'apps' | 'database'>('print');
   const [franchiseDetail, setFranchiseDetail] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -609,6 +609,16 @@ export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: Settin
             }`}
           >
             <Smartphone size={14} className="text-blue-500 animate-pulse" /> Mobile Apps & APK
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('database')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+              activeSubTab === 'database' ? 'bg-blue-600 text-white shadow-md shadow-blue-100' : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Database size={14} className="text-blue-500" /> Database Setup
           </button>
         </div>
       </div>
@@ -1478,6 +1488,216 @@ export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: Settin
                   <div className="mt-8 pt-6 border-t border-slate-800 text-[11px] text-slate-400">
                     <p className="font-bold text-slate-300 mb-1">💡 Pro-tip on Google API Keys:</p>
                     Ensure your Google Maps API keys are added in your environment variables. Android WebView allows tracking automatically as long as the user authorizes the platform's standard location popup request!
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeSubTab === 'database' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Column 1 & 2: Configuration form and status */}
+              <div className="lg:col-span-2 space-y-6">
+                <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
+                      <Database size={24} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-lg">Firebase Connection Settings</h3>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Configure Custom Database Backend</p>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+                    If your default database has hit its daily free limit (50,000 reads) and is locked by Google Cloud billing policies (such as the <strong>₹1,000 billing verification hold</strong> in India), you can connect this app to a brand new, completely free Firebase project. No coding is required!
+                  </p>
+
+                  {/* Current Active Connection Status Card */}
+                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/60 mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Active Database Backend</span>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${
+                        localStorage.getItem('CUSTOM_FIREBASE_CONFIG') 
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      }`}>
+                        {localStorage.getItem('CUSTOM_FIREBASE_CONFIG') ? 'Custom Dev Database' : 'Default Project'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 text-xs">
+                      <div>
+                        <p className="text-slate-400 font-semibold text-[10px] uppercase">Active Project ID:</p>
+                        <p className="font-bold text-slate-700 mt-0.5 font-mono">
+                          {localStorage.getItem('CUSTOM_FIREBASE_CONFIG') 
+                            ? JSON.parse(localStorage.getItem('CUSTOM_FIREBASE_CONFIG') || '{}').projectId 
+                            : 'ai-studio-3b3dfcf8-1c07-47fa...'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-400 font-semibold text-[10px] uppercase">Connection Status:</p>
+                        <p className="font-bold text-emerald-600 mt-0.5 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Connected
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Config Paste Form */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-widest mb-1.5">
+                        Paste Firebase Web Config (JSON or JS Snippet)
+                      </label>
+                      <p className="text-[10px] text-slate-400 font-semibold mb-2">
+                        Paste the configuration block from your Firebase Console. Our smart parser will automatically extract the keys.
+                      </p>
+                      <textarea
+                        rows={6}
+                        placeholder={`const firebaseConfig = {\n  apiKey: "AIzaSy...",\n  authDomain: "my-project.firebaseapp.com",\n  projectId: "my-project",\n  ...\n};`}
+                        className="w-full bg-slate-50 border border-slate-200/80 px-4 py-3 rounded-2xl text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none leading-relaxed"
+                        id="customFirebaseConfigTextarea"
+                      />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const textarea = document.getElementById('customFirebaseConfigTextarea') as HTMLTextAreaElement;
+                          if (!textarea || !textarea.value.trim()) {
+                            alert("Please paste your Firebase Configuration first!");
+                            return;
+                          }
+
+                          try {
+                            const rawText = textarea.value.trim();
+                            
+                            // Highly resilient regex parser for JavaScript/JSON config object
+                            const extractKey = (key: string) => {
+                              const regex = new RegExp(`['"]?${key}['"]?\\s*:\\s*['"]([^'"]+)['"]`);
+                              const match = rawText.match(regex);
+                              return match ? match[1] : null;
+                            };
+
+                            const apiKey = extractKey('apiKey');
+                            const authDomain = extractKey('authDomain');
+                            const projectId = extractKey('projectId');
+                            const storageBucket = extractKey('storageBucket');
+                            const messagingSenderId = extractKey('messagingSenderId');
+                            const appId = extractKey('appId');
+                            const measurementId = extractKey('measurementId');
+
+                            if (!apiKey || !projectId) {
+                              // Try general JSON parsing
+                              try {
+                                const parsed = JSON.parse(rawText);
+                                if (parsed.apiKey && parsed.projectId) {
+                                  localStorage.setItem('CUSTOM_FIREBASE_CONFIG', JSON.stringify(parsed));
+                                  alert("⚡ Custom Firebase configuration applied successfully! Page will refresh to connect to your new database.");
+                                  window.location.reload();
+                                  return;
+                                }
+                              } catch (e) {}
+                              
+                              alert("⚠️ Error: Could not find valid apiKey or projectId in the pasted text. Please make sure to copy the entire 'firebaseConfig' object verbatim from your Firebase Console.");
+                              return;
+                            }
+
+                            const configObj = {
+                              apiKey,
+                              authDomain: authDomain || `${projectId}.firebaseapp.com`,
+                              projectId,
+                              storageBucket: storageBucket || `${projectId}.appspot.com`,
+                              messagingSenderId: messagingSenderId || '',
+                              appId: appId || ''
+                            };
+
+                            localStorage.setItem('CUSTOM_FIREBASE_CONFIG', JSON.stringify(configObj));
+                            alert("⚡ Custom database backend applied successfully! Connecting to your new free Firebase project...");
+                            window.location.reload();
+                          } catch (err: any) {
+                            alert("Failed to parse configuration: " + err.message);
+                          }
+                        }}
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider h-12 rounded-xl transition-all shadow-md shadow-blue-100 flex items-center justify-center gap-1.5"
+                      >
+                        <Database size={14} /> Connect Custom Project
+                      </button>
+
+                      {localStorage.getItem('CUSTOM_FIREBASE_CONFIG') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm("Are you sure you want to revert to the default project database?")) {
+                              localStorage.removeItem('CUSTOM_FIREBASE_CONFIG');
+                              alert("Default database connection restored! Page will reload.");
+                              window.location.reload();
+                            }
+                          }}
+                          className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs uppercase tracking-wider h-12 rounded-xl transition-all px-6 flex items-center justify-center"
+                        >
+                          Reset to Default
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Data migration instructions */}
+                <div className="bg-emerald-50 border border-emerald-100 p-6 rounded-[2rem] text-emerald-950 flex gap-4">
+                  <div className="w-12 h-12 bg-emerald-500 text-white rounded-2xl flex items-center justify-center shrink-0 shadow-lg shadow-emerald-200">
+                    <Database size={20} />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="font-extrabold text-sm text-emerald-950">How to Migrate Your Data securely:</h4>
+                    <p className="text-[11px] leading-relaxed text-emerald-800">
+                      If you are moving from your old project to a new project:
+                    </p>
+                    <ol className="text-[11px] leading-relaxed list-decimal pl-4 text-emerald-800 space-y-1 mt-1.5">
+                      <li>Before switching project configurations, go to the <strong>Backup & Restore</strong> tab and click <strong>"Export Backup to File"</strong>. (Even if your project is out of quota, our app will extract cached data locally!)</li>
+                      <li>Paste and connect your new Firebase project configuration above.</li>
+                      <li>Once the app reloads under the new project, go to <strong>Backup & Restore</strong>, select the JSON file you downloaded, and click <strong>"Run Restore Process"</strong> in <strong>Fresh Clean</strong> mode.</li>
+                      <li>Done! All your customers, ledgers, and history are instantly cloned into your new free database!</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
+              {/* Column 3: Interactive documentation on creating a new free project */}
+              <div className="space-y-6">
+                <div className="bg-slate-900 text-slate-100 p-6 sm:p-8 rounded-[2.5rem] border border-slate-800 shadow-xl">
+                  <span className="bg-blue-600/20 text-blue-400 text-[9px] font-black uppercase px-2 py-0.5 rounded-md border border-blue-500/30">Free Database Guide</span>
+                  <h3 className="text-base font-black text-white mt-3 mb-4">
+                    Create New Firebase Project (100% Free)
+                  </h3>
+
+                  <div className="space-y-4 text-slate-400 text-xs">
+                    <div className="border-l-2 border-blue-500 pl-3.5 space-y-1">
+                      <p className="font-black text-white text-[11px] uppercase tracking-wide">1. Visit Console</p>
+                      <p className="leading-relaxed">Go to <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" className="text-blue-400 font-bold hover:underline">console.firebase.google.com</a> and log in with your Gmail ID.</p>
+                    </div>
+
+                    <div className="border-l-2 border-blue-500 pl-3.5 space-y-1">
+                      <p className="font-black text-white text-[11px] uppercase tracking-wide">2. Create Project</p>
+                      <p className="leading-relaxed">Click <strong>"Add Project"</strong>. Give it a name (e.g., "Rajhans Database") and click Continue. Ensure Google Analytics is disabled to save loading time.</p>
+                    </div>
+
+                    <div className="border-l-2 border-blue-500 pl-3.5 space-y-1">
+                      <p className="font-black text-white text-[11px] uppercase tracking-wide">3. Create Firestore Database</p>
+                      <p className="leading-relaxed">In the left menu, click <strong>Build &gt; Firestore Database</strong>. Click <strong>"Create Database"</strong>. Select <strong>"Start in Test Mode"</strong> (so security rules allow reading/writing) and click Enable.</p>
+                    </div>
+
+                    <div className="border-l-2 border-blue-500 pl-3.5 space-y-1">
+                      <p className="font-black text-white text-[11px] uppercase tracking-wide">4. Register Web App</p>
+                      <p className="leading-relaxed">Go back to the Project Overview. Click the web code icon (<strong>&lt;/&gt;</strong>). Name it "Web App", and click Register. Copy the generated <code className="text-emerald-400 font-mono bg-slate-950 px-1 rounded">firebaseConfig</code> block and paste it in the text area on the left!</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 pt-6 border-t border-slate-800 text-[10px] text-slate-500 leading-relaxed font-semibold">
+                    💡 Creating a new project registers a completely separate database with its own fresh daily limit of 50,000 free reads, meaning your business never stops!
                   </div>
                 </div>
               </div>

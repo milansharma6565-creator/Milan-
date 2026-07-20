@@ -220,7 +220,7 @@ export function SandboxSimulatorHub({ franchiseId, currentFranchise }: SandboxSi
       // Seed current asset balance directly for immediate metrics beauty
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       const cashAcc = accountsSnap.docs.find(d => d.data().name === 'Cash' && d.data().franchiseId === franchiseId);
-      const bankAcc = accountsSnap.docs.find(d => d.data().name === 'Bank Account' && d.data().franchiseId === franchiseId);
+      const bankAcc = accountsSnap.docs.find(d => (d.data().name === 'Bank of Baroda Operating A/c' || d.data().name === 'Bank Account') && d.data().franchiseId === franchiseId);
       const serviceAcc = accountsSnap.docs.find(d => d.data().name === 'Service Income' && d.data().franchiseId === franchiseId);
 
       if (cashAcc) {
@@ -300,7 +300,7 @@ export function SandboxSimulatorHub({ franchiseId, currentFranchise }: SandboxSi
 
         // Adjust bank account ledger balance dynamically!
         const accountsSnap = await getDocs(collection(db, 'accounts'));
-        const bankAcc = accountsSnap.docs.find(d => d.data().name === 'Bank Account' && d.data().franchiseId === franchiseId);
+        const bankAcc = accountsSnap.docs.find(d => (d.data().name === 'Bank of Baroda Operating A/c' || d.data().name === 'Bank Account') && d.data().franchiseId === franchiseId);
         const serviceAcc = accountsSnap.docs.find(d => d.data().name === 'Service Income' && d.data().franchiseId === franchiseId);
         if (bankAcc) {
           await updateDoc(doc(db, 'accounts', bankAcc.id), { currentBalance: (bankAcc.data().currentBalance || 0) + 500 });

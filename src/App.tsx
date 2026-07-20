@@ -40,32 +40,34 @@ import { PremiumTractor } from "./components/PremiumTractor";
 import { GoodMorningGreeting } from "./components/GoodMorningGreeting";
 import { WishesOverlay } from "./components/WishesOverlay";
 
-const Dashboard = React.lazy(() => import("./components/Dashboard").then(m => ({ default: m.Dashboard })));
-const CustomerManagement = React.lazy(() => import("./components/CustomerManagement").then(m => ({ default: m.CustomerManagement })));
-const Billing = React.lazy(() => import("./components/Billing").then(m => ({ default: m.Billing })));
-const Ledger = React.lazy(() => import("./components/Ledger").then(m => ({ default: m.Ledger })));
-const TractorDiesel = React.lazy(() => import("./components/TractorDiesel").then(m => ({ default: m.TractorDiesel })));
-const ReportView = React.lazy(() => import("./components/ReportView").then(m => ({ default: m.ReportView })));
-const DriverManagement = React.lazy(() => import("./components/DriverManagement").then(m => ({ default: m.DriverManagement })));
-const DriverAttendance = React.lazy(() => import("./components/DriverAttendance").then(m => ({ default: m.DriverAttendance })));
-const DriverTrackingAdmin = React.lazy(() => import("./components/DriverTrackingAdmin").then(m => ({ default: m.DriverTrackingAdmin })));
-const HydrantFilling = React.lazy(() => import("./components/HydrantFilling").then(m => ({ default: m.HydrantFilling })));
-const DocumentVault = React.lazy(() => import("./components/DocumentVault").then(m => ({ default: m.DocumentVault })));
-const Settings = React.lazy(() => import("./components/Settings").then(m => ({ default: m.Settings })));
-const BackupRestore = React.lazy(() => import("./components/BackupRestore").then(m => ({ default: m.BackupRestore })));
-const LetterheadGenerator = React.lazy(() => import("./components/LetterheadGenerator").then(m => ({ default: m.LetterheadGenerator })));
-const FranchiseManagement = React.lazy(() => import("./components/FranchiseManagement").then(m => ({ default: m.FranchiseManagement })));
-const DriverApp = React.lazy(() => import("./components/DriverApp").then(m => ({ default: m.DriverApp })));
-const CustomerBookingPortal = React.lazy(() => import("./components/CustomerBookingPortal").then(m => ({ default: m.CustomerBookingPortal })));
-const Ecosystem = React.lazy(() => import("./components/Ecosystem").then(m => ({ default: m.Ecosystem })));
-const TendersMarketplace = React.lazy(() => import("./components/TendersMarketplace").then(m => ({ default: m.TendersMarketplace })));
-const MotorController = React.lazy(() => import("./components/MotorController").then(m => ({ default: m.MotorController })));
+import { Dashboard } from "./components/Dashboard";
+import { CustomerManagement } from "./components/CustomerManagement";
+import { Billing } from "./components/Billing";
+import { Ledger } from "./components/Ledger";
+import { TractorDiesel } from "./components/TractorDiesel";
+import { ReportView } from "./components/ReportView";
+import { DriverManagement } from "./components/DriverManagement";
+import { DriverAttendance } from "./components/DriverAttendance";
+import { DriverTrackingAdmin } from "./components/DriverTrackingAdmin";
+import { HydrantFilling } from "./components/HydrantFilling";
+import { DocumentVault } from "./components/DocumentVault";
+import { Settings } from "./components/Settings";
+import { BackupRestore } from "./components/BackupRestore";
+import { LetterheadGenerator } from "./components/LetterheadGenerator";
+import { FranchiseManagement } from "./components/FranchiseManagement";
+import { DriverApp } from "./components/DriverApp";
+import { CustomerBookingPortal } from "./components/CustomerBookingPortal";
+import { Ecosystem } from "./components/Ecosystem";
+import { TendersMarketplace } from "./components/TendersMarketplace";
+import { MotorController } from "./components/MotorController";
 import {
   auth,
   googleProvider,
   signInWithPopup,
   onAuthStateChanged,
   db,
+  handleFirestoreError,
+  OperationType,
 } from "./firebase";
 import {
   collection,
@@ -186,6 +188,18 @@ export default function App() {
     string | null
   >(null);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [quotaError, setQuotaError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleFirestoreErrorEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail?.isQuota) {
+        setQuotaError(customEvent.detail.message || "Quota limit exceeded");
+      }
+    };
+    window.addEventListener('firestore-error', handleFirestoreErrorEvent);
+    return () => window.removeEventListener('firestore-error', handleFirestoreErrorEvent);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -321,6 +335,7 @@ export default function App() {
             await ledgerAutomation.setupFranchiseLedgers(fId, fName);
           } catch (err) {
             console.error("Auto-initializing legacy-rajhans failed:", err instanceof Error ? err.message : String(err));
+            handleFirestoreError(err, OperationType.WRITE, 'franchise-autoseed-rajhans');
           } finally {
             setFranchiseLoaded(true);
           }
@@ -358,6 +373,7 @@ export default function App() {
             await ledgerAutomation.setupFranchiseLedgers(fId, fName);
           } catch (err) {
             console.error("Auto-initializing legacy-pile failed:", err instanceof Error ? err.message : String(err));
+            handleFirestoreError(err, OperationType.WRITE, 'franchise-autoseed-pile');
           } finally {
             setFranchiseLoaded(true);
           }
@@ -783,6 +799,78 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row relative overflow-hidden">
+      {quotaError && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4 overflow-y-auto">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-[2.5rem] shadow-2xl p-8 md:p-10 max-w-xl w-full border border-slate-100 flex flex-col items-center text-center"
+          >
+            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 border border-red-100 animate-pulse">
+              <ShieldAlert size={32} />
+            </div>
+            
+            <h2 className="text-2xl font-display font-black text-slate-900 mb-3 tracking-tight">
+              Firestore Database Quota Exceeded
+            </h2>
+            
+            <p className="text-slate-500 font-medium text-sm leading-relaxed mb-6">
+              This app's Firebase Firestore daily free-tier read limit (50,000 requests) has been reached. No data can be read or written until the quota resets or billing is configured.
+            </p>
+
+            <div className="w-full bg-slate-50 border border-slate-200/80 p-5 rounded-3xl text-left text-xs text-slate-600 space-y-4 mb-6">
+              <div>
+                <p className="font-extrabold text-slate-800 uppercase tracking-wide text-[10px] mb-1">💡 Indian Billing Regulatory Hold (Error [OR_BACR2_44]):</p>
+                <p className="leading-relaxed">
+                  If you are trying to upgrade to the Blaze Plan from India, Google requires submitting tax details (PAN/GSTIN) and making a <strong>one-time prepaid payment of at least ₹1,000</strong> to verify your account. If you do not want to pay this, you can bypass it 100% for free!
+                </p>
+              </div>
+
+              <div className="border-t border-slate-200/60 pt-3 space-y-2.5">
+                <p className="font-extrabold text-slate-800 uppercase tracking-wide text-[10px] mb-0.5">🚀 Free Solutions / Workarounds:</p>
+                <div className="flex gap-2">
+                  <span className="text-blue-600 font-bold">1.</span>
+                  <p><strong>Database Hot-Swap (Free & Unlimited):</strong> You can create a brand new, free Firebase project (takes 2 minutes) and paste its config in our <strong>Database Setup</strong> page. Every new project gets a fresh 50,000 free reads daily!</p>
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-blue-600 font-bold">2.</span>
+                  <p><strong>Offline Backup & Restore:</strong> Even with this quota freeze, our app retrieves your database records safely from your browser's offline cache! Go to <strong>Backup & Restore</strong> to download your backup, swap your database config, and restore your business instantly.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mb-3">
+              <button 
+                onClick={() => {
+                  setActiveTab("settings");
+                  setQuotaError(null);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white h-12 rounded-xl font-bold transition-all text-xs uppercase tracking-wider active:scale-95 shadow-md shadow-blue-50 flex items-center justify-center gap-1.5"
+              >
+                🛠️ Setup Free Database
+              </button>
+
+              <button 
+                onClick={() => {
+                  setActiveTab("backup");
+                  setQuotaError(null);
+                }}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 h-12 rounded-xl font-bold transition-all text-xs uppercase tracking-wider active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                💾 Export Cache Backup
+              </button>
+            </div>
+
+            <button 
+              onClick={() => setQuotaError(null)}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white h-11 rounded-xl font-bold transition-all text-xs uppercase tracking-wider active:scale-95"
+            >
+              Close Warning
+            </button>
+          </motion.div>
+        </div>
+      )}
+
       {/* Cinematic Ambient Glow Nodes */}
       <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-15%] w-[600px] h-[600px] bg-sky-400/5 rounded-full blur-[140px] pointer-events-none" />

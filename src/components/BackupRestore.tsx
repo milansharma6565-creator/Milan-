@@ -4,6 +4,8 @@ import {
   collection, 
   getDocs, 
   getDoc,
+  getDocFromCache,
+  getDocsFromCache,
   query, 
   where, 
   setDoc, 
@@ -103,6 +105,32 @@ export function BackupRestore({ franchiseId, currentFranchise }: BackupRestorePr
     return val;
   };
 
+  const fetchDocWithCacheFallback = async (docRef: any): Promise<any> => {
+    try {
+      return await getDoc(docRef);
+    } catch (err) {
+      console.warn("Server doc fetch failed, attempting cache version:", err);
+      try {
+        return await getDocFromCache(docRef);
+      } catch (cacheErr) {
+        throw err;
+      }
+    }
+  };
+
+  const fetchQueryWithCacheFallback = async (q: any): Promise<any> => {
+    try {
+      return await getDocs(q);
+    } catch (err) {
+      console.warn("Server query failed, attempting cache version:", err);
+      try {
+        return await getDocsFromCache(q);
+      } catch (cacheErr) {
+        throw err;
+      }
+    }
+  };
+
   // 1. Export Data to JSON (Pendrive Backup)
   const handleExportBackup = async () => {
     if (!franchiseId) {
@@ -118,7 +146,7 @@ export function BackupRestore({ franchiseId, currentFranchise }: BackupRestorePr
     try {
       // A. Back up the single Franchise doc
       setExportStep("Backing up Franchise Settings...");
-      const fDocSnap = await getDoc(doc(db, 'franchises', franchiseId));
+      const fDocSnap = await fetchDocWithCacheFallback(doc(db, 'franchises', franchiseId));
       if (fDocSnap.exists()) {
         backupData['franchises'] = [{ id: fDocSnap.id, ...fDocSnap.data() }];
         stats['franchises'] = 1;
@@ -132,7 +160,7 @@ export function BackupRestore({ franchiseId, currentFranchise }: BackupRestorePr
           collection(db, col.key),
           where('franchiseId', '==', franchiseId)
         );
-        const snap = await getDocs(q);
+        const snap = await fetchQueryWithCacheFallback(q);
         
         backupData[col.key] = snap.docs.map(doc => ({
           id: doc.id,

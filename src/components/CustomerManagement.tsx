@@ -347,14 +347,18 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
     setIsSavingQuickReceipt(true);
     try {
       const amount = Number(receiptForm.amount);
-      const paymentAccName = receiptForm.paymentMethod === 'Cash' ? 'Cash' : 'Bank Account';
+      const paymentAccName = receiptForm.paymentMethod === 'Cash' ? 'Cash' : 'Bank of Baroda Operating A/c';
       
       let customerAccount = accounts.find(acc => acc.customerId === quickReceiptCustomer.id);
       if (!customerAccount) {
         customerAccount = accounts.find(acc => acc.name === quickReceiptCustomer.name);
       }
 
-      const paymentAccount = accounts.find(acc => acc.name === paymentAccName);
+      let paymentAccount = accounts.find(acc => acc.name === paymentAccName);
+      if (!paymentAccount && receiptForm.paymentMethod !== 'Cash') {
+        paymentAccount = accounts.find(acc => acc.name === 'Bank Account') ||
+                         accounts.find(acc => acc.name.toLowerCase().includes('bank'));
+      }
       if (!paymentAccount) throw new Error(`${paymentAccName} account not found`);
 
       const entryDate = new Date(receiptForm.date);

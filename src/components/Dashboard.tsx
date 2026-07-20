@@ -387,8 +387,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
       .reduce((sum, b) => sum + b.grandTotal, 0);
 
-    // Calculate today's manual/quick cash changes from vouchers List (+ for Receipt, - for Payment)
+    // Calculate today's manual/quick cash/bank changes from vouchers List (+ for Receipt, - for Payment)
     let todayCashAdjustment = 0;
+    let todayBankAdjustment = 0;
     vouchersList.forEach(vch => {
       let vchDateStr = '';
       if (vch.date) {
@@ -400,15 +401,28 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       
       if (vchDateStr === todayStr) {
         // Skip bill-settlement receipt vouchers which are already registered under todayBillsList's collection
-        const isSelfGeneratedBillVch = vch.voucherNumber?.startsWith('REC-') || vch.voucherNumber?.startsWith('TRP-');
+        const isSelfGeneratedBillVch = 
+          vch.voucherNumber?.startsWith('REC-') || 
+          vch.voucherNumber?.startsWith('TRP-') || 
+          vch.voucherNumber?.startsWith('SLS-');
         
         if (!isSelfGeneratedBillVch && vch.items) {
           vch.items.forEach((item: any) => {
-            if (item.accountName === 'Cash') {
+            const nameLower = (item.accountName || '').trim().toLowerCase();
+            const isCashAcc = nameLower === 'cash' || nameLower === 'cash in hand' || nameLower.includes('petty cash') || nameLower.includes('cash safe') || nameLower.includes('cash box');
+            const isBankAcc = nameLower.includes('bank') || nameLower.includes('baroda') || nameLower.includes('bob') || nameLower.includes('sbi') || nameLower.includes('hdfc') || nameLower.includes('axis') || nameLower.includes('icici');
+            
+            if (isCashAcc) {
               if (item.type === 'Dr') {
                 todayCashAdjustment += item.amount;
               } else if (item.type === 'Cr') {
                 todayCashAdjustment -= item.amount;
+              }
+            } else if (isBankAcc) {
+              if (item.type === 'Dr') {
+                todayBankAdjustment += item.amount;
+              } else if (item.type === 'Cr') {
+                todayBankAdjustment -= item.amount;
               }
             }
           });
@@ -419,6 +433,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const todayCashCollection = todayBillsList
       .filter(b => b.paymentMode === 'Cash' && b.status !== 'Cancelled')
       .reduce((sum, b) => sum + b.grandTotal, 0) + todayCashAdjustment;
+
+    const todayBankCollection = todayBillsList
+      .filter(b => (b.paymentMode === 'UPI' || b.paymentMode === 'Bank Transfer') && b.status !== 'Cancelled')
+      .reduce((sum, b) => sum + b.grandTotal, 0) + todayBankAdjustment;
 
     const todayPendingCollection = todayBillsList
       .filter(b => (b.paymentMode === 'Pending' || !b.isSettled) && b.status !== 'Cancelled')
@@ -690,6 +708,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     return {
       todayCollection,
       todayCashCollection,
+      todayBankCollection,
       todayPendingCollection,
       totalPending,
       todayDeliveredSale,
@@ -743,6 +762,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .sort((a: any, b: any) => b.activeTripCount - a.activeTripCount);
   }, [stats.driverStats, driverTripPeriod]);
   const [billSortOption, setBillSortOption] = useState<'Default' | 'Number' | 'Time'>('Default');
+  const [billStatusTab, setBillStatusTab] = useState<'Recent' | 'Delivered'>('Recent');
   const [quickVoucher, setQuickVoucher] = useState<{
     type: 'Receipt' | 'Payment';
     paymentMethod: 'Cash' | 'Bank';
@@ -980,20 +1000,20 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
         setAccounts(deduplicated);
         
-        // Derive Cash & Bank from accounts of all matching ledger accounts
-        const totalCashBalance = deduplicated
+        // Derive Cash & Bank from ALL accounts of all matching ledger accounts (full raw list)
+        const totalCashBalance = accs
           .filter(a => {
             const norm = a.name.trim().toLowerCase();
             const grp = (a.group || '').trim().toLowerCase();
-            return norm === 'cash' || norm === 'cash in hand' || grp === 'cash-in-hand' || grp === 'cash in hand';
+            return norm === 'cash' || norm === 'cash in hand' || norm.includes('petty cash') || norm.includes('cash safe') || norm.includes('cash box') || grp === 'cash-in-hand' || grp === 'cash in hand';
           })
           .reduce((sum, a) => sum + (a.currentBalance || 0), 0);
 
-        const totalBankBalance = deduplicated
+        const totalBankBalance = accs
           .filter(a => {
             const norm = a.name.trim().toLowerCase();
             const grp = (a.group || '').trim().toLowerCase();
-            return norm.includes('bank') || norm.includes('baroda') || norm.includes('bob') || grp.includes('bank');
+            return norm.includes('bank') || norm.includes('baroda') || norm.includes('bob') || norm.includes('sbi') || norm.includes('hdfc') || norm.includes('axis') || norm.includes('icici') || grp.includes('bank') || grp.includes('bank accounts');
           })
           .reduce((sum, a) => sum + (a.currentBalance || 0), 0);
 
@@ -1066,8 +1086,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const todayStr = format(new Date(), 'yyyy-MM-dd');
     const yesterdayStr = format(subDays(new Date(), 1), 'yyyy-MM-dd');
 
+    let result = [];
     if (tokenFilter === 'Today') {
-      return baseBills.filter(b => {
+      result = baseBills.filter(b => {
         // ALWAYS show active/assigned/pending trips even if from previous days
         if (['Pending', 'Assigned', 'Filling', 'On the way', 'Reached'].includes(b.status!)) return true;
         
@@ -1085,7 +1106,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         return format(bDate, 'yyyy-MM-dd') === todayStr;
       });
     } else if (tokenFilter === 'Yesterday') {
-      return baseBills.filter(b => {
+      result = baseBills.filter(b => {
         if (b.date === yesterdayStr) return true;
 
         if (b.createdAt) {
@@ -1100,7 +1121,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       });
     } else {
       // Custom Date
-      return baseBills.filter(b => {
+      result = baseBills.filter(b => {
         if (b.date === selectedTokenDate) return true;
         
         if (b.createdAt) {
@@ -1114,7 +1135,15 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         return format(bDate, 'yyyy-MM-dd') === selectedTokenDate;
       });
     }
-  }, [bills, tokenFilter, selectedTokenDate, billSortOption]);
+
+    if (billStatusTab === 'Recent') {
+      result = result.filter(b => b.status !== 'Delivered' && b.status !== 'Cancelled');
+    } else if (billStatusTab === 'Delivered') {
+      result = result.filter(b => b.status === 'Delivered');
+    }
+
+    return result;
+  }, [bills, tokenFilter, selectedTokenDate, billSortOption, billStatusTab]);
 
   const handleQuickVchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1124,7 +1153,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     try {
       const amount = Number(quickVchForm.amount);
       const isPayment = quickVoucher.type === 'Payment';
-      let paymentAccName = quickVoucher.paymentMethod === 'Cash' ? 'Cash' : 'Bank Account';
+      let paymentAccName = quickVoucher.paymentMethod === 'Cash' ? 'Cash' : 'Bank of Baroda Operating A/c';
       
       if (quickVoucher.targetAccountName) {
         paymentAccName = quickVoucher.targetAccountName;
@@ -1139,12 +1168,19 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       if (fid) {
         paymentAccQuery = query(collection(db, 'accounts'), where('name', '==', paymentAccName), where('franchiseId', '==', fid));
       }
-      const [paymentAccSnap, otherAccSnap] = await Promise.all([
+      let [paymentAccSnap, otherAccSnap] = await Promise.all([
         getDocs(paymentAccQuery),
         getDoc(doc(db, 'accounts', quickVchForm.accountId))
       ]);
 
-      const paymentAccId = paymentAccSnap.docs[0]?.id;
+      let paymentAccId = paymentAccSnap.docs[0]?.id;
+      if (!paymentAccId && paymentAccName !== 'Cash') {
+        // Fallback robust check
+        const qAll = fid ? query(collection(db, 'accounts'), where('franchiseId', '==', fid)) : collection(db, 'accounts');
+        const snap = await getDocs(qAll);
+        const match = snap.docs.find(d => d.data().name === 'Bank Account' || d.data().name?.toLowerCase().includes('bank'));
+        paymentAccId = match?.id;
+      }
       if (!paymentAccId) throw new Error("Payment account not found");
       if (!otherAccSnap.exists()) throw new Error("Selected account not found");
 
@@ -1406,7 +1442,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           // 6. Update Account Balances
           const accountsSnap = await getDocs(collection(db, 'accounts'));
           const cashAcc = accountsSnap.docs.find(d => d.data().name === 'Cash' && d.data().franchiseId === activeFid);
-          const bankAcc = accountsSnap.docs.find(d => d.data().name === 'Bank Account' && d.data().franchiseId === activeFid);
+          const bankAcc = accountsSnap.docs.find(d => (d.data().name === 'Bank of Baroda Operating A/c' || d.data().name === 'Bank Account') && d.data().franchiseId === activeFid);
           const serviceAcc = accountsSnap.docs.find(d => d.data().name === 'Sales' && d.data().franchiseId === activeFid);
 
           if (cashAcc) {
@@ -1620,7 +1656,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       // 6. Update Account Balances
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       const cashAcc = accountsSnap.docs.find(d => d.data().name === 'Cash' && d.data().franchiseId === activeFid);
-      const bankAcc = accountsSnap.docs.find(d => d.data().name === 'Bank Account' && d.data().franchiseId === activeFid);
+      const bankAcc = accountsSnap.docs.find(d => (d.data().name === 'Bank of Baroda Operating A/c' || d.data().name === 'Bank Account') && d.data().franchiseId === activeFid);
       const serviceAcc = accountsSnap.docs.find(d => d.data().name === 'Sales' && d.data().franchiseId === activeFid);
 
       if (cashAcc) {
@@ -1710,7 +1746,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         ] = await Promise.all([
           getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Sales', 'Service Income']), where('franchiseId', '==', franchiseIdForBill))),
           getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
-          getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
+          getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Bank of Baroda Operating A/c', 'Bank Account']), where('franchiseId', '==', franchiseIdForBill))),
           getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
           getDoc(doc(db, 'franchises', franchiseIdForBill)),
           getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense'), where('franchiseId', 'in', [franchiseIdForBill, null]))),
@@ -1900,7 +1936,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             }
           } else {
             const debitAccId = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') ? bankAccId : cashAccId;
-            const debitAccName = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') ? 'Bank Account' : 'Cash';
+            const debitAccName = (oldPaymentMode === 'UPI' || oldPaymentMode === 'Bank' || oldPaymentMode === 'Bank Transfer') ? (bankSnap.docs.find(d => d.id === bankAccId)?.data().name || 'Bank of Baroda Operating A/c') : 'Cash';
             if (debitAccId) {
               salesItems.push({ accountId: debitAccId, accountName: debitAccName, amount: newGrandTotal, type: 'Dr' });
             }
@@ -2129,7 +2165,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       const [incomeSnap, cashSnap, bankSnap, customerSnap, franchiseDoc, loyaltyExpenseAccSnap] = await Promise.all([
         getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Sales', 'Service Income']), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Bank of Baroda Operating A/c', 'Bank Account']), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
         getDoc(doc(db, 'franchises', franchiseIdForBill)),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Franchise Loyalty Expense'), where('franchiseId', 'in', [franchiseIdForBill, null])))
@@ -2285,7 +2321,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       
       const bankQueryPromise = targetBankAccountId
         ? getDoc(doc(db, 'accounts', targetBankAccountId))
-        : getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill)));
+        : getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Bank of Baroda Operating A/c', 'Bank Account']), where('franchiseId', '==', franchiseIdForBill)));
 
       const [
         incomeSnap,
@@ -2492,7 +2528,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         let finalBankAccId = bankAccId;
         if (!bankAccId) {
           const newAcc = doc(collection(db, 'accounts'));
-          transaction.set(newAcc, { name: 'Bank Account', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: (mode === 'UPI' || mode === 'Bank') ? amount : 0, franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
+          transaction.set(newAcc, { name: 'Bank of Baroda Operating A/c', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: (mode === 'UPI' || mode === 'Bank') ? amount : 0, franchiseId: franchiseIdForBill, createdAt: serverTimestamp() });
           finalBankAccId = newAcc.id;
         } else if (bankAccDoc?.exists()) {
             const base = bankAccDoc.data().currentBalance || 0;
@@ -2580,7 +2616,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           salesItems.push({ accountId: finalDrCustId, accountName: oldBill.customerName, amount: amount, type: 'Dr' });
         } else {
           const debitAccId = (mode === 'UPI' || mode === 'Bank') ? finalBankAccId! : finalCashAccId!;
-          const debitAccName = (mode === 'UPI' || mode === 'Bank') ? 'Bank Account' : 'Cash';
+          const debitAccName = (mode === 'UPI' || mode === 'Bank') ? (bankAccDoc?.exists() ? bankAccDoc.data().name : 'Bank of Baroda Operating A/c') : 'Cash';
           salesItems.push({ accountId: debitAccId, accountName: debitAccName, amount: amount, type: 'Dr' });
         }
 
@@ -2635,7 +2671,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       const franchiseIdForBill = editingBill.franchiseId || 'legacy-rajhans';
       const [cashSnap, bankSnap, customerSnap, assetsGroupSnap] = await Promise.all([
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', franchiseIdForBill))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', franchiseIdForBill))),
+        getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Bank of Baroda Operating A/c', 'Bank Account']), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', editingBill.customerName), where('franchiseId', '==', franchiseIdForBill))),
         getDocs(query(collection(db, 'accountGroups'), where('name', '==', 'Current Assets'), where('franchiseId', 'in', [franchiseIdForBill, null])))
       ]);
@@ -2704,7 +2740,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           const isNewBank = mode === 'UPI' || mode === 'Bank Transfer';
           if (!bankAccId && isNewBank) {
             const newAcc = doc(collection(db, 'accounts'));
-            transaction.set(newAcc, { name: 'Bank Account', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: amount, createdAt: serverTimestamp() });
+            transaction.set(newAcc, { name: 'Bank of Baroda Operating A/c', groupId: assetsGroupId, openingBalance: 0, balanceType: 'Dr', currentBalance: amount, createdAt: serverTimestamp() });
             finalBankAccId = newAcc.id;
           } else if (bankAccDoc?.exists()) {
             const base = (bankAccDoc.data().currentBalance || 0);
@@ -2743,7 +2779,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             const updatedItems = items.map((item: any) => {
               if (item.type === 'Dr' && item.accountName !== 'Franchise Loyalty Expense') {
                 const debitAccId = isCredit ? customerAccId! : (isNewBank ? finalBankAccId! : finalCashAccId!);
-                const debitAccName = isCredit ? billData.customerName : (isNewBank ? 'Bank Account' : 'Cash');
+                const debitAccName = isCredit ? billData.customerName : (isNewBank ? (bankAccDoc?.exists() ? bankAccDoc.data().name : 'Bank of Baroda Operating A/c') : 'Cash');
                 return {
                   ...item,
                   accountId: debitAccId,
@@ -2959,7 +2995,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               lat: request.location.lat,
               lng: request.location.lng,
               address: request.location.address,
-              mapLink: `https://www.google.com/maps?q=${request.location.lat},${request.location.lng}`
+              mapLink: `https://www.openstreetmap.org/?mlat=${request.location.lat}&mlon=${request.location.lng}&zoom=16`
             } : null
           };
         } else {
@@ -2969,11 +3005,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         }
       }
       
-      // 2. Generate new bill number
-      let highestBillNum = 0;
+      // 2. Generate new bill number using transaction
+      const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
+      let highestQueryNum = 0;
       try {
         let q = query(collection(db, 'bills'), orderBy('billNumber', 'desc'), limit(1));
-        const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
         if (fId) {
           q = query(collection(db, 'bills'), where('franchiseId', '==', fId), orderBy('billNumber', 'desc'), limit(1));
         }
@@ -2981,78 +3017,57 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         if (!snapshot.empty) {
           const lastNumStr = snapshot.docs[0].data().billNumber;
           const parsed = parseInt(lastNumStr.replace(/\D/g, ''));
-          if (!isNaN(parsed)) highestBillNum = parsed;
+          if (!isNaN(parsed)) highestQueryNum = parsed;
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn("Soft fail querying highest bill number in Dashboard acceptRequest:", e);
+      }
 
-      let counterNum = 0;
-      try {
-        const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
-        const counterSnap = await getDoc(doc(db, 'counters', fId ? `bill_sequence_${fId}` : 'bill_sequence_global'));
+      const counterRef = doc(db, 'counters', fId ? `bill_sequence_${fId}` : 'bill_sequence_global');
+      let newBillNumber = '';
+
+      await runTransaction(db, async (transaction) => {
+        const counterSnap = await transaction.get(counterRef);
+        let lastSequence = 0;
         if (counterSnap.exists()) {
-          counterNum = counterSnap.data().lastSequence || 0;
+          lastSequence = counterSnap.data().lastSequence || 0;
         }
-      } catch (e) {}
 
-      const nextNum = Math.max(highestBillNum, counterNum) + 1;
-      let newBillNumber = generateBillNumber(nextNum);
-      const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
+        const nextSeq = Math.max(highestQueryNum, lastSequence) + 1;
+        newBillNumber = generateBillNumber(nextSeq);
 
-      let isDuplicate = true;
-      let checkAttempts = 0;
-      while (isDuplicate && checkAttempts < 10) {
-        const qDup = query(
-          collection(db, 'bills'),
-          where('franchiseId', '==', fId),
-          where('billNumber', '==', newBillNumber)
-        );
-        const dupSnap = await getDocs(qDup);
-        if (dupSnap.empty) {
-          isDuplicate = false;
-        } else {
-          const currentSeq = parseInt(newBillNumber.replace(/\D/g, ''), 10);
-          const nextSeq = (isNaN(currentSeq) ? 1001 : currentSeq) + 1;
-          newBillNumber = generateBillNumber(nextSeq);
-          checkAttempts++;
-        }
-      }
+        // Update counter
+        transaction.set(counterRef, { lastSequence: nextSeq }, { merge: true });
 
-      // 3. Create new bill based on original but with current time
-      const newBillData = {
-        ...originalData,
-        category: request.category || originalData.category || 'TANKER', // Ensure category is present
-        billNumber: newBillNumber,
-        date: new Date().toISOString(),
-        status: 'Pending',
-        isSettled: false,
-        paymentMode: 'Pending',
-        remarks: request.remarks || originalData.remarks || '',
-        createdAt: serverTimestamp(),
-        franchiseId: fId,
-        loyaltyPointsRedeemed: request.loyaltyPointsRedeemed || 0,
-        discount: (originalData.discount || 0) + (request.loyaltyPointsRedeemed || 0),
-        grandTotal: Math.max(0, (originalData.grandTotal || request.totalEstimate || 0) - (request.loyaltyPointsRedeemed || 0))
-      };
+        // Prepare new bill data
+        const newBillData = {
+          ...originalData,
+          category: request.category || originalData.category || 'TANKER',
+          billNumber: newBillNumber,
+          date: new Date().toISOString(),
+          status: 'Pending',
+          isSettled: false,
+          paymentMode: 'Pending',
+          remarks: request.remarks || originalData.remarks || '',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          franchiseId: fId,
+          loyaltyPointsRedeemed: request.loyaltyPointsRedeemed || 0,
+          discount: (originalData.discount || 0) + (request.loyaltyPointsRedeemed || 0),
+          grandTotal: Math.max(0, (originalData.grandTotal || request.totalEstimate || 0) - (request.loyaltyPointsRedeemed || 0))
+        };
 
-      try {
-        await addDoc(collection(db, 'bills'), newBillData);
-        const seq = parseInt(newBillNumber.replace(/\D/g, ''), 10);
-        if (!isNaN(seq)) {
-          const fId = request.franchiseId || originalData.franchiseId || franchiseId || null;
-          await setDoc(doc(db, 'counters', fId ? `bill_sequence_${fId}` : 'bill_sequence_global'), { lastSequence: seq }, { merge: true });
-        }
-      } catch (billErr) {
-        handleFirestoreError(billErr, OperationType.CREATE, 'bills');
-        throw billErr;
-      }
+        const newBillRef = doc(collection(db, 'bills'));
+        transaction.set(newBillRef, newBillData);
 
-      // 4. Update request status
-      await updateDoc(doc(db, 'bookingRequests', request.id), { 
-        status: 'Accepted',
-        updatedAt: serverTimestamp() 
+        // Update booking request status to Accepted
+        const requestRef = doc(db, 'bookingRequests', request.id);
+        transaction.update(requestRef, {
+          status: 'Accepted',
+          updatedAt: serverTimestamp()
+        });
       });
     } catch (error) {
-      // Avoid double handleFirestoreError if it already happened for bills
       if (!(error instanceof Error && error.message.includes('OperationType'))) {
         handleFirestoreError(error, OperationType.UPDATE, `bookingRequests/${request.id}`);
       }
@@ -3083,7 +3098,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       const [incomeSnap, cashSnap, bankSnap, customerAccSnap] = await Promise.all([
         getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Sales', 'Service Income']), where('franchiseId', '==', fid))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', 'Cash'), where('franchiseId', '==', fid))),
-        getDocs(query(collection(db, 'accounts'), where('name', '==', 'Bank Account'), where('franchiseId', '==', fid))),
+        getDocs(query(collection(db, 'accounts'), where('name', 'in', ['Bank of Baroda Operating A/c', 'Bank Account']), where('franchiseId', '==', fid))),
         getDocs(query(collection(db, 'accounts'), where('name', '==', billData.customerName), where('franchiseId', '==', fid)))
       ]);
 
@@ -3661,75 +3676,117 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         )}
 
         {/* Individual Bank Cards */}
-        {accounts.filter(a => 
-          a.name.toLowerCase().includes('bank') || 
-          a.name.toLowerCase().includes('baroda') || 
-          a.name.toLowerCase().includes('sbi') || 
-          a.name.toLowerCase().includes('hdfc')
-        ).map((bankAcc, index) => {
-          const bankName = bankAcc.name;
-          const bankBalance = bankAcc.currentBalance || 0;
-          return (
-            <motion.div 
-              key={`bank-card-${bankAcc.id}`}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              whileHover={{ y: -6, scale: 1.02 }}
-              transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 + (index * 0.05) }}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                if (bankAcc.id) {
-                  sessionStorage.setItem('selectedLedgerId', bankAcc.id);
-                  sessionStorage.setItem('activeLedgerTab', 'ledgers');
-                  setActiveTab('ledger');
-                }
-              }}
-              className="bg-white p-6 rounded-[2.5rem] border-t border-x border-indigo-50 border-b-[8px] border-b-indigo-200/50 shadow-[0_20px_40px_rgba(99,102,241,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative cursor-pointer"
-              style={{
-                background: "linear-gradient(135deg, #ffffff 0%, #fbfbfe 100%)"
-              }}
-            >
-              {/* Elegant Logo Branding Background Watermark */}
-              <div className="absolute right-4 bottom-2 opacity-[0.05] pointer-events-none select-none z-0 flex flex-col items-center text-indigo-950">
-                <Logo size={90} />
-                <span className="text-[8px] font-black uppercase tracking-[0.15em] font-sans mt-0.5">TANKERWALA</span>
-              </div>
+        {(() => {
+          const todayStr = tokenFilter === 'Today' 
+            ? format(new Date(), 'yyyy-MM-dd') 
+            : tokenFilter === 'Yesterday' 
+              ? format(subDays(new Date(), 1), 'yyyy-MM-dd') 
+              : selectedTokenDate;
+          
+          return accounts.filter(a => 
+            a.name.toLowerCase().includes('bank') || 
+            a.name.toLowerCase().includes('baroda') || 
+            a.name.toLowerCase().includes('sbi') || 
+            a.name.toLowerCase().includes('hdfc')
+          ).map((bankAcc, index) => {
+            const bankName = bankAcc.name;
+            const bankBalance = bankAcc.currentBalance || 0;
 
-              <div className="relative z-10">
-                <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center mb-4 shadow-lg shadow-blue-100">
-                  <Smartphone size={20} />
+            // Calculate Today's net flow for this specific bank account
+            let todayBankFlow = 0;
+            vouchersList.forEach(vch => {
+              let vchDateStr = '';
+              if (vch.date) {
+                try {
+                  const dObj = vch.date.toDate ? vch.date.toDate() : new Date(vch.date);
+                  vchDateStr = format(dObj, 'yyyy-MM-dd');
+                } catch (e) {}
+              }
+              
+              if (vchDateStr === todayStr && vch.items) {
+                vch.items.forEach((item: any) => {
+                  if (item.accountId === bankAcc.id || item.accountName === bankName) {
+                    if (item.type === 'Dr') {
+                      todayBankFlow += item.amount;
+                    } else if (item.type === 'Cr') {
+                      todayBankFlow -= item.amount;
+                    }
+                  }
+                });
+              }
+            });
+
+            return (
+              <motion.div 
+                key={`bank-card-${bankAcc.id}`}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                whileHover={{ y: -6, scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 + (index * 0.05) }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  if (bankAcc.id) {
+                    sessionStorage.setItem('selectedLedgerId', bankAcc.id);
+                    sessionStorage.setItem('activeLedgerTab', 'ledgers');
+                    setActiveTab('ledger');
+                  }
+                }}
+                className="bg-white p-6 rounded-[2.5rem] border-t border-x border-indigo-50 border-b-[8px] border-b-indigo-200/50 shadow-[0_20px_40px_rgba(99,102,241,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden min-h-[180px] relative cursor-pointer"
+                style={{
+                  background: "linear-gradient(135deg, #ffffff 0%, #fbfbfe 100%)"
+                }}
+              >
+                {/* Elegant Logo Branding Background Watermark */}
+                <div className="absolute right-4 bottom-2 opacity-[0.05] pointer-events-none select-none z-0 flex flex-col items-center text-indigo-950">
+                  <Logo size={90} />
+                  <span className="text-[8px] font-black uppercase tracking-[0.15em] font-sans mt-0.5">TANKERWALA</span>
                 </div>
-                <div className="flex items-center justify-between mb-1">
-                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate max-w-[150px]" title={bankName}>{bankName}</div>
-                  <div className="flex gap-1">
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: bankName });
-                      }}
-                      className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
-                    >
-                      <Plus size={16} />
-                    </button>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: bankName });
-                      }}
-                      className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
-                    >
-                      <Minus size={16} />
-                    </button>
+
+                <div className="relative z-10">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shadow-blue-100">
+                      <Smartphone size={20} />
+                    </div>
+                    <div className="text-right flex flex-col items-end bg-blue-50 border border-blue-100 rounded-2xl p-1.5 px-2.5 shadow-sm">
+                      <span className="text-[8px] uppercase font-black text-blue-600 tracking-wider">Today's UPI</span>
+                      <span className={`text-xs font-black flex items-center gap-0.5 mt-0.5 ${todayBankFlow >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
+                        <span className="text-[10px] font-bold">{todayBankFlow < 0 ? '-' : ''}₹</span>
+                        {Number(Math.abs(todayBankFlow)).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 truncate max-w-[150px]" title={bankName}>{bankName}</div>
+                    <div className="flex gap-1">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setQuickVoucher({ type: 'Receipt', paymentMethod: 'Bank', targetAccountName: bankName });
+                        }}
+                        className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                      >
+                        <Plus size={16} />
+                      </button>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setQuickVoucher({ type: 'Payment', paymentMethod: 'Bank', targetAccountName: bankName });
+                        }}
+                        className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                      >
+                        <Minus size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-3xl font-display font-black text-slate-900 flex items-baseline">
+                    <span className="text-xl mr-1 text-blue-600">₹</span>
+                    {formatCurrency(bankBalance).replace('₹', '')}
                   </div>
                 </div>
-                <div className="text-3xl font-display font-black text-slate-900 flex items-baseline">
-                  <span className="text-xl mr-1 text-blue-600">₹</span>
-                  {formatCurrency(bankBalance).replace('₹', '')}
-                </div>
-              </div>
-            </motion.div>
-          );
-        })}
+              </motion.div>
+            );
+          });
+        })()}
       </div>
 
       {/* Automation Desk */}
@@ -4347,6 +4404,32 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             />
           </motion.div>
         )}
+
+        {/* Status Scroll Tab */}
+        <div 
+          className="mb-4 overflow-x-auto flex items-center gap-2 py-1 select-none scrollbar-none"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        >
+          {[
+            { id: 'Recent', label: 'Recent Bills 🚛' },
+            { id: 'Delivered', label: 'Delivered Bills ✅' }
+          ].map((tab) => {
+            const isActive = billStatusTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setBillStatusTab(tab.id as any)}
+                className={`shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 duration-150 ${
+                  isActive
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
 
         <div className="flex flex-col gap-3">
           <AnimatePresence mode="popLayout" initial={false}>
@@ -5383,7 +5466,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     <option value="">-- Choose Account --</option>
                     {accounts
                       .filter(acc => {
-                         if (acc.name === 'Cash' || acc.name === 'Bank Account') return false;
+                         if (acc.name === 'Cash' || acc.name === 'Bank of Baroda Operating A/c' || acc.name === 'Bank Account' || acc.name.toLowerCase().includes('bank')) return false;
                          if (quickVoucher.customerId === 'ALL_CUSTOMERS') {
                            return acc.group === 'Sundry Debtors' || customers.some(c => c.name === acc.name || c.id === acc.customerId);
                          }

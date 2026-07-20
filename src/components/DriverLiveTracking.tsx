@@ -100,7 +100,7 @@ export function DriverLiveTracking({ driverId }: DriverLiveTrackingProps) {
             updateLocationInFirebase(pos.coords);
           },
           (err) => {
-            console.error('WatchPosition error:', err instanceof Error ? err.message : String(err));
+            console.warn('WatchPosition notice:', err instanceof Error ? err.message : String(err));
             // Don't kill tracking on intermittent sync errors, only on permission/fatal
             if (err.code === 1) {
               setError('Permission denied. Please allow location access in your browser settings.');
