@@ -920,6 +920,8 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         if (e.key === 'F5') { e.preventDefault(); setTallyVchType('Payment'); }
         if (e.key === 'F6') { e.preventDefault(); setTallyVchType('Receipt'); }
         if (e.key === 'F7') { e.preventDefault(); setTallyVchType('Journal'); }
+        if (e.key === 'F8') { e.preventDefault(); setTallyVchType('Sales'); }
+        if (e.key === 'F9') { e.preventDefault(); setTallyVchType('Purchase'); }
       }
 
       // Menu arrow navigation and triggers
@@ -1632,6 +1634,18 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                       className={`w-full py-2 text-left px-2 font-bold flex justify-between border ${tallyVchType === 'Journal' ? 'bg-[#115b62] border-yellow-400 text-yellow-300' : 'bg-teal-950/30 border-teal-900 hover:bg-[#115b62]/40'}`}
                     >
                       <span>F7: Journal</span>
+                    </button>
+                    <button 
+                      onClick={() => setTallyVchType('Sales')}
+                      className={`w-full py-2 text-left px-2 font-bold flex justify-between border ${tallyVchType === 'Sales' ? 'bg-[#115b62] border-yellow-400 text-yellow-300' : 'bg-teal-950/30 border-teal-900 hover:bg-[#115b62]/40'}`}
+                    >
+                      <span>F8: Sales</span>
+                    </button>
+                    <button 
+                      onClick={() => setTallyVchType('Purchase')}
+                      className={`w-full py-2 text-left px-2 font-bold flex justify-between border ${tallyVchType === 'Purchase' ? 'bg-[#115b62] border-yellow-400 text-yellow-300' : 'bg-teal-950/30 border-teal-900 hover:bg-[#115b62]/40'}`}
+                    >
+                      <span>F9: Purchase</span>
                     </button>
                     <div className="h-px bg-[#115b62]" />
                     <button 
@@ -2783,6 +2797,8 @@ function VoucherEntryModal({ onClose, accounts, franchiseId, editingVoucher }: {
               vchType === 'Payment' ? 'bg-red-500' :
               vchType === 'Receipt' ? 'bg-green-500' :
               vchType === 'Contra' ? 'bg-blue-500' :
+              vchType === 'Sales' ? 'bg-purple-500' :
+              vchType === 'Purchase' ? 'bg-orange-500' :
               'bg-slate-900'
             }`}>
               <Receipt size={24} />
@@ -2804,17 +2820,17 @@ function VoucherEntryModal({ onClose, accounts, franchiseId, editingVoucher }: {
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-8 flex flex-col gap-8">
           {/* Top Bar: Type, Date, No */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 col-span-1 md:col-span-3">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Voucher Type</label>
-              <div className="flex bg-slate-100 p-1 rounded-2xl">
-                {(['Payment', 'Receipt', 'Contra', 'Journal'] as VoucherType[]).map(type => (
+              <div className="grid grid-cols-3 sm:grid-cols-6 bg-slate-100 p-1 rounded-2xl gap-1">
+                {(['Payment', 'Receipt', 'Contra', 'Journal', 'Sales', 'Purchase'] as VoucherType[]).map(type => (
                   <button
                     key={type}
                     type="button"
                     onClick={() => setVchType(type)}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                    className={`py-2.5 rounded-xl text-xs font-bold transition-all ${
                       vchType === type 
-                        ? 'bg-white shadow-sm text-slate-900' 
+                        ? 'bg-white shadow-sm text-slate-900 font-extrabold' 
                         : 'text-slate-500 hover:text-slate-700'
                     }`}
                   >
@@ -4947,11 +4963,14 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
 function VoucherManager({ vouchers, onAdd }: { vouchers: Voucher[], onAdd: () => void }) {
   return (
     <div className="space-y-6">
-       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
          <VoucherTypeCard type="Payment" amount={vouchers.filter(v => v.type === 'Payment').reduce((s, v) => s + v.totalAmount, 0)} count={vouchers.filter(v => v.type === 'Payment').length} color="bg-red-50 text-red-600 border-red-100" icon={<ArrowUpRight />} />
          <VoucherTypeCard type="Receipt" amount={vouchers.filter(v => v.type === 'Receipt').reduce((s, v) => s + v.totalAmount, 0)} count={vouchers.filter(v => v.type === 'Receipt').length} color="bg-green-50 text-green-600 border-green-100" icon={<ArrowDownLeft />} />
          <VoucherTypeCard type="Contra" amount={vouchers.filter(v => v.type === 'Contra').reduce((s, v) => s + v.totalAmount, 0)} count={vouchers.filter(v => v.type === 'Contra').length} color="bg-blue-50 text-blue-600 border-blue-100" icon={<ArrowRightLeft />} />
-         <button onClick={onAdd} className="bg-slate-900 rounded-[2rem] p-6 text-white shadow-xl shadow-slate-200 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all">
+         <VoucherTypeCard type="Journal" amount={vouchers.filter(v => v.type === 'Journal').reduce((s, v) => s + v.totalAmount, 0)} count={vouchers.filter(v => v.type === 'Journal').length} color="bg-indigo-50 text-indigo-600 border-indigo-100" icon={<BookOpen size={20} />} />
+         <VoucherTypeCard type="Sales" amount={vouchers.filter(v => v.type === 'Sales').reduce((s, v) => s + v.totalAmount, 0)} count={vouchers.filter(v => v.type === 'Sales').length} color="bg-purple-50 text-purple-600 border-purple-100" icon={<FileText size={20} />} />
+         <VoucherTypeCard type="Purchase" amount={vouchers.filter(v => v.type === 'Purchase').reduce((s, v) => s + v.totalAmount, 0)} count={vouchers.filter(v => v.type === 'Purchase').length} color="bg-orange-50 text-orange-600 border-orange-100" icon={<Receipt size={20} />} />
+         <button onClick={onAdd} className="bg-slate-900 rounded-[2rem] p-6 text-white shadow-xl shadow-slate-200 flex flex-col items-center justify-center gap-2 active:scale-95 transition-all md:col-span-1 lg:col-span-1 min-h-[140px]">
             <Plus size={32} />
             <span className="font-bold uppercase tracking-widest text-[10px]">Create Entry</span>
          </button>

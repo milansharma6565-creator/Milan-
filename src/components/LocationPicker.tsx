@@ -38,20 +38,29 @@ interface LocationPickerProps {
 }
 
 // Leaflet internal component to handle programmatic center updates
-function LeafletChangeView({ center }: { center: [number, number] }) {
+function LeafletChangeView({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useLeafletMap();
   useEffect(() => {
-    map.setView(center, map.getZoom());
-  }, [center, map]);
+    map.setView(center, zoom);
+  }, [center, zoom, map]);
   return null;
 }
 
-// Leaflet click handler component
-function LeafletMapEvents({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
-  useMapEvents({
+// Leaflet click and zoom handler component
+function LeafletMapEvents({ 
+  onMapClick, 
+  onZoomChange 
+}: { 
+  onMapClick: (lat: number, lng: number) => void;
+  onZoomChange: (zoom: number) => void;
+}) {
+  const map = useMapEvents({
     click(e) {
       onMapClick(e.latlng.lat, e.latlng.lng);
     },
+    zoomend() {
+      onZoomChange(map.getZoom());
+    }
   });
   return null;
 }
@@ -71,6 +80,7 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
   const [searchTimeout, setSearchTimeout] = useState<any>(null);
   const [findingMe, setFindingMe] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<number>(13);
 
   // Get user's current location on mount
   useEffect(() => {
@@ -80,12 +90,13 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
           const pos = { lat: position.coords.latitude, lng: position.coords.longitude };
           setOrigin(pos);
           setCenter(pos);
+          setZoom(15); // Set closer zoom for their real location on load
           setLocationError(null);
         },
         (error) => {
           console.warn("Geolocation on-mount notice (safe fallback used):", error?.message || "Unavailable");
         },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 } // Force fresh GPS coordinates without cache on mount
       );
     }
   }, []);
@@ -132,30 +143,49 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
     if (navigator.geolocation) {
       setFindingMe(true);
       setLocationError(null);
+      
+      // Attempt highly precise GPS query directly from hardware (maximumAge: 0 forces fresh search)
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const pos = { lat: position.coords.latitude, lng: position.coords.longitude };
           setOrigin(pos);
           setCenter(pos);
+          setZoom(17); // Street level zoom (Google Maps behavior)
           handleMapClick(pos.lat, pos.lng);
           setFindingMe(false);
           setLocationError(null);
         },
         (err) => {
-          setFindingMe(false);
-          console.warn("Geolocation find-me notice:", err?.message || "Unavailable");
-          
-          let msg = "Could not access precise GPS. Please type your location above or select directly on the map.";
-          if (err.code === 1) {
-            msg = "Location permission denied. Please allow location access or type your location above.";
-          } else if (err.code === 2) {
-            msg = "Position unavailable. Please type your location above or click directly on the map.";
-          } else if (err.code === 3) {
-            msg = "Location request timed out. Please select directly on the map.";
-          }
-          setLocationError(msg);
+          console.warn("First precise GPS attempt failed, trying fallback standard accuracy:", err?.message);
+          // If pure high-accuracy direct satellite search fails or times out, fall back to cellular/IP/cached position
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              const pos = { lat: position.coords.latitude, lng: position.coords.longitude };
+              setOrigin(pos);
+              setCenter(pos);
+              setZoom(16); // High specificity zoom
+              handleMapClick(pos.lat, pos.lng);
+              setFindingMe(false);
+              setLocationError(null);
+            },
+            (err2) => {
+              setFindingMe(false);
+              console.error("Geolocation fallback also failed:", err2?.message);
+              
+              let msg = "Could not access precise GPS. Please type your location above or select directly on the map.";
+              if (err2.code === 1) {
+                msg = "Location permission denied. Please allow location access or type your location above.";
+              } else if (err2.code === 2) {
+                msg = "Position unavailable. Please type your location above or click directly on the map.";
+              } else if (err2.code === 3) {
+                msg = "Location request timed out. Please select directly on the map.";
+              }
+              setLocationError(msg);
+            },
+            { enableHighAccuracy: false, timeout: 10000, maximumAge: 15000 }
+          );
         },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
       );
     } else {
       setLocationError("Geolocation is not supported by your browser.");
@@ -207,6 +237,7 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
     const lng = parseFloat(s.lon || s.lng || s.longitude);
     setCenter({ lat, lng });
     setMarkerPos({ lat, lng });
+    setZoom(17); // Zoom in close for precise marker alignment
     setSearchQuery(s.display_name);
     setSuggestions([]);
     onLocationSelect(lat, lng, s.display_name);
@@ -297,18 +328,18 @@ export function LocationPicker({ onLocationSelect, defaultLocation }: LocationPi
       <div className="w-full h-[400px] rounded-[2rem] overflow-hidden border-4 border-white shadow-2xl relative z-0 bg-slate-50 flex items-center justify-center">
         <MapContainer 
           center={[center.lat, center.lng]} 
-          zoom={13} 
+          zoom={zoom} 
           style={{ height: '100%', width: '100%' }}
           scrollWheelZoom={true}
         >
-          <LeafletChangeView center={[center.lat, center.lng]} />
+          <LeafletChangeView center={[center.lat, center.lng]} zoom={zoom} />
           
           {/* CARTO Voyager maps tile layer for beautiful logistics layout */}
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           />
-          <LeafletMapEvents onMapClick={handleMapClick} />
+          <LeafletMapEvents onMapClick={handleMapClick} onZoomChange={setZoom} />
 
           {origin && (
             <LeafletCircle
