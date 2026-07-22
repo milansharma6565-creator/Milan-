@@ -40,9 +40,11 @@ interface LocationPickerProps {
 // Leaflet internal component to handle programmatic center updates
 function LeafletChangeView({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useLeafletMap();
+  const lat = center[0];
+  const lng = center[1];
   useEffect(() => {
-    map.setView(center, zoom);
-  }, [center, zoom, map]);
+    map.setView([lat, lng], zoom);
+  }, [lat, lng, zoom, map]);
   return null;
 }
 
@@ -54,7 +56,8 @@ function LeafletMapEvents({
   onMapClick: (lat: number, lng: number) => void;
   onZoomChange: (zoom: number) => void;
 }) {
-  const map = useMapEvents({
+  const map = useLeafletMap();
+  useMapEvents({
     click(e) {
       onMapClick(e.latlng.lat, e.latlng.lng);
     },

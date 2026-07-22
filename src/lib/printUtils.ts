@@ -1,12 +1,12 @@
 export const printThermalReceipt = async (element: HTMLElement) => {
   return new Promise<void>((resolve, reject) => {
     try {
-      // 1. Grab modern CSS styles
+      // 1. Grab modern CSS styles from current document
       const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
         .map(style => style.outerHTML)
         .join('\n');
 
-      // 2. We can create an iframe
+      // 2. Create invisible iframe for clean print job
       const iframe = document.createElement('iframe');
       iframe.name = 'thermal_print_iframe';
       iframe.style.position = 'fixed';
@@ -28,60 +28,60 @@ export const printThermalReceipt = async (element: HTMLElement) => {
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Thermal Print</title>
+            <title>Thermal Receipt Print</title>
             ${styles}
             <style>
-              /* Optimize for POS/ATPOS thermal paper */
+              /* Optimize for POS thermal paper rolls (58mm / 80mm ESC/POS) */
               @media print {
-                body {
+                @page {
+                  size: auto;
+                  margin: 0mm !important;
+                }
+                html, body {
                   margin: 0 !important;
                   padding: 0 !important;
                   background-color: #ffffff !important;
                   color: #000000 !important;
-                  width: 78mm !important; /* Slightly narrower than 80 to prevent horizontal scroll/cut margins */
+                  width: 100% !important;
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
                 }
-                /* Hide any non-print elements or custom margins */
-                @page {
-                  size: 80mm auto; /* continuous roll height */
-                  margin: 0 !important;
-                }
-                /* Ensure contrast is dark for direct thermal heat printing */
                 * {
                   color: #000000 !important;
                   text-shadow: none !important;
                   box-shadow: none !important;
-                  background: transparent !important;
                 }
-                .tracking-widest {
-                  letter-spacing: 0.05em !important;
-                }
-                /* Ensure image/QR code prints properly */
                 img, svg {
                   page-break-inside: avoid;
+                  display: block;
+                  margin-left: auto;
+                  margin-right: auto;
                 }
               }
               body {
-                font-family: 'Inter', sans-serif;
+                font-family: 'Inter', system-ui, -apple-system, sans-serif;
                 margin: 0;
-                padding: 10px;
+                padding: 0;
                 background-color: #ffffff;
+                color: #000000;
               }
             </style>
           </head>
           <body>
-            <div style="width: 78mm; margin: 0 auto;">
+            <div style="width: 78mm; max-width: 100%; margin: 0 auto; padding: 2mm;">
               ${element.innerHTML}
             </div>
             <script>
-              // Wait for fonts and assets to finish loading before printing
               window.onload = function() {
                 setTimeout(function() {
                   window.focus();
                   window.print();
                   setTimeout(function() {
-                    window.parent.document.body.removeChild(window.frameElement);
-                  }, 1000);
-                }, 500);
+                    if (window.frameElement && window.parent && window.parent.document.body.contains(window.frameElement)) {
+                      window.parent.document.body.removeChild(window.frameElement);
+                    }
+                  }, 1200);
+                }, 400);
               };
             </script>
           </body>
@@ -91,7 +91,6 @@ export const printThermalReceipt = async (element: HTMLElement) => {
       resolve();
     } catch (err) {
       console.error('Direct thermal print error, falling back to window.open:', err);
-      // Fallback: window.open if iframe printing fails or is restricted
       try {
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
@@ -102,20 +101,21 @@ export const printThermalReceipt = async (element: HTMLElement) => {
           .join('\n');
         
         printWindow.document.write(`
+          <!DOCTYPE html>
           <html>
             <head>
-              <title>Thermal Print</title>
+              <title>Thermal Receipt Print</title>
               ${styles}
               <style>
                 @media print {
-                  body { margin: 0; padding: 0; width: 78mm; background-color: #ffffff; }
-                  @page { size: 80mm auto; margin: 0; }
+                  @page { size: auto; margin: 0mm !important; }
+                  body { margin: 0 !important; padding: 0 !important; background-color: #ffffff !important; color: #000000 !important; }
                 }
-                body { font-family: 'Inter', sans-serif; padding: 10px; }
+                body { font-family: 'Inter', system-ui, sans-serif; padding: 0; margin: 0; }
               </style>
             </head>
             <body>
-              <div style="width: 78mm; margin: 0 auto;">
+              <div style="width: 78mm; max-width: 100%; margin: 0 auto; padding: 2mm;">
                 ${element.innerHTML}
               </div>
               <script>
@@ -124,7 +124,7 @@ export const printThermalReceipt = async (element: HTMLElement) => {
                     window.focus();
                     window.print();
                     window.close();
-                  }, 500);
+                  }, 400);
                 };
               </script>
             </body>
@@ -138,3 +138,4 @@ export const printThermalReceipt = async (element: HTMLElement) => {
     }
   });
 };
+
