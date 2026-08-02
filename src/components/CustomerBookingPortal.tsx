@@ -27,6 +27,7 @@ import {
   ProductCategory,
   BookingRequest as BookingRequestType,
 } from "../types";
+import { decodeCustomerToken } from "../lib/tokenUtils";
 import { ledgerAutomation } from "../services/ledgerAutomation";
 import { QRCodeSVG } from "qrcode.react";
 import { motion, AnimatePresence } from "motion/react";
@@ -715,9 +716,11 @@ export function CustomerBookingPortal() {
       }
       if (bill.id) prevStatuses.current[bill.id] = bill.status;
     });
+  }, [bills, isAlarmSilenced]);
 
-    // Tracking assigned drivers
-    const driversToTrack = bills
+  // Optimized Driver Locations Tracking
+  const driversToTrackKey = React.useMemo(() => {
+    return bills
       .filter(
         (b) =>
           (b.status === "Assigned" ||
@@ -726,30 +729,65 @@ export function CustomerBookingPortal() {
             b.status === "Reached") &&
           b.driverId,
       )
-      .map((b) => b.driverId);
+      .map((b) => b.driverId)
+      .sort()
+      .join(",");
+  }, [bills]);
 
-    if (driversToTrack.length > 0) {
-      const unsubLocations = onSnapshot(
-        collection(db, "driverLocations"),
-        (snap) => {
-          const locs: any = {};
-          snap.docs.forEach((d) => {
-            if (driversToTrack.includes(d.id)) {
-              locs[d.id] = d.data();
-            }
-          });
-          setDriverLocations(locs);
-        },
-        (err: any) => {
-          console.error(
-            "Failed to fetch driver locations:",
-            err?.message || String(err),
-          );
-        },
-      );
-      return () => unsubLocations();
+  useEffect(() => {
+    if (!driversToTrackKey) {
+      setDriverLocations({});
+      return;
     }
-  }, [bills, isAlarmSilenced]);
+
+    const driverIds = driversToTrackKey.split(",");
+    const unsubLocations = onSnapshot(
+      collection(db, "driverLocations"),
+      (snap) => {
+        const locs: any = {};
+        snap.docs.forEach((d) => {
+          if (driverIds.includes(d.id)) {
+            locs[d.id] = d.data();
+          }
+        });
+
+        setDriverLocations((prev: Record<string, any>) => {
+          let hasChanged = false;
+          if (Object.keys(prev).length !== Object.keys(locs).length) {
+            hasChanged = true;
+          } else {
+            for (const id of driverIds) {
+              const oldL = prev[id];
+              const newL = locs[id];
+              if (!oldL && newL) {
+                hasChanged = true;
+                break;
+              }
+              if (
+                oldL &&
+                newL &&
+                (oldL.latitude !== newL.latitude ||
+                  oldL.longitude !== newL.longitude ||
+                  oldL.speed !== newL.speed)
+              ) {
+                hasChanged = true;
+                break;
+              }
+            }
+          }
+          return hasChanged ? locs : prev;
+        });
+      },
+      (err: any) => {
+        console.error(
+          "Failed to fetch driver locations:",
+          err?.message || String(err),
+        );
+      },
+    );
+
+    return () => unsubLocations();
+  }, [driversToTrackKey]);
 
   useEffect(() => {
     // Already handled in the modified block above
@@ -808,11 +846,21 @@ export function CustomerBookingPortal() {
   ]);
 
   useEffect(() => {
-    // Detect franchise from URL
+    // Detect franchise and encrypted customer token from URL
     const params = new URLSearchParams(window.location.search);
     const fId = params.get("f");
     if (fId) {
       setFranchiseId(fId);
+    }
+
+    const token = params.get("c") || params.get("customerToken") || params.get("token");
+    if (token) {
+      const decoded = decodeCustomerToken(token);
+      if (decoded?.mobile) {
+        bypassLoginByMobile(decoded.mobile);
+        localStorage.setItem("customerBookingMobile", decoded.mobile);
+        localStorage.setItem("isCustomerLoggedIn", "true");
+      }
     }
 
     // Fetch active franchises

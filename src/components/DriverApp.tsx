@@ -105,6 +105,8 @@ export function DriverApp() {
   const watchId = useRef<number | null>(null);
   const timerInterval = useRef<any>(null);
   const sirenRef = useRef<{ oscillator: OscillatorNode, audioContext: AudioContext } | null>(null);
+  const lastGpsUploadTime = useRef<number>(0);
+  const lastGpsCoords = useRef<{ lat: number; lng: number } | null>(null);
   
   const [isLogged, setIsLogged] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -379,7 +381,19 @@ export function DriverApp() {
           auth.signOut();
           alert("Your account is no longer Active. Contact admin.");
         } else {
-          setDriver({ id: snap.id, ...dData });
+          setDriver((prev: any) => {
+            if (
+              prev &&
+              prev.id === snap.id &&
+              prev.status === dData.status &&
+              prev.name === dData.name &&
+              prev.franchiseId === dData.franchiseId &&
+              prev.showDashboardToDriver === dData.showDashboardToDriver
+            ) {
+              return prev;
+            }
+            return { id: snap.id, ...dData };
+          });
         }
       }
     }, (error) => {
@@ -487,13 +501,36 @@ export function DriverApp() {
       async (pos) => {
         const { latitude, longitude, speed } = pos.coords;
         if (driver?.id) {
+          const now = Date.now();
+          const timeElapsed = now - lastGpsUploadTime.current;
+          let movedSignificantly = false;
+
+          if (lastGpsCoords.current) {
+            const dLat = Math.abs(latitude - lastGpsCoords.current.lat);
+            const dLng = Math.abs(longitude - lastGpsCoords.current.lng);
+            // ~0.00025 difference is approx 25 meters
+            if (dLat > 0.00025 || dLng > 0.00025) {
+              movedSignificantly = true;
+            }
+          } else {
+            movedSignificantly = true;
+          }
+
+          // Throttle: upload at most once every 6 seconds unless moved > 25m
+          if (timeElapsed < 6000 && !movedSignificantly) {
+            return;
+          }
+
+          lastGpsUploadTime.current = now;
+          lastGpsCoords.current = { lat: latitude, lng: longitude };
+
           try {
             await setDoc(doc(db, 'driverLocations', driver.id), {
               driverId: driver.id,
               driverName: driver?.name || 'Driver',
               latitude,
               longitude,
-              speed: (speed || 0) * 3.6, // km/h
+              speed: Math.round((speed || 0) * 3.6), // km/h
               lastUpdated: serverTimestamp(),
               isActive: true,
               franchiseId: driver?.franchiseId || 'legacy-rajhans'
@@ -507,7 +544,7 @@ export function DriverApp() {
         console.warn("Geolocation Notice:", err?.message || String(err));
         setIsTracking(false);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 5000 }
     );
   };
 

@@ -157,24 +157,18 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
     setIsSavingQuickPayment(true);
     try {
       const amount = Number(paymentForm.amount);
+      const targetFranchiseId = franchiseId || quickPaymentDriver.franchiseId || null;
       
-      // Use Professional Automation
+      // Post voucher to Ledger & update account balances
       await ledgerAutomation.postDriverPaymentToLedger(
         quickPaymentDriver,
         amount,
         paymentForm.paymentMethod,
-        paymentForm.description.trim()
+        paymentForm.description.trim(),
+        targetFranchiseId,
+        paymentForm.date
       );
 
-      // We still update the account balance for UI consistency if needed, 
-      // but the ledgerAutomation does the main work.
-      // However, if we want the 'currentBalance' on the account doc to be updated too,
-      // we should keep the transaction logic or rely on the automation to do it.
-      // The current ledgerAutomation only creates a voucher.
-      // Best is to do both in a transaction if we want consistency.
-      
-      // For now, let's keep it simple as per user request: "ledger m chali jaaye entry"
-      
       setQuickPaymentDriver(null);
       setPaymentForm({
         amount: '',
@@ -182,10 +176,10 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
         date: new Date().toISOString().split('T')[0],
         description: ''
       });
-      alert('Entry posted to Ledger successfully!');
+      alert('Driver payment entry posted to Ledger successfully!');
     } catch (error) {
       console.error('Error posting driver payment:', error instanceof Error ? error.message : String(error));
-      alert('Failed to post entry.');
+      alert('Failed to post entry to Ledger.');
     } finally {
       setIsSavingQuickPayment(false);
     }

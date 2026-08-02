@@ -540,57 +540,192 @@ export const ledgerAutomation = {
   /**
    * Posts a Payment/Deduction Voucher for a Driver
    */
-  postDriverPaymentToLedger: async (driver: any, amount: number, mode: string, description: string = '') => {
+  postDriverPaymentToLedger: async (
+    driver: any, 
+    amount: number, 
+    mode: string, 
+    description: string = '', 
+    franchiseId?: string | null,
+    paymentDate?: string
+  ) => {
     try {
+      const targetFranchiseId = franchiseId || driver.franchiseId || null;
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       const accounts = accountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Account));
 
-      // Debit: Driver Account (Decreases what we owe them - Liabilities accounts are naturally Cr)
-      // Credit: Cash/Bank/Penalty (Decreases our asset or increases our income)
-      
-      const driverAcc = accounts.find(a => a.driverId === driver.id) || 
-                       accounts.find(a => a.name.toLowerCase() === driver.name.toLowerCase());
-      
+      // 1. Locate or Auto-create Driver Ledger Account
+      let driverAcc = accounts.find(a => 
+        (a.driverId === driver.id) || 
+        (a.name.trim().toLowerCase() === driver.name.trim().toLowerCase() && (a.franchiseId === targetFranchiseId || !a.franchiseId))
+      );
+
+      if (!driverAcc) {
+        try {
+          const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+          let liabGroup = groupsSnap.docs.find(d => {
+            const data = d.data();
+            return data.name === 'Current Liabilities' && (data.franchiseId === targetFranchiseId || !data.franchiseId);
+          });
+          let liabGroupId = liabGroup?.id;
+
+          if (!liabGroupId) {
+            let parentLiab = groupsSnap.docs.find(d => d.data().name === 'Liabilities');
+            let parentLiabId = parentLiab?.id;
+            if (!parentLiabId) {
+              const newParent = await addDoc(collection(db, 'accountGroups'), {
+                name: 'Liabilities',
+                type: 'Liability',
+                franchiseId: targetFranchiseId,
+                createdAt: serverTimestamp()
+              });
+              parentLiabId = newParent.id;
+            }
+            const newSubGrp = await addDoc(collection(db, 'accountGroups'), {
+              name: 'Current Liabilities',
+              parentGroupId: parentLiabId,
+              type: 'Liability',
+              franchiseId: targetFranchiseId,
+              createdAt: serverTimestamp()
+            });
+            liabGroupId = newSubGrp.id;
+          }
+
+          const newAccRef = await addDoc(collection(db, 'accounts'), {
+            name: driver.name,
+            groupId: liabGroupId,
+            group: 'Current Liabilities',
+            openingBalance: 0,
+            currentBalance: 0,
+            balanceType: 'Cr',
+            driverId: driver.id,
+            franchiseId: targetFranchiseId,
+            createdAt: serverTimestamp()
+          });
+
+          driverAcc = {
+            id: newAccRef.id,
+            name: driver.name,
+            groupId: liabGroupId,
+            group: 'Current Liabilities',
+            openingBalance: 0,
+            currentBalance: 0,
+            balanceType: 'Cr',
+            driverId: driver.id,
+            franchiseId: targetFranchiseId
+          } as Account;
+        } catch (e) {
+          console.error("Failed to auto-create Driver ledger account:", e);
+        }
+      }
+
+      // 2. Locate or Auto-create Credit Account (Cash / Bank / Penalty)
       let creditAccName = '';
       if (mode === 'Cash') creditAccName = 'Cash';
       else if (mode === 'Bank') creditAccName = 'Bank of Baroda Operating A/c'; 
       else if (mode === 'Penalty') creditAccName = 'Penalty Recovery';
 
-      let creditAcc = accounts.find(a => a.name.toLowerCase() === creditAccName.toLowerCase());
+      let creditAcc = accounts.find(a => 
+        a.name.trim().toLowerCase() === creditAccName.toLowerCase() && 
+        (a.franchiseId === targetFranchiseId || !a.franchiseId)
+      );
 
-      // Fallback for Bank or general Penalty
-      if (mode === 'Bank' && !creditAcc) {
-          creditAcc = accounts.find(a => a.name === 'Bank Account') ||
-                      accounts.find(a => a.group === 'Bank Accounts' || a.name.toLowerCase().includes('bank'));
+      // Fallback searches
+      if (!creditAcc && mode === 'Cash') {
+        creditAcc = accounts.find(a => 
+          a.name.toLowerCase() === 'cash' || 
+          a.group === 'Cash-in-hand'
+        );
       }
-      if (mode === 'Penalty' && !creditAcc) {
-          creditAcc = accounts.find(a => a.name.toLowerCase().includes('penalty'));
+      if (!creditAcc && mode === 'Bank') {
+        creditAcc = accounts.find(a => 
+          a.name === 'Bank Account' || 
+          a.group === 'Bank Accounts' || 
+          a.name.toLowerCase().includes('bank')
+        );
+      }
+      if (!creditAcc && mode === 'Penalty') {
+        creditAcc = accounts.find(a => a.name.toLowerCase().includes('penalty'));
       }
 
-      // Proactive Fix: Create Penalty Recovery account if still missing
-      if (mode === 'Penalty' && !creditAcc) {
+      // Proactive Fix: Create Credit account if missing
+      if (!creditAcc) {
         try {
           const groupsSnap = await getDocs(collection(db, 'accountGroups'));
-          const incomeGroup = groupsSnap.docs.find(d => d.data().name === 'Direct Income' || d.data().name === 'Direct Incomes');
-          if (incomeGroup) {
+          if (mode === 'Penalty') {
+            let incomeGroup = groupsSnap.docs.find(d => d.data().name === 'Direct Income' || d.data().name === 'Direct Incomes');
+            let incomeGroupId = incomeGroup?.id;
+            if (!incomeGroupId) {
+              const newGrp = await addDoc(collection(db, 'accountGroups'), {
+                name: 'Direct Incomes',
+                type: 'Income',
+                franchiseId: targetFranchiseId,
+                createdAt: serverTimestamp()
+              });
+              incomeGroupId = newGrp.id;
+            }
             const newAccRef = await addDoc(collection(db, 'accounts'), {
               name: 'Penalty Recovery',
-              groupId: incomeGroup.id,
+              groupId: incomeGroupId,
               openingBalance: 0,
               balanceType: 'Cr',
               currentBalance: 0,
+              franchiseId: targetFranchiseId,
               createdAt: serverTimestamp()
             });
             creditAcc = { id: newAccRef.id, name: 'Penalty Recovery', balanceType: 'Cr', currentBalance: 0 } as Account;
+          } else if (mode === 'Cash') {
+            let cashGrp = groupsSnap.docs.find(d => d.data().name === 'Cash-in-hand');
+            let cashGrpId = cashGrp?.id;
+            if (!cashGrpId) {
+              const newGrp = await addDoc(collection(db, 'accountGroups'), {
+                name: 'Cash-in-hand',
+                type: 'Asset',
+                franchiseId: targetFranchiseId,
+                createdAt: serverTimestamp()
+              });
+              cashGrpId = newGrp.id;
+            }
+            const newAccRef = await addDoc(collection(db, 'accounts'), {
+              name: 'Cash',
+              groupId: cashGrpId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: 0,
+              franchiseId: targetFranchiseId,
+              createdAt: serverTimestamp()
+            });
+            creditAcc = { id: newAccRef.id, name: 'Cash', balanceType: 'Dr', currentBalance: 0 } as Account;
+          } else if (mode === 'Bank') {
+            let bankGrp = groupsSnap.docs.find(d => d.data().name === 'Bank Accounts');
+            let bankGrpId = bankGrp?.id;
+            if (!bankGrpId) {
+              const newGrp = await addDoc(collection(db, 'accountGroups'), {
+                name: 'Bank Accounts',
+                type: 'Asset',
+                franchiseId: targetFranchiseId,
+                createdAt: serverTimestamp()
+              });
+              bankGrpId = newGrp.id;
+            }
+            const newAccRef = await addDoc(collection(db, 'accounts'), {
+              name: 'Bank of Baroda Operating A/c',
+              groupId: bankGrpId,
+              openingBalance: 0,
+              balanceType: 'Dr',
+              currentBalance: 0,
+              franchiseId: targetFranchiseId,
+              createdAt: serverTimestamp()
+            });
+            creditAcc = { id: newAccRef.id, name: 'Bank of Baroda Operating A/c', balanceType: 'Dr', currentBalance: 0 } as Account;
           }
         } catch (e) {
-          console.error("Failed to auto-create Penalty account:", e instanceof Error ? e.message : String(e));
+          console.error("Failed to auto-create Credit account:", e instanceof Error ? e.message : String(e));
         }
       }
 
       if (!driverAcc || !creditAcc) {
         console.error(`Missing accounts for driver payment: Driver: ${!!driverAcc}, Credit: ${!!creditAcc} (${creditAccName})`);
-        return;
+        throw new Error(`Ledger account missing for driver or payment mode (${mode}).`);
       }
 
       const items: VoucherItem[] = [
@@ -610,21 +745,35 @@ export const ledgerAutomation = {
 
       const vchSnap = await getDocs(collection(db, 'vouchers'));
       const vchNumber = `DRV-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
+      const dateToUse = paymentDate || new Date().toISOString().slice(0, 10);
 
+      // Create Voucher in Firestore with franchiseId
       await addDoc(collection(db, 'vouchers'), {
         type: 'Payment',
         voucherNumber: vchNumber,
-        date: new Date().toISOString().slice(0, 10),
+        date: dateToUse,
         items,
-        narration: description || `Payment to ${driver.name} via ${mode}`,
+        narration: description || `Quick payment to ${driver.name} via ${mode}`,
         totalAmount: amount,
         driverId: driver.id,
+        franchiseId: targetFranchiseId,
         createdAt: serverTimestamp()
       });
+
+      // Update balances in driver account & payment/credit account
+      await updateDoc(doc(db, 'accounts', driverAcc.id!), {
+        currentBalance: (driverAcc.currentBalance || 0) - amount
+      });
+
+      const creditDelta = creditAcc.balanceType === 'Cr' ? amount : -amount;
+      await updateDoc(doc(db, 'accounts', creditAcc.id!), {
+        currentBalance: (creditAcc.currentBalance || 0) + creditDelta
+      });
       
-      console.log(`Auto-posted Driver Payment (${mode}) to Ledger.`);
+      console.log(`Auto-posted Driver Payment (${mode}, ₹${amount}) for ${driver.name} to Ledger.`);
     } catch (error) {
       console.error('Driver Payment Automation Error:', error instanceof Error ? error.message : String(error));
+      throw error;
     }
   },
 

@@ -1,73 +1,64 @@
 import { Bill } from '../types';
 import { db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { encodeCustomerToken } from './tokenUtils';
 
 /**
- * Formats a Bill and Franchise info into a highly polished Unicode WhatsApp Invoice
- * with payment links, itemized breakdown, and live tracking URLs.
+ * Formats a Bill and Franchise info into a clean digital WhatsApp message
+ * with live status link and encrypted customer rebook link in Hindi/English.
  */
 export const getWhatsAppBillLink = (bill: Bill, franchise?: any) => {
   const upiId = franchise?.upiId || "rajha94133@barodampay";
-  const franchiseName = franchise?.printName || franchise?.name || "TankerWala";
-  const printPhone = franchise?.printMobile || franchise?.operatorMobile || "94133 39987";
+  const franchiseName = franchise?.printName || franchise?.name || "राजहंस वाटर सप्लाई";
+  const printPhone = franchise?.printMobile || franchise?.operatorMobile || "9413339987";
 
-  // Public order live tracking and view URL
-  const orderUrl = `${window.location.origin}/?o=${bill.id}`;
-  // UPI Payment Protocol link
-  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(franchiseName)}&am=${bill.grandTotal}&cu=INR&tn=Bill%20${bill.billNumber}`;
+  const origin = window.location.origin;
 
-  let itemDesc = '';
-  if (bill.category === 'CAN') {
-    itemDesc = '20L RO Water Can';
-  } else if (bill.category === 'MONTHLY_CAN') {
-    itemDesc = '20L RO Water Can (Monthly Plan)';
+  // 1. Live Tanker Status Link
+  const statusUrl = `${origin}/?o=${bill.id}`;
+
+  // 2. Encrypted Customer Rebook Link
+  const encryptedToken = encodeCustomerToken(bill.customerMobile, bill.customerId);
+  const rebookUrl = `${origin}/?mode=booking&c=${encryptedToken}`;
+
+  // Item & capacity description
+  let capacityText = `${bill.tankerSize || '5000'}L (Litre Tanker)`;
+  if (bill.category === 'CAN' || bill.category === 'MONTHLY_CAN') {
+    capacityText = `20L RO Water Can (${bill.quantity || 1} Pcs)`;
   } else if (bill.category === 'BOTTLE') {
-    itemDesc = `Packaged Water (${bill.bottleSize || 'Standard'})`;
-  } else {
-    itemDesc = `Tanker ${bill.tankerSize || 'Std'}L`;
+    capacityText = `Bottled Water (${bill.bottleSize || '1L'}, ${bill.quantity || 1} Pcs)`;
   }
 
+  // Current status badge text matching portal status
+  const currentStatus = bill.status || 'Pending';
+  let statusBadge = 'Pending ⏳';
+  if (currentStatus === 'Assigned') statusBadge = 'Assigned 🚚';
+  else if (currentStatus === 'Filling') statusBadge = 'Filling 🚰';
+  else if (currentStatus === 'On the Way') statusBadge = 'On the Way 🛣️';
+  else if (currentStatus === 'Delivered') statusBadge = 'Delivered ✅';
+
   const message = 
-`*=========================*
-*🚛 TANKERWALA DIGITAL INVOICE*
-*=========================*
+`नमस्ते ${bill.customerName} जी! 💧
+आपकी वाटर सप्लाई का डिजिटल बिल:
 
-👤 *Customer Details:*
-• *Name:* ${bill.customerName}
-• *Mobile:* ${bill.customerMobile}
-• *Address:* ${bill.customerAddress || 'N/A'}
+🧾 बिल नं: #${bill.billNumber}
+💧 क्षमता/आइटम: ${capacityText}
+💰 कुल राशि: ₹${bill.grandTotal || bill.totalAmount}
+📌 भुगतान मोड: ${bill.paymentMode || 'Cash'}
 
----------------------------------
-*📄 BILL DETAILS:*
-• *Bill No:* #${bill.billNumber}
-• *Date:* ${new Date(bill.date).toLocaleDateString()}
-• *Status:* ${bill.status || 'Delivered'}
----------------------------------
+🚚 टैंकर स्टेटस: ${statusBadge}
+लाइव स्टेटस देखें:
+👉 ${statusUrl}
 
-*🛒 BILL ITEMS:*
-• *Item:* ${itemDesc}
-• *Quantity:* ${bill.quantity}
-• *Rate/Total Amount:* ₹${bill.totalAmount}
-${bill.extraCharges > 0 ? `• *Extra Charges:* ₹${bill.extraCharges}\n` : ''}
----------------------------------
-💰 *GRAND TOTAL:* *₹${bill.grandTotal}*
-💵 *Payment Mode:* *${bill.paymentMode}*
----------------------------------
+🔄 भविष्य में कभी भी 1-क्लिक में दोबारा टैंकर बुक करने के लिए यह लिंक दबाएं:
+👉 ${rebookUrl}
 
-*📲 CLICK TO PAY INSTANTLY VIA UPI:*
-👉 ${upiLink}
+यदि ऑनलाइन भुगतान करना चाहें (UPI ID: ${upiId}):
+upi://pay?pa=${upiId}&pn=${encodeURIComponent(franchiseName)}&am=${bill.grandTotal}&cu=INR
 
-*UPI ID Address:* ${upiId}
-
-*🌐 LIVE INVOICE & REBOOK LINK:*
-👉 ${orderUrl}
-
-*⚠️ ATTENTION CUSTOMER:*
-For booking support or new order delivery requests, please do not call the driver's number.
-📞 Direct Helpline: +91 ${printPhone}
-
-*Thank you from ${franchiseName} - Quality Pure Drinking Water* ☺
-*Powered by Rajhans*`;
+धन्यवाद!
+${franchiseName} 💧
+📞 हेल्पलाइन: +91 ${printPhone}`;
 
   // Filter non-digit characters to build correct phone number
   const cleanMobile = bill.customerMobile.replace(/\D/g, '');
@@ -94,3 +85,4 @@ export const openWhatsAppDirect = async (bill: Bill, franchise?: any) => {
   const url = getWhatsAppBillLink(bill, activeFranchise);
   window.open(url, '_blank');
 };
+

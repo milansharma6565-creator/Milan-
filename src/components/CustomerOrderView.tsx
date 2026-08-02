@@ -3,9 +3,19 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, addDoc, collection, serverTimestamp, onSnapshot, query, where, deleteDoc, getDocs } from 'firebase/firestore';
 import { Bill } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Truck, CheckCircle2, XCircle, Clock, RefreshCw, Phone, MapPin } from 'lucide-react';
+import { Truck, CheckCircle2, XCircle, Clock, RefreshCw, Phone, MapPin, ExternalLink, Droplets } from 'lucide-react';
 import { formatCurrency } from '../constants';
 import { Logo } from './Logo';
+import { encodeCustomerToken } from '../lib/tokenUtils';
+
+// Status pipeline definitions matching portal
+const STATUS_STAGES = [
+  { id: 'Pending', label: 'पेंडिंग ⏳', sub: 'स्वीकार की जा रही है' },
+  { id: 'Assigned', label: 'असाइन 🚚', sub: 'ड्राइवर असाइन हुआ' },
+  { id: 'Filling', label: 'भर रहा है 🚰', sub: 'टैंकर में पानी लोड हो रहा है' },
+  { id: 'On the Way', label: 'रास्ते में है 🛣️', sub: 'लाइव लोकेशन चालू है' },
+  { id: 'Delivered', label: 'डिलीवर हुआ ✅', sub: 'सफलतापूर्वक पहुंचा दिया गया' },
+];
 import { MapContainer, TileLayer, Marker as LeafletMarker, Polyline as LeafletPolyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -244,13 +254,18 @@ export function CustomerOrderView({ billId }: { billId: string }) {
     </div>
   );
 
+  const currentStatusIndex = STATUS_STAGES.findIndex(s => s.id === (bill.status || 'Pending'));
+  const activeStageIndex = currentStatusIndex >= 0 ? currentStatusIndex : 0;
+  
+  const rebookPortalUrl = `${window.location.origin}/?mode=booking&c=${encodeCustomerToken(bill.customerMobile, bill.customerId)}`;
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 md:p-10">
       <div className="max-w-md w-full">
-        <div className="flex flex-col items-center justify-center gap-3 mb-10">
+        <div className="flex flex-col items-center justify-center gap-3 mb-8">
           <Logo size={56} />
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">
-            Tanker<span className="relative text-blue-600">Wala<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">Powered by Rajhans</span></span>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight text-center">
+            राजहंस <span className="relative text-blue-600">वाटर सप्लाई<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">TankerWala Portal</span></span>
           </h1>
         </div>
 
@@ -259,44 +274,82 @@ export function CustomerOrderView({ billId }: { billId: string }) {
           animate={{ opacity: 1, y: 0 }}
           className="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 overflow-hidden"
         >
-          <div className="p-8 text-center bg-blue-600 text-white">
-            <div className="w-20 h-20 bg-white/20 rounded-3xl flex items-center justify-center mx-auto mb-4">
-              <Truck size={40} />
+          <div className="p-6 text-center bg-gradient-to-br from-blue-600 to-indigo-700 text-white relative">
+            <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-3">
+              <Truck size={36} />
             </div>
-            <h2 className="text-2xl font-bold">Bill Details</h2>
-            <p className="opacity-80">Bill #: {bill.billNumber}</p>
+            <h2 className="text-2xl font-black tracking-tight">लाइव टैंकर स्टेटस</h2>
+            <p className="text-xs opacity-90 font-medium">बिल नं: #{bill.billNumber}</p>
           </div>
 
-          <div className="p-8 space-y-6">
-            <div className="flex justify-between border-b border-slate-100 pb-4">
-              <span className="text-slate-400">Customer</span>
-              <span className="font-bold text-slate-900">{bill.customerName}</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-100 pb-4">
-              <span className="text-slate-400">Tanker Size</span>
-              <span className="font-bold text-slate-900">{bill.tankerSize}</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-100 pb-4">
-              <span className="text-slate-400">Amount Paid</span>
-              <span className="font-bold text-slate-900">{formatCurrency(bill.grandTotal)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Status</span>
-              <span className={`font-bold ${bill.status === 'Delivered' ? 'text-green-500' : 'text-orange-500'}`}>
-                {bill.status}
-              </span>
+          <div className="p-6 space-y-6">
+            {/* Live Pipeline Progress Tracker */}
+            <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
+              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <Droplets size={14} className="text-blue-600" />
+                टैंकर डिलीवरी प्रोग्रेस (Live Status)
+              </h3>
+              
+              <div className="relative pl-6 space-y-5 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+                {STATUS_STAGES.map((stage, idx) => {
+                  const isDone = idx < activeStageIndex;
+                  const isCurrent = idx === activeStageIndex;
+                  
+                  return (
+                    <div key={stage.id} className="relative flex items-start gap-3.5">
+                      <div 
+                        className={`absolute -left-[23px] top-0.5 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black transition-all ${
+                          isDone 
+                            ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200' 
+                            : isCurrent 
+                              ? 'bg-blue-600 text-white ring-4 ring-blue-100 animate-pulse' 
+                              : 'bg-slate-200 text-slate-400'
+                        }`}
+                      >
+                        {isDone ? '✓' : idx + 1}
+                      </div>
+
+                      <div className="flex-1">
+                        <div className={`font-bold text-sm ${isCurrent ? 'text-blue-600 text-base font-black' : isDone ? 'text-slate-800' : 'text-slate-400'}`}>
+                          {stage.label}
+                        </div>
+                        <p className="text-xs text-slate-400 font-medium leading-snug">
+                          {stage.sub}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
+            {/* Bill Details Info */}
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between border-b border-slate-100 pb-3">
+                <span className="text-slate-400 font-medium">ग्राहक का नाम:</span>
+                <span className="font-bold text-slate-900">{bill.customerName}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 pb-3">
+                <span className="text-slate-400 font-medium">टैंकर क्षमता/साइज:</span>
+                <span className="font-bold text-slate-900">{bill.tankerSize || '5000'}L Litre</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 pb-3">
+                <span className="text-slate-400 font-medium">कुल राशि (Amount):</span>
+                <span className="font-black text-emerald-600 text-base">{formatCurrency(bill.grandTotal || bill.totalAmount)}</span>
+              </div>
+            </div>
+
+            {/* Driver GPS Location */}
             {bill.driverId && driverLocation && (
-              <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-slate-50 rounded-3xl p-4 border border-slate-100">
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600">
                       <Truck size={20} />
                     </div>
                     <div>
-                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Driver Details</p>
-                       <h4 className="font-bold text-slate-900">{bill.driverName}</h4>
+                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">ड्राइवर संपर्क</p>
+                       <h4 className="font-bold text-slate-900">{bill.driverName || 'राजहंस ड्राइवर'}</h4>
                     </div>
                   </div>
                   {bill.driverMobile && (
@@ -309,14 +362,14 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                 <div className="flex items-center justify-between mb-3 px-1">
                    <div className="flex items-center gap-1.5 font-black text-[10px] text-blue-500 uppercase">
                      <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
-                     Live Tracking Active
+                     लाइव जीपीएस ट्रैकिंग Active
                    </div>
                    <div className="text-[10px] font-bold text-slate-400 uppercase">
                      {Math.round(driverLocation.speed || 0)} KM/H
                    </div>
                 </div>
 
-                <div className="h-56 rounded-2xl overflow-hidden relative border-2 border-white shadow-lg bg-slate-100">
+                <div className="h-52 rounded-2xl overflow-hidden relative border-2 border-white shadow-lg bg-slate-100">
                   <CustomerLiveMap
                     driverLoc={{ lat: driverLocation.latitude, lng: driverLocation.longitude }}
                     customerLoc={bill.deliveryLocation && bill.deliveryLocation.lat && bill.deliveryLocation.lng ? { lat: bill.deliveryLocation.lat, lng: bill.deliveryLocation.lng } : undefined}
@@ -325,55 +378,45 @@ export function CustomerOrderView({ billId }: { billId: string }) {
               </div>
             )}
 
-            {requestStatus === 'none' && (
-              <div className="pt-6 space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest pl-1">Special Instructions / Remarks</label>
-                  <textarea 
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    placeholder="E.g. Call before coming, Deliver at back gate..."
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all min-h-[100px]"
-                  />
-                </div>
+            {/* Direct 1-Click Rebook Portal Redirect */}
+            <div className="pt-2 space-y-3">
+              <a 
+                href={rebookPortalUrl}
+                className="w-full bg-slate-900 text-white h-14 rounded-2xl font-bold shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all flex items-center justify-center gap-2.5 text-sm"
+              >
+                <ExternalLink size={18} className="text-blue-400" />
+                🔄 भविष्य के लिए 1-क्लिक री-बुकिंग पोर्टल खोलें
+              </a>
+
+              {requestStatus === 'none' && (
                 <button 
                   onClick={handleRebook}
-                  className="w-full bg-blue-600 text-white h-14 rounded-2xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-3"
+                  className="w-full bg-blue-600 text-white h-12 rounded-2xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-2 text-sm"
                 >
-                  <RefreshCw size={20} />
-                  Rebook Same Order
+                  <RefreshCw size={18} />
+                  इसी ऑर्डर को दोबारा भेजें (Instant Rebook)
                 </button>
-              </div>
-            )}
+              )}
 
-            {requestStatus === 'pending' && (
-              <div className="pt-6 space-y-4">
-                <div className="bg-orange-50 p-6 rounded-3xl text-center border border-orange-100">
-                  <Clock className="text-orange-500 mx-auto mb-3 animate-pulse" size={40} />
-                  <h3 className="font-bold text-orange-900">Rebooking Pending</h3>
-                  <p className="text-sm text-orange-700 mt-1">Admin is reviewing your request. Please wait...</p>
+              {requestStatus === 'pending' && (
+                <div className="bg-orange-50 p-4 rounded-2xl text-center border border-orange-100">
+                  <Clock className="text-orange-500 mx-auto mb-2 animate-pulse" size={32} />
+                  <h3 className="font-bold text-orange-900 text-sm">री-बुकिंग रिक्वेस्ट पेंडिंग है</h3>
+                  <p className="text-xs text-orange-700 mt-0.5">एडमिन आपकी नई बुकिंग स्वीकार कर रहा है...</p>
+                  <button 
+                    onClick={handleCancelRequest}
+                    className="mt-3 text-xs text-slate-500 underline font-semibold"
+                  >
+                    रिक्वेस्ट रद्द करें
+                  </button>
                 </div>
-                <button 
-                  onClick={handleCancelRequest}
-                  className="w-full bg-slate-100 text-slate-600 h-10 rounded-xl text-sm font-bold active:scale-95 transition-all"
-                >
-                  Cancel Request
-                </button>
-              </div>
-            )}
-
-            {requestStatus === 'accepted' && (
-              <div className="pt-6 bg-green-50 p-6 rounded-3xl text-center border border-green-100">
-                <CheckCircle2 className="text-green-500 mx-auto mb-3" size={40} />
-                <h3 className="font-bold text-green-900">Order Accepted!</h3>
-                <p className="text-sm text-green-700 mt-1">Your new trip is being scheduled. Driver will contact you soon.</p>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </motion.div>
         
-        <p className="mt-8 text-center text-slate-400 text-xs font-semibold uppercase tracking-widest pb-4">
-            Tanker<span className="relative text-blue-600">Wala<span className="absolute top-[90%] left-0 text-[8px] text-slate-400 font-medium whitespace-nowrap tracking-normal normal-case mt-0.5">Powered by Rajhans</span></span>
+        <p className="mt-6 text-center text-slate-400 text-xs font-bold uppercase tracking-widest pb-4">
+            राजहंस <span className="relative text-blue-600">वाटर सप्लाई</span>
         </p>
       </div>
     </div>
