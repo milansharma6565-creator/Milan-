@@ -53,7 +53,6 @@ import { printThermalReceipt } from '../lib/printUtils';
 import { openWhatsAppDirect } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
-import CloudPrintGateway from './CloudPrintGateway';
 import { QRCodeSVG } from 'qrcode.react';
 import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -5630,12 +5629,6 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           />
         )}
       </AnimatePresence>
-
-      {franchiseId && (
-        <div className="mt-8">
-          <CloudPrintGateway franchiseId={franchiseId} userName={auth.currentUser?.displayName || 'Operator'} />
-        </div>
-      )}
     </div>
   );
 }

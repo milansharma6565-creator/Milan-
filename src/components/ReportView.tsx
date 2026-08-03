@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, where, getDoc, runTransaction, orderBy, serverTimestamp, getDocs } from 'firebase/firestore';
 import { Customer, Bill } from '../types';
-import { Download, Calendar, CheckSquare, ListFilter, MapPin, AlertCircle, Printer, XCircle, Send, Clock, ShieldCheck, Mail, MessageSquare, BookOpen, FileDown, CheckCircle, CloudLightning } from 'lucide-react';
+import { Download, Calendar, CheckSquare, ListFilter, MapPin, AlertCircle, Printer, XCircle, Send, Clock, ShieldCheck, Mail, MessageSquare, BookOpen, FileDown, CheckCircle } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { formatCurrency } from '../constants';
 import { motion, AnimatePresence } from 'motion/react';
@@ -384,29 +384,6 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
     }
   };
 
-  const handleRemotePrintQueue = async (bill: any) => {
-    if (!bill) return;
-    try {
-      await addDoc(collection(db, 'print_jobs'), {
-        franchiseId: bill.franchiseId || franchiseId || 'legacy-rajhans',
-        billId: bill.id || '',
-        billNumber: bill.billNumber || '',
-        customerName: bill.customerName || '',
-        status: 'pending',
-        createdAt: serverTimestamp(),
-        billData: {
-          ...bill,
-          date: bill.date instanceof Date ? bill.date.toISOString() : (bill.date?.seconds ? new Date(bill.date.seconds * 1000).toISOString() : String(bill.date))
-        }
-      });
-      alert("Print command sent to desktop! ☁️\n\n(Remote print command has been successfully sent to the desktop printer)");
-      setSelectedBillForPrint(null);
-    } catch (e: any) {
-      console.error("Failed to queue remote print:", e);
-      alert("Error sending remote print job: " + e.message);
-    }
-  };
-
   if (!reportData) return null;
 
   return (
@@ -444,13 +421,6 @@ export function ReportView({ franchiseId, isSuperAdmin }: { franchiseId?: string
                   className="w-full material-btn material-btn-primary flex items-center justify-center gap-2 py-4 shadow-xl shadow-blue-100"
                 >
                   <Printer size={20} /> Confirm Re-print
-                </button>
-                <button 
-                  onClick={() => handleRemotePrintQueue(selectedBillForPrint)}
-                  className="w-full font-extrabold text-blue-700 bg-blue-50 border border-blue-200 rounded-2xl hover:bg-blue-100 flex items-center justify-center gap-2 py-4 min-h-[56px] shadow-sm transition-all active:scale-95 duration-150"
-                >
-                  <CloudLightning size={20} className="animate-bounce text-blue-600" />
-                  Remote Desktop Print ☁️
                 </button>
               </div>
             </motion.div>

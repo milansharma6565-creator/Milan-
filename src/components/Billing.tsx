@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp, doc, getDoc, runTransaction, orderBy, limit, setDoc } from 'firebase/firestore';
 import { Customer, Driver, Bill } from '../types';
-import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare, CloudLightning } from 'lucide-react';
+import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES, getPublicAppUrl } from '../constants';
 import { ThermalInvoice } from './ThermalInvoice';
@@ -609,28 +609,6 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
   const sendWhatsApp = (bill: any) => {
     shareBillImage(bill);
-  };
-
-  const handleRemotePrintQueue = async (bill: any) => {
-    if (!bill) return;
-    try {
-      await addDoc(collection(db, 'print_jobs'), {
-        franchiseId: bill.franchiseId || franchiseId || 'legacy-rajhans',
-        billId: bill.id || '',
-        billNumber: bill.billNumber || '',
-        customerName: bill.customerName || '',
-        status: 'pending',
-        createdAt: serverTimestamp(),
-        billData: {
-          ...bill,
-          date: bill.date instanceof Date ? bill.date.toISOString() : (bill.date?.seconds ? new Date(bill.date.seconds * 1000).toISOString() : String(bill.date))
-        }
-      });
-      alert("Print command sent to desktop! ☁️\n\n(Remote print command has been successfully sent to the desktop printer)");
-    } catch (e: any) {
-      console.error("Failed to queue remote print:", e);
-      alert("Error sending remote print job: " + e.message);
-    }
   };
 
   const sendDriverWhatsApp = (bill: any, driver: Driver) => {
@@ -1612,13 +1590,6 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 >
                   <MessageSquare size={24} />
                   Send on WhatsApp
-                </button>
-                <button 
-                  onClick={() => handleRemotePrintQueue(bookedBill)}
-                  className="h-16 font-extrabold text-blue-700 bg-blue-50 border border-blue-200 rounded-2xl hover:bg-blue-100 transition-all flex items-center justify-center gap-3 active:scale-95"
-                >
-                  <CloudLightning size={24} className="animate-bounce" />
-                  Remote Desktop Print ☁️
                 </button>
                 <div className="grid grid-cols-2 gap-3">
                   <button 
