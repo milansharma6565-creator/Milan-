@@ -937,11 +937,17 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       },
       (error) => console.log('Feedbacks err:', error?.message || error)
     );
-    const unsubRequests = onSnapshot(requestsQ,
+    const unsubRequests = onSnapshot(query(collection(db, 'bookingRequests'), where('status', '==', 'Pending')),
       (snapshot) => {
-        const sorted = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a: any, b: any) => {
-          const timeA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : 0;
-          const timeB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : 0;
+        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const filtered = docs.filter((r: any) => {
+          if (isSuperAdmin || !fid || fid === 'PLACEHOLDER_NONE') return true;
+          if (!r.franchiseId || r.franchiseId === fid || r.franchiseId === 'legacy-rajhans') return true;
+          return false;
+        });
+        const sorted = filtered.sort((a: any, b: any) => {
+          const timeA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0);
+          const timeB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0);
           return timeB - timeA;
         });
         setBookingRequests(sorted);

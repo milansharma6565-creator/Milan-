@@ -206,13 +206,18 @@ export function CustomerOrderView({ billId }: { billId: string }) {
     try {
       await addDoc(collection(db, 'bookingRequests'), {
         billId: bill.id,
-        customerId: bill.customerId,
-        customerName: bill.customerName,
-        customerMobile: bill.customerMobile,
-        tankerSize: bill.tankerSize,
+        franchiseId: bill.franchiseId || 'legacy-rajhans',
+        customerId: bill.customerId || '',
+        customerName: bill.customerName || '',
+        customerMobile: bill.customerMobile || '',
+        tankerSize: bill.tankerSize || 'Standard',
+        category: bill.category || 'TANKER',
+        totalEstimate: bill.grandTotal || bill.totalAmount || 0,
         remarks: remarks.trim(),
         status: 'Pending',
         requestedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'bookingRequests');
