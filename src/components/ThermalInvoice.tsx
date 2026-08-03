@@ -49,16 +49,22 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
 
   return (
     <div 
-      className="thermal-receipt-container bg-white p-2.5 text-black select-none" 
+      className="thermal-receipt-container bg-white p-3 text-black select-none border-2 border-black" 
       style={{ width: '76mm', maxWidth: '100%', margin: '0 auto', fontFamily: 'system-ui, -apple-system, sans-serif' }}
     >
-      {/* Header Branding with TankerWala Logo & Leaf Symbol */}
+      {/* Header Branding with Official TankerWala Logo */}
       <div className="flex flex-col items-center pb-2 mb-2 text-center">
-        {/* Minimalist Leaf/Drop SVG Icon */}
-        <div className="mb-1">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-black mx-auto">
-            <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.4 19 2c1 2 2 4.1 2 7 0 6-4.5 11-10 11z"></path>
-            <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"></path>
+        {/* Official TankerWala Water Tanker / Water Drop Icon SVG */}
+        <div className="mb-1.5 flex items-center justify-center">
+          <svg width="36" height="36" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-black mx-auto">
+            {/* Water Drop Outline */}
+            <path d="M50 8C50 8 20 45 20 65C20 81.5685 33.4315 95 50 95C66.5685 95 80 81.5685 80 65C80 45 50 8 50 8Z" stroke="currentColor" strokeWidth="6" strokeLinejoin="round" fill="none" />
+            {/* Inner Water Tanker Truck Silhouette */}
+            <rect x="34" y="48" width="22" height="16" rx="2" fill="currentColor" />
+            <path d="M56 54H66L70 60V64H56V54Z" fill="currentColor" />
+            <circle cx="41" cy="65" r="3.5" fill="white" stroke="currentColor" strokeWidth="2" />
+            <circle cx="63" cy="65" r="3.5" fill="white" stroke="currentColor" strokeWidth="2" />
+            <path d="M28 72C35 76 45 76 50 72C55 68 65 68 72 72" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
           </svg>
         </div>
 
