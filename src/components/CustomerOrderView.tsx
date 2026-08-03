@@ -378,39 +378,60 @@ export function CustomerOrderView({ billId }: { billId: string }) {
               </div>
             )}
 
-            {/* Direct 1-Click Rebook Portal Redirect */}
-            <div className="pt-2 space-y-3">
-              <a 
-                href={rebookPortalUrl}
-                className="w-full bg-slate-900 text-white h-14 rounded-2xl font-bold shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all flex items-center justify-center gap-2.5 text-sm"
-              >
-                <ExternalLink size={18} className="text-blue-400" />
-                🔄 भविष्य के लिए 1-क्लिक री-बुकिंग पोर्टल खोलें
-              </a>
-
-              {requestStatus === 'none' && (
-                <button 
-                  onClick={handleRebook}
-                  className="w-full bg-blue-600 text-white h-12 rounded-2xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-2 text-sm"
-                >
-                  <RefreshCw size={18} />
-                  इसी ऑर्डर को दोबारा भेजें (Instant Rebook)
-                </button>
-              )}
-
-              {requestStatus === 'pending' && (
-                <div className="bg-orange-50 p-4 rounded-2xl text-center border border-orange-100">
-                  <Clock className="text-orange-500 mx-auto mb-2 animate-pulse" size={32} />
-                  <h3 className="font-bold text-orange-900 text-sm">री-बुकिंग रिक्वेस्ट पेंडिंग है</h3>
-                  <p className="text-xs text-orange-700 mt-0.5">एडमिन आपकी नई बुकिंग स्वीकार कर रहा है...</p>
-                  <button 
-                    onClick={handleCancelRequest}
-                    className="mt-3 text-xs text-slate-500 underline font-semibold"
-                  >
-                    रिक्वेस्ट रद्द करें
-                  </button>
+            {/* Direct 1-Click Rebook Option at Bottom */}
+            <div className="pt-4 border-t border-slate-100 space-y-3">
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50/70 p-4 rounded-2xl border border-blue-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
+                    <RefreshCw size={16} />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm text-slate-900">दोबारा ऑर्डर करें (Rebook Tanker)</h3>
+                    <p className="text-[11px] text-slate-500 font-medium">1-क्लिक में नया टैंकर या वाटर केन बुक करें</p>
+                  </div>
                 </div>
-              )}
+
+                {requestStatus === 'none' && (
+                  <div className="space-y-2 mt-3">
+                    <button 
+                      onClick={handleRebook}
+                      className="w-full bg-blue-600 text-white h-12 rounded-xl font-black shadow-md hover:bg-blue-700 transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+                    >
+                      <RefreshCw size={18} />
+                      इसी ऑर्डर को दोबारा भेजें (Instant Rebook)
+                    </button>
+                    <a 
+                      href={rebookPortalUrl}
+                      className="w-full bg-slate-900 text-white h-11 rounded-xl font-bold shadow-xs hover:bg-slate-800 transition-all flex items-center justify-center gap-2 text-xs"
+                    >
+                      <ExternalLink size={15} className="text-blue-400" />
+                      पूरा कस्टमर बुकिंग पोर्टल खोलें (Full Portal)
+                    </a>
+                  </div>
+                )}
+
+                {requestStatus === 'pending' && (
+                  <div className="bg-white p-3.5 rounded-xl text-center border border-orange-200 mt-2 shadow-xs">
+                    <Clock className="text-orange-500 mx-auto mb-1 animate-pulse" size={28} />
+                    <h3 className="font-black text-orange-900 text-xs">आपकी री-बुकिंग रिक्वेस्ट भेजी जा चुकी है</h3>
+                    <p className="text-[11px] text-orange-700 mt-0.5">एडमिन आपकी नई बुकिंग स्वीकार कर रहा है...</p>
+                    <button 
+                      onClick={handleCancelRequest}
+                      className="mt-2 text-xs text-red-500 underline font-extrabold cursor-pointer"
+                    >
+                      रिक्वेस्ट रद्द करें
+                    </button>
+                  </div>
+                )}
+
+                {requestStatus === 'accepted' && (
+                  <div className="bg-emerald-50 p-3.5 rounded-xl text-center border border-emerald-200 mt-2">
+                    <CheckCircle2 className="text-emerald-600 mx-auto mb-1" size={28} />
+                    <h3 className="font-black text-emerald-900 text-xs">आपकी बुकिंग स्वीकार कर ली गई है!</h3>
+                    <p className="text-[11px] text-emerald-700 mt-0.5">जल्द ही नया टैंकर असाइन किया जाएगा।</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </motion.div>

@@ -14,12 +14,8 @@ export const getWhatsAppBillLink = (bill: Bill, franchise?: any) => {
 
   const origin = window.location.origin;
 
-  // 1. Live Tanker Status Link
-  const statusUrl = `${origin}/?o=${bill.id}`;
-
-  // 2. Encrypted Customer Rebook Link
-  const encryptedToken = encodeCustomerToken(bill.customerMobile, bill.customerId);
-  const rebookUrl = `${origin}/?mode=booking&c=${encryptedToken}`;
+  // Single Live Tanker Status & Rebook Link (Customer Portal)
+  const portalUrl = `${origin}/?o=${bill.id}`;
 
   // Item & capacity description
   let capacityText = `${bill.tankerSize || '5000'}L (Litre Tanker)`;
@@ -34,7 +30,8 @@ export const getWhatsAppBillLink = (bill: Bill, franchise?: any) => {
   let statusBadge = 'Pending ⏳';
   if (currentStatus === 'Assigned') statusBadge = 'Assigned 🚚';
   else if (currentStatus === 'Filling') statusBadge = 'Filling 🚰';
-  else if (currentStatus === 'On the Way') statusBadge = 'On the Way 🛣️';
+  else if (currentStatus === 'On the way' as any || currentStatus === 'On the Way' as any) statusBadge = 'On the Way 🛣️';
+  else if (currentStatus === 'Scheduled') statusBadge = 'Scheduled 📅';
   else if (currentStatus === 'Delivered') statusBadge = 'Delivered ✅';
 
   const message = 
@@ -46,12 +43,10 @@ export const getWhatsAppBillLink = (bill: Bill, franchise?: any) => {
 💰 कुल राशि: ₹${bill.grandTotal || bill.totalAmount}
 📌 भुगतान मोड: ${bill.paymentMode || 'Cash'}
 
-🚚 टैंकर स्टेटस: ${statusBadge}
-लाइव स्टेटस देखें:
-👉 ${statusUrl}
+🚚 स्टेटस: ${statusBadge}
 
-🔄 भविष्य में कभी भी 1-क्लिक में दोबारा टैंकर बुक करने के लिए यह लिंक दबाएं:
-👉 ${rebookUrl}
+🌐 लाइव ट्रैक करें व दोबारा ऑर्डर (Rebook) करें:
+👉 ${portalUrl}
 
 यदि ऑनलाइन भुगतान करना चाहें (UPI ID: ${upiId}):
 upi://pay?pa=${upiId}&pn=${encodeURIComponent(franchiseName)}&am=${bill.grandTotal}&cu=INR

@@ -123,8 +123,11 @@ export interface Bill {
     address: string;
     mapLink?: string;
   };
-  status: 'Delivered' | 'Pending' | 'Filling' | 'Cancelled' | 'Printed' | 'Assigned' | 'On the way' | 'Reached';
+  status: 'Delivered' | 'Pending' | 'Filling' | 'Cancelled' | 'Printed' | 'Assigned' | 'On the way' | 'Reached' | 'Scheduled';
   isSettled: boolean;
+  isScheduled?: boolean;
+  scheduledDate?: string;
+  scheduledStatus?: 'Pending_Activation' | 'Activated';
   remarks?: string;
   createdAt: any;
   completedAt?: any;

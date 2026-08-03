@@ -13,6 +13,7 @@ import { toJpeg } from 'html-to-image';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 import { LocationPicker } from './LocationPicker';
 import { activityLogger } from '../services/activityLogger';
+import { scheduledBillsService } from '../services/scheduledBillsService';
 import { QRCodeSVG } from 'qrcode.react';
 
 export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPercentage, currentFranchise }: { 
@@ -254,6 +255,22 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
     const timer = setTimeout(checkName, 500);
     return () => clearTimeout(timer);
   }, [quickAddForm.name, quickAddForm.mobile, isQuickAdding]);
+
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().slice(0, 10);
+  });
+
+  // Background check & auto-activation for scheduled bills
+  useEffect(() => {
+    scheduledBillsService.checkAndActivateScheduledBills(franchiseId);
+    const interval = setInterval(() => {
+      scheduledBillsService.checkAndActivateScheduledBills(franchiseId);
+    }, 20000);
+    return () => clearInterval(interval);
+  }, [franchiseId]);
 
   const [form, setForm] = useState({
     billNumber: '',
@@ -518,7 +535,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
     const phone = cleanMobile.startsWith('91') ? cleanMobile : `91${cleanMobile}`;
     
     const orderUrl = `${window.location.origin}/?o=${bill.id}`;
-    const message = `🙏 *Greetings from ${franchiseNameText}* 💧\n\nThank you for choosing us for pure and quality drinking water! Here is your thermal bill #${bill.billNumber} for amount *₹${bill.grandTotal}*.\n\n*🌐 LIVE BILL & TRACKING LINK:*\n👉 ${orderUrl}\n\nHave a wonderful and healthy day! 🙏🌸`;
+    const message = `🙏 *Greetings from ${franchiseNameText}* 💧\n\nThank you for choosing us for pure and quality drinking water! Here is your thermal bill #${bill.billNumber} for amount *₹${bill.grandTotal}*.\n\n*🌐 LIVE STATUS & REBOOK LINK / लाइव ट्रैक करें व दोबारा बुक करें:*\n👉 ${orderUrl}\n\nHave a wonderful and healthy day! 🙏🌸`;
 
     try {
       // Capture the thermal receipt as JPEG
@@ -736,6 +753,62 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       setIsSubmitting(false);
       submissionRef.current = false;
     };
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const isFutureScheduled = isScheduled && scheduledDate > todayStr;
+
+    if (isFutureScheduled) {
+      try {
+        const newBillRef = doc(collection(db, 'bills'));
+        const tempSchedNum = `SCHED-${scheduledDate.replace(/-/g, '')}-${Math.floor(100 + Math.random()*900)}`;
+        const storeData = {
+          ...billData,
+          billNumber: tempSchedNum,
+          isScheduled: true,
+          scheduledDate: scheduledDate,
+          scheduledStatus: 'Pending_Activation',
+          status: 'Scheduled',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
+        await setDoc(newBillRef, storeData);
+        
+        await activityLogger.log({
+          franchiseId: franchiseId || currentFranchise?.id || '',
+          franchiseName: currentFranchise?.name || 'Franchise',
+          userEmail: '',
+          actionType: 'NEW_BILL',
+          description: `Created SCHEDULED Booking for Customer "${selectedCustomer.name}" on ${scheduledDate}. Total: ₹${grandTotal}`,
+          details: { billId: newBillRef.id, scheduledDate, total: grandTotal }
+        });
+
+        alert(`📅 शेड्यूल बुकिंग सफलतापूर्वक दर्ज हो गई!\n\nयह बिल ${scheduledDate} को ऑटोमैटिक उस दिन के सही बिल सीरियल नंबर (Serial No.) के साथ Recent Bills में आ जाएगा।`);
+
+        // Reset form
+        setIsScheduled(false);
+        setForm(prev => ({
+          ...prev,
+          quantity: 1,
+          extraCharges: 0,
+          discount: 0,
+          driverId: '',
+          driverName: '',
+          remarks: ''
+        }));
+        setDeliveryLocation(null);
+        setShowMap(false);
+        setIncludePendingDues(false);
+        setPendingBills([]);
+        return;
+      } catch (err: any) {
+        console.error("Failed to save scheduled booking:", err);
+        alert("Scheduled booking failed: " + err.message);
+        return;
+      } finally {
+        setIsSubmitting(false);
+        submissionRef.current = false;
+      }
+    }
 
     if (!navigator.onLine) {
       useOfflineWorkflow();
@@ -1306,6 +1379,59 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
             />
           </div>
 
+          {/* Schedule Booking Option */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50/60 border border-blue-200/80 rounded-2xl p-4 mt-5 space-y-3 shadow-xs">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isScheduled}
+                  onChange={(e) => setIsScheduled(e.target.checked)}
+                  className="w-5 h-5 rounded-md border-blue-400 text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600 transition-all"
+                />
+                <div>
+                  <span className="font-black text-sm text-slate-800 flex items-center gap-1.5">
+                    📅 Schedule Booking / अग्रिम बुकिंग
+                  </span>
+                  <p className="text-[11px] text-slate-500 font-medium">भविष्य की तारीख के लिए बिल शेड्यूल करें</p>
+                </div>
+              </label>
+              {isScheduled && (
+                <span className="bg-blue-600 text-white text-[10px] font-black uppercase px-2.5 py-1 rounded-full animate-pulse shadow-xs">
+                  Schedule Active
+                </span>
+              )}
+            </div>
+
+            <AnimatePresence>
+              {isScheduled && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="pt-2 border-t border-blue-200/60 overflow-hidden space-y-2.5"
+                >
+                  <label className="text-[10px] font-bold text-blue-900 uppercase tracking-widest block">
+                    बुकिंग की तारीख चुने (Select Delivery Date)
+                  </label>
+                  <input
+                    type="date"
+                    min={new Date().toISOString().slice(0, 10)}
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    className="w-full bg-white border border-blue-300 rounded-xl px-4 py-2.5 font-extrabold text-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none shadow-xs"
+                  />
+                  <div className="bg-white/90 p-3 rounded-xl border border-blue-200 text-xs font-semibold text-blue-950 flex items-start gap-2.5 leading-relaxed">
+                    <span className="text-base shrink-0">ℹ️</span>
+                    <span>
+                      यह बिल चुना गया दिन आते ही उस दिन के <strong>अगले बिल सीरियल नंबर (Serial Number)</strong> के साथ ऑटोमैटिक <strong>'Recent Bills'</strong> में आ जाएगा।
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           <div className="bg-slate-900 p-6 rounded-3xl mt-8 text-white relative overflow-hidden">
             <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/20 blur-3xl rounded-full translate-x-10 -translate-y-10" />
             <div className="relative z-10">
@@ -1514,7 +1640,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
               </div>
 
               {/* Hidden Thermal Invoice for JPG Capture */}
-              <div className="fixed top-[-9999px] left-[-9999px] pointer-events-none">
+              <div className="absolute top-0 left-[-9999px] pointer-events-none bg-white">
                 <div ref={thermalRef}>
                   <ThermalInvoice bill={bookedBill} />
                 </div>

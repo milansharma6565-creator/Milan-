@@ -60,6 +60,7 @@ import { ConfirmationModal } from './ConfirmationModal';
 import { X as LucideX } from 'lucide-react';
 import { SandboxSimulatorHub } from './SandboxSimulatorHub';
 import { ledgerAutomation } from '../services/ledgerAutomation';
+import { scheduledBillsService } from '../services/scheduledBillsService';
 
 const parseFirestoreDate = (val: any): Date => {
   if (!val) return new Date();
@@ -762,7 +763,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .sort((a: any, b: any) => b.activeTripCount - a.activeTripCount);
   }, [stats.driverStats, driverTripPeriod]);
   const [billSortOption, setBillSortOption] = useState<'Default' | 'Number' | 'Time'>('Default');
-  const [billStatusTab, setBillStatusTab] = useState<'Recent' | 'Delivered' | 'Cancelled' | 'All'>('Recent');
+  const [billStatusTab, setBillStatusTab] = useState<'Recent' | 'Delivered' | 'Cancelled' | 'Scheduled' | 'All'>('Recent');
   const [quickVoucher, setQuickVoucher] = useState<{
     type: 'Receipt' | 'Payment';
     paymentMethod: 'Cash' | 'Bank';
@@ -893,6 +894,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
     // Apply Franchise Filter if present
     const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
+
+    // Run scheduled bills auto-activation check on load and interval
+    scheduledBillsService.checkAndActivateScheduledBills(fid || undefined);
+    const schedInterval = setInterval(() => {
+      scheduledBillsService.checkAndActivateScheduledBills(fid || undefined);
+    }, 20000);
     if (fid) {
       billsQ = query(collection(db, 'bills'), where('franchiseId', '==', fid), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
       requestsQ = query(collection(db, 'bookingRequests'), where('franchiseId', '==', fid), where('status', '==', 'Pending'));
@@ -1137,7 +1144,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     }
 
     if (billStatusTab === 'Recent') {
-      result = result.filter(b => b.status !== 'Delivered' && b.status !== 'Cancelled');
+      result = result.filter(b => b.status !== 'Delivered' && b.status !== 'Cancelled' && b.status !== 'Scheduled' && !(b.isScheduled && b.scheduledStatus === 'Pending_Activation'));
+    } else if (billStatusTab === 'Scheduled') {
+      result = result.filter(b => b.status === 'Scheduled' || (b.isScheduled && b.scheduledStatus === 'Pending_Activation'));
     } else if (billStatusTab === 'Delivered') {
       result = result.filter(b => b.status === 'Delivered');
     } else if (billStatusTab === 'Cancelled') {
@@ -4414,6 +4423,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         >
           {[
             { id: 'Recent', label: 'Recent Bills 🚛' },
+            { id: 'Scheduled', label: 'Scheduled 📅' },
             { id: 'Delivered', label: 'Delivered Bills ✅' },
             { id: 'Cancelled', label: 'Cancelled Bills ❌' },
             { id: 'All', label: 'All Bills 📦' }
@@ -5402,7 +5412,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       </AnimatePresence>
 
       {/* Hidden Thermal Print Node */}
-      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', top: 0, left: '-9999px', pointerEvents: 'none', backgroundColor: '#ffffff' }}>
         <div ref={printRef}>
           {editingBill && <ThermalInvoice bill={editingBill} />}
         </div>

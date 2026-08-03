@@ -3,8 +3,63 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 
+// =========================================================================
+// CRASH SHIELD & PROCESS SECURITY GUARD
+// Prevents server from shutting down or crashing on unhandled promise rejections / errors
+// =========================================================================
+process.on("uncaughtException", (err) => {
+  console.error("🛡️ [CRASH SHIELD] Intercepted Uncaught Exception:", err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("🛡️ [CRASH SHIELD] Intercepted Unhandled Rejection at:", promise, "reason:", reason);
+});
+
 export const app = express();
 const PORT = 3000;
+
+// Security Headers
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("X-Powered-By", "TankerWala Secure Node Engine");
+  next();
+});
+
+// Simple In-Memory Anti-DoS Rate Limiter (No external package required)
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+app.use((req, res, next) => {
+  const clientIp = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "127.0.0.1";
+  const now = Date.now();
+  const windowMs = 60 * 1000; // 1 minute window
+  const maxRequests = 120; // 120 requests per minute per IP
+
+  const record = rateLimitMap.get(clientIp);
+  if (!record || now > record.resetTime) {
+    rateLimitMap.set(clientIp, { count: 1, resetTime: now + windowMs });
+    return next();
+  }
+
+  record.count++;
+  if (record.count > maxRequests) {
+    console.warn(`⚠️ [RATE LIMIT] Throttling excessive request flood from IP: ${clientIp}`);
+    return res.status(429).json({
+      error: "Too many requests. Server is protected against DDoS and flood attacks.",
+      retryAfterSeconds: Math.ceil((record.resetTime - now) / 1000)
+    });
+  }
+
+  next();
+});
+
+// Clean up stale rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of rateLimitMap.entries()) {
+    if (now > record.resetTime) rateLimitMap.delete(ip);
+  }
+}, 5 * 60 * 1000);
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -821,6 +876,24 @@ Provide real, informative, and detailed fields. Ensure source URLs are real Goog
         tender: getFallbackTender(req.body.fileName || "Tender_Document.pdf")
       });
     }
+  });
+
+  // Global Express Error Handling Middleware (Catches all unexpected API errors & prevents crashes)
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("🛡️ [EXPRESS GLOBAL ERROR GUARD] Handled endpoint error:", err?.stack || err);
+    
+    // Handle malformed JSON body errors
+    if (err instanceof SyntaxError && "status" in err && err.status === 400 && "body" in err) {
+      return res.status(400).json({ 
+        error: "Malformed JSON payload in request.", 
+        protected: true 
+      });
+    }
+
+    res.status(500).json({ 
+      error: "An internal server error occurred, but the server remains protected and active.",
+      protected: true 
+    });
   });
 
   async function startServer() {
