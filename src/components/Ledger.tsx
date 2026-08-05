@@ -3182,6 +3182,11 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
   const [searchTerm, setSearchTerm] = useState('');
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
+  // Date range filter states (Default = Today)
+  const [startDate, setStartDate] = useState<string>(() => format(new Date(), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState<string>(() => format(new Date(), 'yyyy-MM-dd'));
+  const [filterPreset, setFilterPreset] = useState<'today' | 'yesterday' | 'month' | 'year' | 'all' | 'custom'>('today');
+
   const filteredSortedAccounts = useMemo(() => {
     return [...accounts]
       .filter(acc => acc.name.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -3196,7 +3201,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
 
     const lines: any[] = [];
     
-    // 1. Opening Balance
+    // 1. Opening Balance Helper
     const parseOpDate = (accItem: Account) => {
       if (accItem.openingBalanceDate) {
         if (typeof accItem.openingBalanceDate === 'string') {
@@ -3212,32 +3217,72 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
 
     const opDateObj = parseOpDate(acc);
 
-    lines.push({
-      id: 'OP',
-      date: opDateObj,
-      particulars: 'Opening Balance',
-      dr: acc.balanceType === 'Dr' ? acc.openingBalance : 0,
-      cr: acc.balanceType === 'Cr' ? acc.openingBalance : 0,
-      vchType: 'OP',
-      balance: acc.openingBalance,
-      balType: acc.balanceType,
-      isHidden: false
-    });
+    // Date boundaries
+    let startBound: Date | null = null;
+    let endBound: Date | null = null;
 
-    // 2. Transactions
-    let runningBalance = acc.balanceType === 'Dr' ? acc.openingBalance : -acc.openingBalance;
-    
-    const relevantVouchers = vouchers
+    if (startDate) {
+      const parts = startDate.split('-');
+      if (parts.length === 3) {
+        startBound = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 0, 0, 0, 0);
+      }
+    }
+    if (endDate) {
+      const parts = endDate.split('-');
+      if (parts.length === 3) {
+        endBound = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59, 999);
+      }
+    }
+
+    // Sort all vouchers for this account
+    const allVouchers = vouchers
       .filter(v => v.items.some(i => i.accountId === selectedAccountId))
       .sort((a, b) => a.date.getTime() - b.date.getTime());
 
-    relevantVouchers.forEach(v => {
-      const item = v.items.find(i => i.accountId === selectedAccountId)!;
-      const otherItems = v.items.filter(i => i.accountId !== selectedAccountId);
-      
+    let runningBalance = acc.balanceType === 'Dr' ? (acc.openingBalance || 0) : -(acc.openingBalance || 0);
+
+    const rangeVouchers: Voucher[] = [];
+
+    allVouchers.forEach(v => {
+      const vTime = v.date.getTime();
       const isActuallyHidden = v.isHidden === true;
 
-      // Only update balance if NOT hidden
+      if (startBound && vTime < startBound.getTime()) {
+        // Prior voucher: updates period opening balance
+        if (!isActuallyHidden) {
+          const item = v.items.find(i => i.accountId === selectedAccountId)!;
+          if (item.type === 'Dr') runningBalance += item.amount;
+          else runningBalance -= item.amount;
+        }
+      } else if (endBound && vTime > endBound.getTime()) {
+        // Future voucher beyond selected date range
+      } else {
+        rangeVouchers.push(v);
+      }
+    });
+
+    const periodOpeningBal = Math.abs(runningBalance);
+    const periodOpeningType = runningBalance >= 0 ? 'Dr' : 'Cr';
+
+    lines.push({
+      id: 'OP',
+      date: startBound || opDateObj,
+      particulars: startBound 
+        ? `Opening Balance (as on ${format(startBound, 'dd MMM yyyy')})`
+        : 'Initial Opening Balance',
+      dr: periodOpeningType === 'Dr' ? periodOpeningBal : 0,
+      cr: periodOpeningType === 'Cr' ? periodOpeningBal : 0,
+      vchType: 'OP',
+      balance: periodOpeningBal,
+      balType: periodOpeningType,
+      isHidden: false
+    });
+
+    rangeVouchers.forEach(v => {
+      const item = v.items.find(i => i.accountId === selectedAccountId)!;
+      const otherItems = v.items.filter(i => i.accountId !== selectedAccountId);
+      const isActuallyHidden = v.isHidden === true;
+
       if (!isActuallyHidden) {
         if (item.type === 'Dr') runningBalance += item.amount;
         else runningBalance -= item.amount;
@@ -3258,7 +3303,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
     });
 
     return lines;
-  }, [selectedAccountId, accounts, vouchers]);
+  }, [selectedAccountId, accounts, vouchers, startDate, endDate]);
 
   // Clear index when changing account
   useEffect(() => {
@@ -3305,9 +3350,13 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
     doc.setFontSize(20);
     doc.text('TankerWala Powered by Rajhans', 14, 20);
     doc.setFontSize(12);
-    doc.text(`Ledger Account: ${sanitizePdfText(acc.name)}`, 14, 30);
+    doc.text(`Ledger Account: ${sanitizePdfText(acc.name)}`, 14, 28);
     doc.setFontSize(10);
-    doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 36);
+    const dateRangePdfText = startDate && endDate 
+      ? `Period: ${format(new Date(startDate + 'T00:00:00'), 'dd/MM/yyyy')} to ${format(new Date(endDate + 'T00:00:00'), 'dd/MM/yyyy')}`
+      : (startDate ? `From: ${format(new Date(startDate + 'T00:00:00'), 'dd/MM/yyyy')}` : 'Period: All Time');
+    doc.text(dateRangePdfText, 14, 34);
+    doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}`, 14, 40);
 
     const tableData = statement
       .filter(row => !row.isHidden)
@@ -3322,7 +3371,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
     autoTable(doc, {
       head: [['Date', 'Particulars', 'Debit', 'Credit', 'Balance']],
       body: tableData,
-      startY: 42,
+      startY: 46,
       theme: 'grid',
       headStyles: { fillColor: [15, 23, 42] },
       columnStyles: {
@@ -3377,7 +3426,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
       <div className="lg:col-span-3">
         {selectedAccountId ? (
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-            <div className="p-8 border-b border-slate-50 flex items-center justify-between print:hidden">
+            <div className="p-8 border-b border-slate-50 flex flex-wrap items-center justify-between gap-4 print:hidden">
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-2xl font-display font-black text-slate-900">
@@ -3388,13 +3437,15 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
                       const acc = accounts.find(a => a.id === selectedAccountId);
                       if (acc) setEditingAccount(acc);
                     }}
-                    className="p-1.5 hover:bg-blue-55 hover:text-blue-600 text-slate-400 rounded-lg transition-colors cursor-pointer"
+                    className="p-1.5 hover:bg-blue-50 hover:text-blue-600 text-slate-400 rounded-lg transition-colors cursor-pointer"
                     title="Edit Account Name/Group"
                   >
                     <Edit2 size={16} />
                   </button>
                 </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Account Statement (Historical)</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                  Account Statement {startDate && endDate ? `(${startDate === endDate ? format(new Date(startDate + 'T00:00:00'), 'dd MMM yyyy') : `${format(new Date(startDate + 'T00:00:00'), 'dd MMM yyyy')} - ${format(new Date(endDate + 'T00:00:00'), 'dd MMM yyyy')}`})` : '(All Time)'}
+                </p>
               </div>
               <button onClick={async () => {
                 try {
@@ -3403,6 +3454,123 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
                   alert("Printing is restricted in this preview. Please open the app in a new tab to print.");
                 }
               }} className="p-3 bg-slate-50 rounded-2xl text-slate-400 hover:text-slate-900"><Printer size={20} /></button>
+            </div>
+
+            {/* Date Range Controls Bar */}
+            <div className="px-8 py-3.5 bg-slate-50/80 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 print:hidden">
+              {/* Presets */}
+              <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-2xl border border-slate-200/80 shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = format(new Date(), 'yyyy-MM-dd');
+                    setStartDate(today);
+                    setEndDate(today);
+                    setFilterPreset('today');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    filterPreset === 'today' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  आज (Today)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const y = new Date();
+                    y.setDate(y.getDate() - 1);
+                    const yStr = format(y, 'yyyy-MM-dd');
+                    setStartDate(yStr);
+                    setEndDate(yStr);
+                    setFilterPreset('yesterday');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    filterPreset === 'yesterday' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  कल (Yesterday)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const firstOfMonth = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
+                    const today = format(now, 'yyyy-MM-dd');
+                    setStartDate(firstOfMonth);
+                    setEndDate(today);
+                    setFilterPreset('month');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    filterPreset === 'month' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  इस महीने (This Month)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const firstOfYear = format(new Date(now.getFullYear(), 0, 1), 'yyyy-MM-dd');
+                    const today = format(now, 'yyyy-MM-dd');
+                    setStartDate(firstOfYear);
+                    setEndDate(today);
+                    setFilterPreset('year');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    filterPreset === 'year' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  इस साल (This Year)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartDate('');
+                    setEndDate('');
+                    setFilterPreset('all');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    filterPreset === 'all' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  जब से शुरू हुआ (All Time)
+                </button>
+              </div>
+
+              {/* Custom Date Selection */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-xl shadow-xs">
+                  <Calendar size={13} className="text-slate-400" />
+                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">From:</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      setFilterPreset('custom');
+                    }}
+                    className="text-xs font-bold bg-transparent focus:outline-none text-slate-800"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-xl shadow-xs">
+                  <Calendar size={13} className="text-slate-400" />
+                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">To:</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => {
+                      setEndDate(e.target.value);
+                      setFilterPreset('custom');
+                    }}
+                    className="text-xs font-bold bg-transparent focus:outline-none text-slate-800"
+                  />
+                </div>
+              </div>
             </div>
             
             <div className="overflow-x-auto p-8 pt-0 outline-none print:p-8" ref={componentRef}>
