@@ -49,187 +49,139 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
 
   return (
     <div 
-      className="thermal-receipt-container bg-white p-3 text-black select-none border-2 border-black" 
+      className="thermal-receipt-container bg-white p-2 text-black select-none border-2 border-black" 
       style={{ width: '76mm', maxWidth: '100%', margin: '0 auto', fontFamily: 'system-ui, -apple-system, sans-serif' }}
     >
       {/* Header Branding with Official TankerWala Logo */}
-      <div className="flex flex-col items-center pb-2 mb-2 text-center">
-        {/* Official TankerWala Water Tanker / Water Drop Icon SVG */}
-        <div className="mb-1.5 flex items-center justify-center">
-          <svg width="36" height="36" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-black mx-auto">
-            {/* Water Drop Outline */}
-            <path d="M50 8C50 8 20 45 20 65C20 81.5685 33.4315 95 50 95C66.5685 95 80 81.5685 80 65C80 45 50 8 50 8Z" stroke="currentColor" strokeWidth="6" strokeLinejoin="round" fill="none" />
-            {/* Inner Water Tanker Truck Silhouette */}
+      <div className="flex flex-col items-center pb-1 text-center border-b border-black border-dashed">
+        <div className="flex items-center justify-center gap-1.5 mb-0.5">
+          {/* Official TankerWala Logo Icon */}
+          <svg width="22" height="22" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-black">
+            <path d="M50 8C50 8 20 45 20 65C20 81.5685 33.4315 95 50 95C66.5685 95 80 81.5685 80 65C80 45 50 8 50 8Z" stroke="currentColor" strokeWidth="7" strokeLinejoin="round" fill="none" />
             <rect x="34" y="48" width="22" height="16" rx="2" fill="currentColor" />
             <path d="M56 54H66L70 60V64H56V54Z" fill="currentColor" />
             <circle cx="41" cy="65" r="3.5" fill="white" stroke="currentColor" strokeWidth="2" />
             <circle cx="63" cy="65" r="3.5" fill="white" stroke="currentColor" strokeWidth="2" />
-            <path d="M28 72C35 76 45 76 50 72C55 68 65 68 72 72" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
           </svg>
+          <div className="text-left">
+            <h1 className="text-lg font-black uppercase text-black tracking-tight leading-none">
+              TANKERWALA
+            </h1>
+            <div className="text-[7.5px] font-black uppercase text-black tracking-widest">
+              POWERED BY RAJHANS
+            </div>
+          </div>
         </div>
 
-        {/* TANKERWALA Title */}
-        <h1 className="text-2xl font-black uppercase text-black tracking-tight leading-none font-sans">
-          TANKERWALA
-        </h1>
-        <div className="text-[9px] font-black uppercase text-black tracking-[0.2em] mt-0.5">
-          POWERED BY RAJHANS
-        </div>
-        
-        {/* Branch / Company Name */}
-        <p className="text-[13px] font-black uppercase text-black mt-2 leading-tight">
+        {/* Company & Address */}
+        <p className="text-[11px] font-black uppercase text-black leading-tight">
           {franchiseName || "RAJHANS STEEL AND WATER"}
         </p>
-        <p className="text-[9px] font-bold uppercase tracking-wider text-black mt-0.5">
-          SUPPLIER & SERVICE
-        </p>
-        
-        <p className="text-[8.5px] mt-1 text-center whitespace-pre-line leading-tight text-black font-semibold max-w-[95%]">
+        <p className="text-[7.5px] text-center leading-tight text-black font-semibold max-w-[98%] mt-0.5">
           {printAddress}
         </p>
-        
-        {/* Helpline Phone Pill Box */}
-        <div className="mt-2.5 mb-1 border-2 border-black bg-white px-3 py-1 rounded-xl text-center w-full">
-          <p className="text-[12px] font-black text-black uppercase tracking-wide leading-none">
-            📞 PH: +91 {printPhone}
-          </p>
-        </div>
+        <p className="text-[9.5px] font-black text-black mt-0.5">
+          📞 PH: +91 {printPhone}
+        </p>
       </div>
 
-      {/* Dashed Divider */}
-      <div className="border-b-2 border-black border-dashed my-2"></div>
-
-      {/* Bill Meta Data */}
-      <div className="text-[10.5px] text-black font-bold space-y-1 my-2">
+      {/* Bill & Customer Details in Compact Grid */}
+      <div className="text-[9.5px] text-black font-bold py-1 border-b border-black border-dashed space-y-0.5">
         <div className="flex justify-between items-center">
-          <span className="font-extrabold">Bill No:</span> 
-          <span className="font-black text-[13px]">{bill.billNumber}</span>
-        </div>
-        <div className="flex justify-between items-center">
-          <span className="font-extrabold">Date & Time:</span> 
-          <span className="font-black">{formattedDate} {formattedTime}</span>
+          <span>Bill No: <strong className="font-black text-[11px]">#{bill.billNumber}</strong></span>
+          <span>Date: <strong>{formattedDate} {formattedTime}</strong></span>
         </div>
         {bill.driverName && (
-          <div className="flex justify-between items-center">
-            <span className="font-extrabold">Driver Name:</span> 
-            <span className="font-black uppercase">{bill.driverName}</span>
+          <div className="flex justify-between items-center text-[9px]">
+            <span>Driver: <strong className="uppercase">{bill.driverName}</strong></span>
+            <span>Status: <strong className="uppercase">{bill.status || 'Delivered'}</strong></span>
           </div>
         )}
+        <div className="border-t border-dotted border-gray-400 pt-0.5 mt-0.5 flex justify-between items-start">
+          <div>
+            <span className="text-[8px] uppercase tracking-wider text-gray-700 block">Customer:</span>
+            <strong className="text-[10.5px] font-black block leading-tight">{bill.customerName}</strong>
+          </div>
+          <div className="text-right">
+            <span className="text-[9.5px] font-extrabold block">📱 {bill.customerMobile}</span>
+            {bill.customerAddress && <span className="text-[8px] font-semibold text-gray-800 block">{bill.customerAddress}</span>}
+          </div>
+        </div>
       </div>
 
-      {/* Dashed Divider */}
-      <div className="border-b-2 border-black border-dashed my-2"></div>
-
-      {/* Customer Information */}
-      <div className="text-[10.5px] text-black space-y-0.5 my-2 leading-tight">
-        <div className="font-black uppercase text-[10px] tracking-wider mb-1 text-black">
-          CUSTOMER DETAILS:
-        </div>
-        <div className="font-extrabold text-[12.5px] text-black">{bill.customerName}</div>
-        <div className="font-extrabold text-[11px] flex items-center gap-1">
-          <span>📱</span> {bill.customerMobile}
-        </div>
-        {bill.customerAddress && (
-          <div className="text-[10px] font-bold mt-0.5 text-black">{bill.customerAddress}</div>
-        )}
-      </div>
-
-      {/* Dashed Divider */}
-      <div className="border-b-2 border-black border-dashed my-2"></div>
-
-      {/* Item Table */}
-      <div className="my-2">
-        <table className="w-full text-[10.5px] text-black border-collapse">
+      {/* Item Table - Ultra Compact */}
+      <div className="py-1 border-b border-black border-dashed">
+        <table className="w-full text-[9.5px] text-black border-collapse">
           <thead>
-            <tr className="text-[10px] font-black uppercase text-black">
-              <th className="text-left py-1 pr-1">ITEM</th>
-              <th className="text-center py-1">QTY</th>
-              <th className="text-right py-1 pl-1">AMOUNT</th>
+            <tr className="text-[8.5px] font-black uppercase text-black border-b border-black">
+              <th className="text-left py-0.5">ITEM</th>
+              <th className="text-center py-0.5">QTY</th>
+              <th className="text-right py-0.5">AMOUNT</th>
             </tr>
           </thead>
-          <tbody className="font-bold border-t border-black border-dashed">
+          <tbody className="font-bold">
             <tr>
-              <td className="py-2 pr-1 font-extrabold text-[11px] leading-tight text-black">
-                {getItemName()}
-              </td>
-              <td className="text-center py-2 font-black text-[12px] align-middle">{bill.quantity}</td>
-              <td className="text-right py-2 font-black text-[12px] align-middle pl-1">₹{bill.totalAmount}</td>
+              <td className="py-0.5 font-black text-[10px] leading-tight">{getItemName()}</td>
+              <td className="text-center py-0.5 font-black text-[10.5px]">{bill.quantity}</td>
+              <td className="text-right py-0.5 font-black text-[10.5px]">₹{bill.totalAmount}</td>
             </tr>
             {bill.extraCharges > 0 && (
-              <tr>
-                <td colSpan={2} className="py-1 text-left font-semibold">Extra Charges</td>
-                <td className="text-right py-1 font-black pl-1">₹{bill.extraCharges}</td>
+              <tr className="text-[8.5px]">
+                <td colSpan={2} className="py-0.2 text-left font-semibold">Extra Charges</td>
+                <td className="text-right py-0.2 font-black">₹{bill.extraCharges}</td>
               </tr>
             )}
             {bill.discount > 0 && (
-              <tr>
-                <td colSpan={2} className="py-1 text-left font-semibold">Discount</td>
-                <td className="text-right py-1 font-black pl-1">-₹{bill.discount}</td>
+              <tr className="text-[8.5px]">
+                <td colSpan={2} className="py-0.2 text-left font-semibold">Discount</td>
+                <td className="text-right py-0.2 font-black">-₹{bill.discount}</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Dashed Divider */}
-      <div className="border-b-2 border-black border-dashed my-2"></div>
-
-      {/* Grand Total Box */}
-      <div className="flex justify-between items-center border-2 border-black p-2 bg-white text-black font-black my-2">
-        <span className="text-[12px] uppercase">GRAND TOTAL:</span>
-        <span className="text-[17px]">₹{finalAmount}</span>
+      {/* Grand Total & Payment Mode Combined */}
+      <div className="py-1 border-b border-black border-dashed">
+        <div className="flex justify-between items-center bg-black text-white px-1.5 py-1 font-black my-0.5">
+          <span className="text-[10px] uppercase">GRAND TOTAL:</span>
+          <span className="text-[14px]">₹{finalAmount}</span>
+        </div>
+        <div className="flex justify-between items-center text-[9px] font-bold mt-0.5">
+          <span>Payment Status / Mode:</span>
+          <span className="font-black uppercase border border-black px-1.5 py-0.2 text-[9px]">
+            {bill.paymentMode || 'PENDING'}
+          </span>
+        </div>
       </div>
 
-      {/* Payment Status / Mode Row */}
-      <div className="flex justify-between items-center text-[10.5px] font-bold my-2">
-        <span className="font-extrabold">Payment Status / Mode:</span>
-        <span className="font-black uppercase border-2 border-black px-2.5 py-1 text-[10.5px]">
-          {bill.paymentMode || 'PENDING'}
-        </span>
-      </div>
-
-      {/* Dashed Divider */}
-      <div className="border-b-2 border-black border-dashed my-2"></div>
-
-      {/* UPI QR Code Section */}
-      <div className="my-3 flex flex-col items-center">
-        <p className="text-[10px] font-black mb-1.5 uppercase tracking-wider text-center text-black">
-          SCAN TO PAY VIA ANY UPI APP
-        </p>
-        <div className="bg-white p-2 border-2 border-black rounded-xl my-1">
+      {/* UPI QR Code Section - Compact */}
+      <div className="py-1 flex items-center justify-between border-b border-black border-dashed px-1">
+        <div className="text-left">
+          <p className="text-[8.5px] font-black uppercase text-black leading-tight">
+            SCAN TO PAY VIA UPI
+          </p>
+          <p className="text-[8px] font-mono font-bold text-black mt-0.5">{upiId}</p>
+          <p className="text-[7.5px] text-gray-700 mt-0.5 font-semibold">GPay / PhonePe / Paytm</p>
+        </div>
+        <div className="bg-white p-1 border border-black rounded">
           <QRCodeSVG 
             value={upiLink}
-            size={110}
+            size={70}
             level="M"
-            includeMargin={true}
+            includeMargin={false}
           />
         </div>
-        <p className="text-[9.5px] font-mono font-bold text-black mt-1">{upiId}</p>
       </div>
 
-      {/* Dashed Divider */}
-      <div className="border-b-2 border-black border-dashed my-2"></div>
-
-      {/* Important Office Notice Box */}
-      <div className="my-3 text-center text-[9.5px] leading-snug text-black space-y-1.5">
-        <div className="border-2 border-black py-1 px-2 font-black uppercase text-[10px] tracking-wide inline-block w-full">
-          IMPORTANT OFFICE NOTICE
-        </div>
-        <p className="font-extrabold text-[9px] uppercase tracking-tight text-black mt-1">
-          FOR NEW BOOKING ORDERS, PLEASE DO NOT CALL THE DRIVER'S NUMBER.
+      {/* Important Office Notice - Minimal */}
+      <div className="pt-1 text-center text-[8px] leading-tight text-black space-y-0.5">
+        <p className="font-extrabold text-[8px] uppercase tracking-tight text-black">
+          ⚠️ FOR NEW BOOKINGS DO NOT CALL DRIVER. CALL HELPLINE: <strong>+91 {printPhone}</strong>
         </p>
-        <p className="font-black text-[10px] text-black">
-          Please contact only office helpline (+91 {printPhone}).
+        <p className="text-[8px] font-black italic text-black">
+          Thank you! - TankerWala ({franchiseName || "Rajhans"})
         </p>
-        
-        <p className="mt-2 text-[9.5px] font-black italic text-black">
-          Thank you from {franchiseName || "Rajhans Steel and Water"} - Powered by Rajhans ☺️
-        </p>
-
-        {/* Paper Cut tear indicator */}
-        <div className="text-[8px] text-black font-mono mt-3 tracking-widest text-center opacity-60">
-          . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
-        </div>
       </div>
     </div>
   );
