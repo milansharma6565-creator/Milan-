@@ -391,7 +391,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     } else if (!isSuperAdmin) {
       vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', 'PLACEHOLDER_NONE'));
     }
-    const vouchersUnsub = onSnapshot(query(vouchersBaseQuery, orderBy('date', 'desc'), limit(500)), 
+    const vouchersUnsub = onSnapshot(query(vouchersBaseQuery, orderBy('date', 'desc')), 
       (snapshot) => {
         const docs = snapshot.docs.map(doc => {
           const data = doc.data();
@@ -550,6 +550,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
   const [newLedgerName, setNewLedgerName] = useState('');
   const [newLedgerGroupId, setNewLedgerGroupId] = useState('');
   const [newLedgerOpening, setNewLedgerOpening] = useState(0);
+  const [newLedgerOpeningDate, setNewLedgerOpeningDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [newLedgerBalType, setNewLedgerBalType] = useState<'Dr' | 'Cr'>('Dr');
   const [tallySavingLedger, setTallySavingLedger] = useState(false);
   const [ledgerAcceptPrompt, setLedgerAcceptPrompt] = useState(false);
@@ -559,6 +560,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
   const [editLedgerName, setEditLedgerName] = useState('');
   const [editLedgerGroupId, setEditLedgerGroupId] = useState('');
   const [editLedgerOpening, setEditLedgerOpening] = useState(0);
+  const [editLedgerOpeningDate, setEditLedgerOpeningDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [editLedgerBalType, setEditLedgerBalType] = useState<'Dr' | 'Cr'>('Dr');
   const [tallyEditingLedger, setTallyEditingLedger] = useState(false);
   const [ledgerEditAcceptPrompt, setLedgerEditAcceptPrompt] = useState(false);
@@ -640,6 +642,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         name: cleanName,
         groupId: newLedgerGroupId,
         openingBalance: newLedgerOpening,
+        openingBalanceDate: newLedgerOpeningDate,
         balanceType: newLedgerBalType,
         currentBalance: newLedgerOpening,
         franchiseId: franchiseId || null,
@@ -663,6 +666,11 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     setEditLedgerName(acc.name);
     setEditLedgerGroupId(acc.groupId);
     setEditLedgerOpening(acc.openingBalance);
+    setEditLedgerOpeningDate(
+      acc.openingBalanceDate
+        ? (typeof acc.openingBalanceDate === 'string' ? acc.openingBalanceDate.split('T')[0] : format(new Date(acc.openingBalanceDate.seconds ? acc.openingBalanceDate.seconds * 1000 : acc.openingBalanceDate), 'yyyy-MM-dd'))
+        : format(new Date(), 'yyyy-MM-dd')
+    );
     setEditLedgerBalType(acc.balanceType || 'Dr');
     setTallyScreen('ledger-edit');
   };
@@ -685,6 +693,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         name: cleanName,
         groupId: editLedgerGroupId,
         openingBalance: editLedgerOpening,
+        openingBalanceDate: editLedgerOpeningDate,
         balanceType: editLedgerBalType,
         updatedAt: serverTimestamp()
       });
@@ -1318,6 +1327,16 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                   </div>
 
                   <div className="flex items-center">
+                    <label className="text-teal-300 w-32 font-bold select-none text-right pr-4">Opening Date:</label>
+                    <input 
+                      type="date"
+                      className="bg-[#001d21] border border-[#146067] text-[#0dffd2] px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 flex-1 font-bold"
+                      value={newLedgerOpeningDate}
+                      onChange={e => setNewLedgerOpeningDate(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex items-center">
                     <label className="text-teal-300 w-32 font-bold select-none text-right pr-4">Opening Bal:</label>
                     <div className="flex flex-1 gap-2">
                       <input 
@@ -1415,6 +1434,16 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                         <option key={g.id} value={g.id}>{g.name}</option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="flex items-center">
+                    <label className="text-teal-300 w-32 font-bold select-none text-right pr-4">Opening Date:</label>
+                    <input 
+                      type="date"
+                      className="bg-[#001d21] border border-[#146067] text-[#0dffd2] px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-yellow-400 flex-1 font-bold"
+                      value={editLedgerOpeningDate}
+                      onChange={e => setEditLedgerOpeningDate(e.target.value)}
+                    />
                   </div>
 
                   <div className="flex items-center">
@@ -3006,6 +3035,7 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState('');
   const [opening, setOpening] = useState(0);
+  const [openingDate, setOpeningDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [type, setType] = useState<'Dr' | 'Cr'>('Dr');
   const [submitting, setSubmitting] = useState(false);
 
@@ -3026,6 +3056,7 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
         name: cleanName,
         groupId,
         openingBalance: opening,
+        openingBalanceDate: openingDate,
         balanceType: type,
         currentBalance: opening,
         franchiseId: franchiseId || null,
@@ -3079,6 +3110,17 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
                 <option key={g.id} value={g.id}>{g.name}</option>
               ))}
             </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Opening Balance Date (किस तारीख को बैलेंस था)</label>
+            <input 
+              type="date"
+              required
+              className="w-full h-14 px-5 bg-slate-50 rounded-2xl text-base font-bold border-none"
+              value={openingDate}
+              onChange={e => setOpeningDate(e.target.value)}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -3155,9 +3197,24 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
     const lines: any[] = [];
     
     // 1. Opening Balance
+    const parseOpDate = (accItem: Account) => {
+      if (accItem.openingBalanceDate) {
+        if (typeof accItem.openingBalanceDate === 'string') {
+          const d = new Date(accItem.openingBalanceDate);
+          if (!isNaN(d.getTime())) return d;
+        }
+        if (accItem.openingBalanceDate.seconds) return new Date(accItem.openingBalanceDate.seconds * 1000);
+        const d = new Date(accItem.openingBalanceDate);
+        if (!isNaN(d.getTime())) return d;
+      }
+      return null;
+    };
+
+    const opDateObj = parseOpDate(acc);
+
     lines.push({
       id: 'OP',
-      date: null,
+      date: opDateObj,
       particulars: 'Opening Balance',
       dr: acc.balanceType === 'Dr' ? acc.openingBalance : 0,
       cr: acc.balanceType === 'Cr' ? acc.openingBalance : 0,
@@ -3856,6 +3913,15 @@ function AccountEditModal({
   const [name, setName] = useState(account.name);
   const [groupId, setGroupId] = useState(account.groupId);
   const [opening, setOpening] = useState(account.openingBalance || 0);
+  const [openingDate, setOpeningDate] = useState<string>(() => {
+    if (account.openingBalanceDate) {
+      if (typeof account.openingBalanceDate === 'string') return account.openingBalanceDate.split('T')[0];
+      if (account.openingBalanceDate.seconds) return format(new Date(account.openingBalanceDate.seconds * 1000), 'yyyy-MM-dd');
+      const d = new Date(account.openingBalanceDate);
+      if (!isNaN(d.getTime())) return format(d, 'yyyy-MM-dd');
+    }
+    return format(new Date(), 'yyyy-MM-dd');
+  });
   const [type, setType] = useState<'Dr' | 'Cr'>(account.balanceType || 'Dr');
   const [submitting, setSubmitting] = useState(false);
 
@@ -3873,6 +3939,7 @@ function AccountEditModal({
         name: name.trim(),
         groupId,
         openingBalance: opening,
+        openingBalanceDate: openingDate,
         balanceType: type,
         currentBalance: newCurrentBalance,
         updatedAt: serverTimestamp()
@@ -3928,6 +3995,17 @@ function AccountEditModal({
                 <option key={g.id} value={g.id}>{g.name} ({g.type})</option>
               ))}
             </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Opening Balance Date (किस तारीख को बैलेंस था)</label>
+            <input 
+              type="date"
+              required
+              className="w-full h-14 px-5 bg-slate-50 focus:bg-slate-100 rounded-2xl text-base font-bold border-none transition-colors focus:ring-2 focus:ring-blue-500/10 focus:outline-none"
+              value={openingDate}
+              onChange={e => setOpeningDate(e.target.value)}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">

@@ -253,6 +253,7 @@ export interface Account {
   name: string;
   groupId: string;
   openingBalance: number;
+  openingBalanceDate?: any;
   balanceType: 'Dr' | 'Cr';
   currentBalance: number;
   description?: string;

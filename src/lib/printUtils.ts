@@ -68,7 +68,7 @@ export const printThermalReceipt = async (element: HTMLElement) => {
             </style>
           </head>
           <body>
-            <div style="width: 76mm; max-width: 100%; margin: 0 auto; padding: 2mm; box-sizing: border-box;">
+            <div style="width: 76mm; max-width: 100%; margin: 0 auto; padding: 2mm; box-sizing: border-box; border: 2px solid #000000;">
               ${element.innerHTML}
             </div>
             <script>
@@ -115,7 +115,7 @@ export const printThermalReceipt = async (element: HTMLElement) => {
               </style>
             </head>
             <body>
-              <div style="width: 76mm; max-width: 100%; margin: 0 auto; padding: 2mm; box-sizing: border-box;">
+              <div style="width: 76mm; max-width: 100%; margin: 0 auto; padding: 2mm; box-sizing: border-box; border: 2px solid #000000;">
                 ${element.innerHTML}
               </div>
               <script>

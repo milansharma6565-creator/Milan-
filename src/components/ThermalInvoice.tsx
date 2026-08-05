@@ -40,17 +40,26 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
     return `${bill.tankerSize || '5000'}L Water Tanker`;
   };
 
-  const formattedDate = bill.date 
-    ? new Date(bill.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    : '';
-  const formattedTime = bill.date 
-    ? new Date(bill.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-    : '';
+  const parseBillDate = (d: any) => {
+    if (!d) return null;
+    if (d instanceof Date) return d;
+    if (typeof d === 'object' && d.seconds) return new Date(d.seconds * 1000);
+    if (typeof d === 'object' && typeof d.toDate === 'function') return d.toDate();
+    if (typeof d === 'string' || typeof d === 'number') {
+      const parsed = new Date(d);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+    return null;
+  };
+
+  const billDateObj = parseBillDate(bill.date) || parseBillDate((bill as any).createdAt) || new Date();
+  const formattedDate = billDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const formattedTime = billDateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
   return (
     <div 
-      className="thermal-receipt-container bg-white p-2 text-black select-none border-2 border-black" 
-      style={{ width: '76mm', maxWidth: '100%', margin: '0 auto', fontFamily: 'system-ui, -apple-system, sans-serif' }}
+      className="thermal-receipt-container bg-white p-2.5 text-black select-none border-2 border-black rounded-none shadow-none" 
+      style={{ width: '76mm', maxWidth: '100%', margin: '0 auto', fontFamily: 'system-ui, -apple-system, sans-serif', border: '2px solid #000000', boxSizing: 'border-box' }}
     >
       {/* Header Branding with Official TankerWala Logo */}
       <div className="flex flex-col items-center pb-1 text-center border-b border-black border-dashed">
@@ -89,12 +98,15 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
       <div className="text-[9.5px] text-black font-bold py-1 border-b border-black border-dashed space-y-0.5">
         <div className="flex justify-between items-center">
           <span>Bill No: <strong className="font-black text-[11px]">#{bill.billNumber}</strong></span>
-          <span>Date: <strong>{formattedDate} {formattedTime}</strong></span>
+          <span>Date: <strong>{formattedDate}</strong></span>
+        </div>
+        <div className="flex justify-between items-center text-[9px]">
+          <span>Time: <strong className="uppercase">{formattedTime}</strong></span>
+          <span>Status: <strong className="uppercase">{bill.status || 'Delivered'}</strong></span>
         </div>
         {bill.driverName && (
           <div className="flex justify-between items-center text-[9px]">
             <span>Driver: <strong className="uppercase">{bill.driverName}</strong></span>
-            <span>Status: <strong className="uppercase">{bill.status || 'Delivered'}</strong></span>
           </div>
         )}
         <div className="border-t border-dotted border-gray-400 pt-0.5 mt-0.5 flex justify-between items-start">
@@ -141,15 +153,15 @@ export function ThermalInvoice({ bill }: ThermalInvoiceProps) {
         </table>
       </div>
 
-      {/* Grand Total & Payment Mode Combined */}
+      {/* Grand Total & Payment Mode Combined (No Black Banner) */}
       <div className="py-1 border-b border-black border-dashed">
-        <div className="flex justify-between items-center bg-black text-white px-1.5 py-1 font-black my-0.5">
-          <span className="text-[10px] uppercase">GRAND TOTAL:</span>
-          <span className="text-[14px]">₹{finalAmount}</span>
+        <div className="flex justify-between items-center border-2 border-black px-1.5 py-1 font-black my-0.5 bg-white text-black">
+          <span className="text-[10px] uppercase font-black text-black">GRAND TOTAL:</span>
+          <span className="text-[14px] font-black text-black">₹{finalAmount}</span>
         </div>
         <div className="flex justify-between items-center text-[9px] font-bold mt-0.5">
           <span>Payment Status / Mode:</span>
-          <span className="font-black uppercase border border-black px-1.5 py-0.2 text-[9px]">
+          <span className="font-black uppercase border border-black px-1.5 py-0.2 text-[9px] text-black bg-white">
             {bill.paymentMode || 'PENDING'}
           </span>
         </div>
