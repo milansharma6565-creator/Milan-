@@ -9,7 +9,7 @@ import { encodeCustomerToken } from './tokenUtils';
  */
 export const getWhatsAppBillLink = (bill: Bill, franchise?: any) => {
   const upiId = franchise?.upiId || "rajha94133@barodampay";
-  const franchiseName = franchise?.printName || franchise?.name || "राजहंस वाटर सप्लाई";
+  const franchiseName = franchise?.printName || franchise?.name || "Rajhans Water Supply";
   const printPhone = franchise?.printMobile || franchise?.operatorMobile || "9413339987";
 
   const origin = window.location.origin;
@@ -35,25 +35,25 @@ export const getWhatsAppBillLink = (bill: Bill, franchise?: any) => {
   else if (currentStatus === 'Delivered') statusBadge = 'Delivered ✅';
 
   const message = 
-`नमस्ते ${bill.customerName} जी! 💧
-आपकी वाटर सप्लाई का डिजिटल बिल:
+`Hello ${bill.customerName}! 💧
+Your Water Supply Digital Invoice:
 
-🧾 बिल नं: #${bill.billNumber}
-💧 क्षमता/आइटम: ${capacityText}
-💰 कुल राशि: ₹${bill.grandTotal || bill.totalAmount}
-📌 भुगतान मोड: ${bill.paymentMode || 'Cash'}
+🧾 Bill No: #${bill.billNumber}
+💧 Capacity / Item: ${capacityText}
+💰 Total Amount: ₹${bill.grandTotal || bill.totalAmount}
+📌 Payment Mode: ${bill.paymentMode || 'Cash'}
 
-🚚 स्टेटस: ${statusBadge}
+🚚 Status: ${statusBadge}
 
-🌐 लाइव ट्रैक करें व दोबारा ऑर्डर (Rebook) करें:
+🌐 Track Live & Rebook Order:
 👉 ${portalUrl}
 
-यदि ऑनलाइन भुगतान करना चाहें (UPI ID: ${upiId}):
+For Online Payment (UPI ID: ${upiId}):
 upi://pay?pa=${upiId}&pn=${encodeURIComponent(franchiseName)}&am=${bill.grandTotal}&cu=INR
 
-धन्यवाद!
+Thank you!
 ${franchiseName} 💧
-📞 हेल्पलाइन: +91 ${printPhone}`;
+📞 Helpline: +91 ${printPhone}`;
 
   // Filter non-digit characters to build correct phone number
   const cleanMobile = bill.customerMobile.replace(/\D/g, '');

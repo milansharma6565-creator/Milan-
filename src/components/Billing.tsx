@@ -302,7 +302,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
       q = query(collection(db, 'drivers'), where('franchiseId', '==', franchiseId));
     }
     return onSnapshot(q, 
-      (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
+      (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver)).filter(d => (d.status || 'Active') === 'Active')),
       (error) => handleFirestoreError(error, OperationType.LIST, 'drivers')
     );
   }, [franchiseId, isSuperAdmin]);
@@ -535,7 +535,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
     const phone = cleanMobile.startsWith('91') ? cleanMobile : `91${cleanMobile}`;
     
     const orderUrl = `${window.location.origin}/?o=${bill.id}`;
-    const message = `🙏 *Greetings from ${franchiseNameText}* 💧\n\nThank you for choosing us for pure and quality drinking water! Here is your thermal bill #${bill.billNumber} for amount *₹${bill.grandTotal}*.\n\n*🌐 LIVE STATUS & REBOOK LINK / लाइव ट्रैक करें व दोबारा बुक करें:*\n👉 ${orderUrl}\n\nHave a wonderful and healthy day! 🙏🌸`;
+    const message = `🙏 *Greetings from ${franchiseNameText}* 💧\n\nThank you for choosing us for pure and quality drinking water! Here is your thermal bill #${bill.billNumber} for amount *₹${bill.grandTotal}*.\n\n*🌐 LIVE STATUS & REBOOK LINK:*\n👉 ${orderUrl}\n\nHave a wonderful and healthy day! 🙏🌸`;
 
     try {
       // Capture the thermal receipt as JPEG
@@ -760,7 +760,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
           details: { billId: newBillRef.id, scheduledDate, total: grandTotal }
         });
 
-        alert(`📅 शेड्यूल बुकिंग सफलतापूर्वक दर्ज हो गई!\n\nयह बिल ${scheduledDate} को ऑटोमैटिक उस दिन के सही बिल सीरियल नंबर (Serial No.) के साथ Recent Bills में आ जाएगा।`);
+        alert(`📅 Scheduled booking successfully registered!\n\nThis bill will automatically appear in Recent Bills on ${scheduledDate} with the correct sequential Bill Serial Number for that day.`);
 
         // Reset form
         setIsScheduled(false);
@@ -1369,9 +1369,9 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 />
                 <div>
                   <span className="font-black text-sm text-slate-800 flex items-center gap-1.5">
-                    📅 Schedule Booking / अग्रिम बुकिंग
+                    📅 Schedule Booking
                   </span>
-                  <p className="text-[11px] text-slate-500 font-medium">भविष्य की तारीख के लिए बिल शेड्यूल करें</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Schedule a bill for a future date</p>
                 </div>
               </label>
               {isScheduled && (
@@ -1390,7 +1390,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                   className="pt-2 border-t border-blue-200/60 overflow-hidden space-y-2.5"
                 >
                   <label className="text-[10px] font-bold text-blue-900 uppercase tracking-widest block">
-                    बुकिंग की तारीख चुने (Select Delivery Date)
+                    Select Delivery Date
                   </label>
                   <input
                     type="date"
@@ -1402,7 +1402,7 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                   <div className="bg-white/90 p-3 rounded-xl border border-blue-200 text-xs font-semibold text-blue-950 flex items-start gap-2.5 leading-relaxed">
                     <span className="text-base shrink-0">ℹ️</span>
                     <span>
-                      यह बिल चुना गया दिन आते ही उस दिन के <strong>अगले बिल सीरियल नंबर (Serial Number)</strong> के साथ ऑटोमैटिक <strong>'Recent Bills'</strong> में आ जाएगा।
+                      This bill will automatically appear in <strong>'Recent Bills'</strong> with the <strong>next sequential Bill Serial Number</strong> on the chosen date.
                     </span>
                   </div>
                 </motion.div>

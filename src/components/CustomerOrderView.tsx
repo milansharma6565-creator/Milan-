@@ -10,11 +10,11 @@ import { encodeCustomerToken } from '../lib/tokenUtils';
 
 // Status pipeline definitions matching portal
 const STATUS_STAGES = [
-  { id: 'Pending', label: 'पेंडिंग ⏳', sub: 'स्वीकार की जा रही है' },
-  { id: 'Assigned', label: 'असाइन 🚚', sub: 'ड्राइवर असाइन हुआ' },
-  { id: 'Filling', label: 'भर रहा है 🚰', sub: 'टैंकर में पानी लोड हो रहा है' },
-  { id: 'On the Way', label: 'रास्ते में है 🛣️', sub: 'लाइव लोकेशन चालू है' },
-  { id: 'Delivered', label: 'डिलीवर हुआ ✅', sub: 'सफलतापूर्वक पहुंचा दिया गया' },
+  { id: 'Pending', label: 'Pending ⏳', sub: 'Awaiting confirmation' },
+  { id: 'Assigned', label: 'Assigned 🚚', sub: 'Driver assigned' },
+  { id: 'Filling', label: 'Filling 🚰', sub: 'Loading water into tanker' },
+  { id: 'On the Way', label: 'On the Way 🛣️', sub: 'Live tracking enabled' },
+  { id: 'Delivered', label: 'Delivered ✅', sub: 'Successfully delivered' },
 ];
 import { MapContainer, TileLayer, Marker as LeafletMarker, Polyline as LeafletPolyline } from 'react-leaflet';
 import L from 'leaflet';
@@ -270,7 +270,7 @@ export function CustomerOrderView({ billId }: { billId: string }) {
         <div className="flex flex-col items-center justify-center gap-3 mb-8">
           <Logo size={56} />
           <h1 className="text-3xl font-black text-slate-900 tracking-tight text-center">
-            राजहंस <span className="relative text-blue-600">वाटर सप्लाई<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">TankerWala Portal</span></span>
+            Rajhans <span className="relative text-blue-600">Water Supply<span className="absolute top-full left-0 text-[10px] text-slate-400 font-medium whitespace-nowrap normal-case tracking-normal mt-0.5">TankerWala Portal</span></span>
           </h1>
         </div>
 
@@ -283,8 +283,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
             <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-3">
               <Truck size={36} />
             </div>
-            <h2 className="text-2xl font-black tracking-tight">लाइव टैंकर स्टेटस</h2>
-            <p className="text-xs opacity-90 font-medium">बिल नं: #{bill.billNumber}</p>
+            <h2 className="text-2xl font-black tracking-tight">Live Tanker Status</h2>
+            <p className="text-xs opacity-90 font-medium">Bill No: #{bill.billNumber}</p>
           </div>
 
           <div className="p-6 space-y-6">
@@ -292,7 +292,7 @@ export function CustomerOrderView({ billId }: { billId: string }) {
             <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                 <Droplets size={14} className="text-blue-600" />
-                टैंकर डिलीवरी प्रोग्रेस (Live Status)
+                Tanker Delivery Progress (Live Status)
               </h3>
               
               <div className="relative pl-6 space-y-5 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
@@ -331,15 +331,15 @@ export function CustomerOrderView({ billId }: { billId: string }) {
             {/* Bill Details Info */}
             <div className="space-y-3 text-sm">
               <div className="flex justify-between border-b border-slate-100 pb-3">
-                <span className="text-slate-400 font-medium">ग्राहक का नाम:</span>
+                <span className="text-slate-400 font-medium">Customer Name:</span>
                 <span className="font-bold text-slate-900">{bill.customerName}</span>
               </div>
               <div className="flex justify-between border-b border-slate-100 pb-3">
-                <span className="text-slate-400 font-medium">टैंकर क्षमता/साइज:</span>
+                <span className="text-slate-400 font-medium">Tanker Capacity / Size:</span>
                 <span className="font-bold text-slate-900">{bill.tankerSize || '5000'}L Litre</span>
               </div>
               <div className="flex justify-between border-b border-slate-100 pb-3">
-                <span className="text-slate-400 font-medium">कुल राशि (Amount):</span>
+                <span className="text-slate-400 font-medium">Total Amount:</span>
                 <span className="font-black text-emerald-600 text-base">{formatCurrency(bill.grandTotal || bill.totalAmount)}</span>
               </div>
             </div>
@@ -353,8 +353,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                       <Truck size={20} />
                     </div>
                     <div>
-                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">ड्राइवर संपर्क</p>
-                       <h4 className="font-bold text-slate-900">{bill.driverName || 'राजहंस ड्राइवर'}</h4>
+                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Driver Contact</p>
+                       <h4 className="font-bold text-slate-900">{bill.driverName || 'Rajhans Driver'}</h4>
                     </div>
                   </div>
                   {bill.driverMobile && (
@@ -367,7 +367,7 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                 <div className="flex items-center justify-between mb-3 px-1">
                    <div className="flex items-center gap-1.5 font-black text-[10px] text-blue-500 uppercase">
                      <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
-                     लाइव जीपीएस ट्रैकिंग Active
+                     Live GPS Tracking Active
                    </div>
                    <div className="text-[10px] font-bold text-slate-400 uppercase">
                      {Math.round(driverLocation.speed || 0)} KM/H
@@ -391,8 +391,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                     <RefreshCw size={16} />
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-sm text-slate-900">दोबारा ऑर्डर करें (Rebook Tanker)</h3>
-                    <p className="text-[11px] text-slate-500 font-medium">1-क्लिक में नया टैंकर या वाटर केन बुक करें</p>
+                    <h3 className="font-extrabold text-sm text-slate-900">Rebook Tanker</h3>
+                    <p className="text-[11px] text-slate-500 font-medium">Book a new tanker or water container in 1 click</p>
                   </div>
                 </div>
 
@@ -403,14 +403,14 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                       className="w-full bg-blue-600 text-white h-12 rounded-xl font-black shadow-md hover:bg-blue-700 transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
                     >
                       <RefreshCw size={18} />
-                      इसी ऑर्डर को दोबारा भेजें (Instant Rebook)
+                      Rebook Same Order (Instant Rebook)
                     </button>
                     <a 
                       href={rebookPortalUrl}
                       className="w-full bg-slate-900 text-white h-11 rounded-xl font-bold shadow-xs hover:bg-slate-800 transition-all flex items-center justify-center gap-2 text-xs"
                     >
                       <ExternalLink size={15} className="text-blue-400" />
-                      पूरा कस्टमर बुकिंग पोर्टल खोलें (Full Portal)
+                      Open Full Customer Booking Portal
                     </a>
                   </div>
                 )}
@@ -418,13 +418,13 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                 {requestStatus === 'pending' && (
                   <div className="bg-white p-3.5 rounded-xl text-center border border-orange-200 mt-2 shadow-xs">
                     <Clock className="text-orange-500 mx-auto mb-1 animate-pulse" size={28} />
-                    <h3 className="font-black text-orange-900 text-xs">आपकी री-बुकिंग रिक्वेस्ट भेजी जा चुकी है</h3>
-                    <p className="text-[11px] text-orange-700 mt-0.5">एडमिन आपकी नई बुकिंग स्वीकार कर रहा है...</p>
+                    <h3 className="font-black text-orange-900 text-xs">Your rebooking request has been submitted</h3>
+                    <p className="text-[11px] text-orange-700 mt-0.5">Admin is reviewing your new booking...</p>
                     <button 
                       onClick={handleCancelRequest}
                       className="mt-2 text-xs text-red-500 underline font-extrabold cursor-pointer"
                     >
-                      रिक्वेस्ट रद्द करें
+                      Cancel Request
                     </button>
                   </div>
                 )}
@@ -432,8 +432,8 @@ export function CustomerOrderView({ billId }: { billId: string }) {
                 {requestStatus === 'accepted' && (
                   <div className="bg-emerald-50 p-3.5 rounded-xl text-center border border-emerald-200 mt-2">
                     <CheckCircle2 className="text-emerald-600 mx-auto mb-1" size={28} />
-                    <h3 className="font-black text-emerald-900 text-xs">आपकी बुकिंग स्वीकार कर ली गई है!</h3>
-                    <p className="text-[11px] text-emerald-700 mt-0.5">जल्द ही नया टैंकर असाइन किया जाएगा।</p>
+                    <h3 className="font-black text-emerald-900 text-xs">Your booking has been accepted!</h3>
+                    <p className="text-[11px] text-emerald-700 mt-0.5">A new tanker will be assigned shortly.</p>
                   </div>
                 )}
               </div>
@@ -442,7 +442,7 @@ export function CustomerOrderView({ billId }: { billId: string }) {
         </motion.div>
         
         <p className="mt-6 text-center text-slate-400 text-xs font-bold uppercase tracking-widest pb-4">
-            राजहंस <span className="relative text-blue-600">वाटर सप्लाई</span>
+            Rajhans <span className="relative text-blue-600">Water Supply</span>
         </p>
       </div>
     </div>

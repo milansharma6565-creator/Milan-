@@ -18,7 +18,7 @@ const OCCASIONS: Occasion[] = [
     id: 'new_year',
     date: '01-01',
     title: 'Happy New Year!',
-    message: 'Naye saal ki hardik shubhkamnaye! May this year bring abundance of water and prosperity to your life. \n- Team TankerWala',
+    message: 'Happy New Year! May this year bring an abundance of water and prosperity to your life. \n- Team TankerWala',
     image: 'https://images.unsplash.com/photo-1467810563316-b5476525c0f9?q=80&w=800',
     bgColor: 'from-purple-600 to-blue-600',
     textColor: 'text-white'
@@ -27,7 +27,7 @@ const OCCASIONS: Occasion[] = [
     id: 'republic_day',
     date: '01-26',
     title: 'Happy Republic Day',
-    message: 'Gantantra Diwas ki sabhi ko badhai! Proud to serve our nation with pure water. Jai Hind! Vande Mataram! \n- Wishes from TankerWala',
+    message: 'Happy Republic Day to everyone! Proud to serve our nation with pure water. \n- Wishes from TankerWala',
     image: 'https://images.unsplash.com/photo-1532375810709-75b1da00537c?q=80&w=800',
     audio: 'https://www.soundjay.com/misc/sounds/bell-ringing-01.mp3', 
     bgColor: 'from-orange-500 via-white to-green-500',
@@ -37,7 +37,7 @@ const OCCASIONS: Occasion[] = [
     id: 'holi',
     date: '03-14', // 2025 date
     title: 'Happy Holi!',
-    message: 'Rangon ke tyohar ki hardik shubhkamnaye! Let your life be as colorful as Holi and as pure as our water. \n- Wishes from TankerWala',
+    message: 'Wishing you a very Happy Holi! May your life be as colorful as Holi and as pure as our water. \n- Wishes from TankerWala',
     image: 'https://images.unsplash.com/photo-1570733577313-097ed43321db?q=80&w=800',
     bgColor: 'from-pink-500 via-yellow-400 to-teal-500',
     textColor: 'text-white'
@@ -45,8 +45,8 @@ const OCCASIONS: Occasion[] = [
   {
     id: 'independence_day',
     date: '08-15',
-    title: 'Swatantrata Diwas',
-    message: '79th Independence Day ki hardik badhai! Vande Mataram! Serving the nation with every drop. \n- Wishes from TankerWala',
+    title: 'Happy Independence Day',
+    message: 'Wishing you a very Happy Independence Day! Serving the nation with every drop. \n- Wishes from TankerWala',
     image: 'https://images.unsplash.com/photo-1532375810709-75b1da00537c?q=80&w=800',
     audio: 'https://www.soundjay.com/buttons/beep-01a.mp3', 
     bgColor: 'from-orange-600 via-slate-50 to-green-600',
@@ -56,7 +56,7 @@ const OCCASIONS: Occasion[] = [
     id: 'gandhi_jayanti',
     date: '10-02',
     title: 'Happy Gandhi Jayanti',
-    message: 'Mahatma Gandhi ki jayanti par unke satya aur ahimsa ke marg ko yaad karte hue. \n- Wishes from TankerWala',
+    message: 'Remembering Mahatma Gandhi on his birth anniversary. Truth and non-violence guide us. \n- Wishes from TankerWala',
     image: 'https://images.unsplash.com/photo-1590494165264-1ebe3602eb80?q=80&w=800',
     bgColor: 'from-slate-100 to-slate-300',
     textColor: 'text-slate-800'
@@ -65,7 +65,7 @@ const OCCASIONS: Occasion[] = [
     id: 'diwali',
     date: '10-20', // Approx for 2025
     title: 'Happy Diwali!',
-    message: 'Deepawali ki dher saari shubhkamnaye! Is saal roshni ke saath tanki bhi full rahegi! \n- Wishes from TankerWala',
+    message: 'Wishing you a bright and prosperous Diwali! May your home be filled with light and joy. \n- Wishes from TankerWala',
     image: 'https://images.unsplash.com/photo-1573843225224-aa69739d446a?q=80&w=800',
     bgColor: 'from-yellow-500 to-red-600',
     textColor: 'text-white'

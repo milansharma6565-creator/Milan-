@@ -140,7 +140,7 @@ export function DriverApp() {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'hi-IN';
+      utterance.lang = 'en-US';
       utterance.rate = 0.85;
       window.speechSynthesis.speak(utterance);
     }
@@ -149,7 +149,7 @@ export function DriverApp() {
   useEffect(() => {
     if (!activeTrip) {
       if (prevTripIdRef.current) {
-        playAnnouncement("Aapka active trip samapt ho gaya hai. Dhanyawad!");
+        playAnnouncement("Your active trip has been completed. Thank you!");
         prevTripIdRef.current = '';
         prevTripStatusRef.current = '';
       }
@@ -160,16 +160,16 @@ export function DriverApp() {
     const currentId = activeTrip.id;
 
     if (currentId !== prevTripIdRef.current) {
-      playAnnouncement(`Naya order mila hai. ${activeTrip.customerName} ke liye delivery karein.`);
+      playAnnouncement(`New order received. Please deliver for ${activeTrip.customerName}.`);
       prevTripIdRef.current = currentId;
       prevTripStatusRef.current = currentStatus;
     } else if (currentStatus !== prevTripStatusRef.current) {
       if (currentStatus === 'On the way') {
-        playAnnouncement(`Trip shuru ho chuka hai. On-the-way mark kiya gaya.`);
+        playAnnouncement(`Trip started. Marked as on the way.`);
       } else if (currentStatus === 'Reached') {
-        playAnnouncement(`Aap location par pahunch gaye hain.`);
+        playAnnouncement(`You have arrived at the location.`);
       } else if (currentStatus === 'Delivered') {
-        playAnnouncement(`Order delivered ho gaya hai.`);
+        playAnnouncement(`Order has been delivered.`);
       }
       prevTripStatusRef.current = currentStatus;
     }
@@ -871,14 +871,14 @@ export function DriverApp() {
               if (newVal) {
                 if ('speechSynthesis' in window) {
                   window.speechSynthesis.cancel();
-                  const u = new SpeechSynthesisUtterance("Awaaz alert chalu ho gae hain.");
-                  u.lang = 'hi-IN';
+                  const u = new SpeechSynthesisUtterance("Voice alerts enabled.");
+                  u.lang = 'en-US';
                   window.speechSynthesis.speak(u);
                 }
               }
             }} 
             className={`p-3 rounded-2xl active:scale-95 transition-all border ${speakAnnouncements ? 'bg-indigo-50 text-indigo-600 border-indigo-150' : 'bg-slate-100 text-slate-400 border-slate-200'}`}
-            title={speakAnnouncements ? "Hindi Speak Alerts Active" : "Speak Alerts Off"}
+            title={speakAnnouncements ? "Voice Alerts Active" : "Speak Alerts Off"}
           >
             {speakAnnouncements ? <Bell size={20} className="animate-bounce" /> : <BellOff size={20} />}
           </button>

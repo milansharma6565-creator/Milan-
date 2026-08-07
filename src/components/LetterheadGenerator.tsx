@@ -178,7 +178,7 @@ ${billData.splitPayments?.pending ? `Pending Amount: ₹${billData.splitPayments
             </div>
           </div>
 
-          <label className="block text-sm font-bold text-slate-700 mb-2">Instructions for AI (Hindi/English)</label>
+          <label className="block text-sm font-bold text-slate-700 mb-2">Instructions for AI (English)</label>
           <textarea
             className="w-full h-24 rounded-xl border border-slate-200 p-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none resize-none transition-all mb-3"
             placeholder="e.g. Write a letter to regular customers wishing them Happy Diwali..."

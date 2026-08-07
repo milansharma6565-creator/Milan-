@@ -61,7 +61,7 @@ export function DriverAttendance({ franchiseId, isSuperAdmin }: { franchiseId?: 
       qDrivers = query(collection(db, 'drivers'), where('franchiseId', '==', fid));
     }
     const driversUnsub = onSnapshot(qDrivers, (snapshot) => {
-      setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver)));
+      setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver)).filter(d => (d.status || 'Active') === 'Active'));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'drivers'));
 
     // Fetch attendance for current month

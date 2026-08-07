@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc, query, where, setDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc, query, where, setDoc, runTransaction } from 'firebase/firestore';
 import { VoucherItem, Account } from '../types';
 
 export const ledgerAutomation = {
@@ -903,6 +903,186 @@ export const ledgerAutomation = {
       console.log(`Successfully initialized default ledgers (Cash, Bank of Baroda Operating A/c, Sales) for franchise: ${franchiseName}`);
     } catch (e) {
       console.error('Error setupFranchiseLedgers:', e);
+    }
+  },
+
+  /**
+   * Posts accumulated attendance salary for a driver to Ledger upon deactivation or manual trigger
+   */
+  postDriverAttendanceSalaryToLedger: async (driver: any, franchiseId?: string | null) => {
+    try {
+      if (!driver?.id) return { posted: false, amount: 0, totalDays: 0 };
+      const targetFranchiseId = franchiseId || driver.franchiseId || null;
+
+      // 1. Fetch attendance records for this driver
+      let attQuery = query(collection(db, 'attendance'), where('driverId', '==', driver.id));
+      const attSnap = await getDocs(attQuery);
+
+      if (attSnap.empty) {
+        return { posted: false, amount: 0, totalDays: 0 };
+      }
+
+      let totalDays = 0;
+      attSnap.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.status === 'Full Day') totalDays += 1;
+        else if (data.status === 'Half Day') totalDays += 0.5;
+      });
+
+      if (totalDays <= 0) {
+        return { posted: false, amount: 0, totalDays: 0 };
+      }
+
+      const monthlySalary = Number(driver.monthlySalary) || 0;
+      const dailyRate = monthlySalary > 0 ? monthlySalary / 30 : 0;
+      const grossSalary = Math.round(totalDays * dailyRate);
+
+      if (grossSalary <= 0) {
+        return { posted: false, amount: 0, totalDays };
+      }
+
+      // 2. Fetch existing salary vouchers posted for this driver to avoid duplicate postings
+      const vchSnap = await getDocs(query(collection(db, 'vouchers')));
+      let totalAlreadyPosted = 0;
+
+      vchSnap.docs.forEach(d => {
+        const v = d.data();
+        const isForDriver = v.driverId === driver.id || 
+          (v.voucherNumber && (v.voucherNumber.startsWith('INACT-SAL-') || v.voucherNumber.startsWith('ATT-'))) ||
+          (v.narration && v.narration.toLowerCase().includes(driver.name.toLowerCase()) && v.narration.toLowerCase().includes('salary'));
+
+        if (isForDriver && v.items && Array.isArray(v.items)) {
+          const drvItem = v.items.find((item: any) => 
+            (item.accountName && item.accountName.toLowerCase().trim() === driver.name.toLowerCase().trim()) && item.type === 'Cr'
+          );
+          if (drvItem && drvItem.amount) {
+            totalAlreadyPosted += Number(drvItem.amount) || 0;
+          } else if (v.totalAmount && v.type === 'Journal') {
+            totalAlreadyPosted += Number(v.totalAmount) || 0;
+          }
+        }
+      });
+
+      const unpostedAmount = Math.max(0, grossSalary - totalAlreadyPosted);
+      if (unpostedAmount <= 0) {
+        return { posted: false, amount: 0, totalDays };
+      }
+
+      // 3. Find or Create Driver Ledger Account (Liability)
+      const accountsSnap = await getDocs(collection(db, 'accounts'));
+      const accounts = accountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Account));
+
+      let driverAcc = accounts.find(a => 
+        (a.driverId === driver.id) || 
+        (a.name.trim().toLowerCase() === driver.name.trim().toLowerCase() && (a.franchiseId === targetFranchiseId || !a.franchiseId))
+      );
+
+      let driverAccId = driverAcc?.id;
+
+      if (!driverAccId) {
+        const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+        let liabGrp = groupsSnap.docs.find(d => d.data().name === 'Current Liabilities');
+        let liabGrpId = liabGrp?.id;
+
+        if (!liabGrpId) {
+          const newGrp = await addDoc(collection(db, 'accountGroups'), {
+            name: 'Current Liabilities',
+            type: 'Liability',
+            franchiseId: targetFranchiseId,
+            createdAt: serverTimestamp()
+          });
+          liabGrpId = newGrp.id;
+        }
+
+        const newAccRef = await addDoc(collection(db, 'accounts'), {
+          name: driver.name,
+          groupId: liabGrpId,
+          group: 'Current Liabilities',
+          openingBalance: 0,
+          currentBalance: 0,
+          balanceType: 'Cr',
+          driverId: driver.id,
+          franchiseId: targetFranchiseId,
+          createdAt: serverTimestamp()
+        });
+        driverAccId = newAccRef.id;
+      }
+
+      // 4. Find or Create Salary Expense Account (Expense)
+      let expAcc = accounts.find(a => 
+        a.name.trim().toLowerCase() === 'salary expense' && 
+        (a.franchiseId === targetFranchiseId || !a.franchiseId)
+      );
+      let expAccId = expAcc?.id;
+
+      if (!expAccId) {
+        const groupsSnap = await getDocs(collection(db, 'accountGroups'));
+        let expGrp = groupsSnap.docs.find(d => d.data().name === 'Indirect Expenses');
+        let expGrpId = expGrp?.id;
+
+        if (!expGrpId) {
+          const newGrp = await addDoc(collection(db, 'accountGroups'), {
+            name: 'Indirect Expenses',
+            type: 'Expense',
+            franchiseId: targetFranchiseId,
+            createdAt: serverTimestamp()
+          });
+          expGrpId = newGrp.id;
+        }
+
+        const newExpRef = await addDoc(collection(db, 'accounts'), {
+          name: 'Salary Expense',
+          groupId: expGrpId,
+          group: 'Indirect Expenses',
+          openingBalance: 0,
+          currentBalance: 0,
+          balanceType: 'Dr',
+          franchiseId: targetFranchiseId,
+          createdAt: serverTimestamp()
+        });
+        expAccId = newExpRef.id;
+      }
+
+      // 5. Post Journal Voucher & Update Ledger Balances
+      const vchNo = `INACT-SAL-${driver.id.slice(0, 4)}-${Date.now()}`;
+      const todayDateStr = new Date().toISOString().split('T')[0];
+
+      await runTransaction(db, async (transaction) => {
+        const drvRef = doc(db, 'accounts', driverAccId!);
+        const expRef = doc(db, 'accounts', expAccId!);
+        const vchRef = doc(collection(db, 'vouchers'));
+
+        const [drvDoc, expDoc] = await Promise.all([
+          transaction.get(drvRef),
+          transaction.get(expRef)
+        ]);
+
+        transaction.set(vchRef, {
+          date: todayDateStr,
+          franchiseId: targetFranchiseId,
+          type: 'Journal',
+          voucherNumber: vchNo,
+          items: [
+            { accountId: expAccId!, accountName: 'Salary Expense', amount: unpostedAmount, type: 'Dr' },
+            { accountId: driverAccId!, accountName: driver.name, amount: unpostedAmount, type: 'Cr' }
+          ],
+          narration: `Attendance Salary posted on Driver Deactivation: ${driver.name} (${totalDays} days worked, ₹${unpostedAmount})`,
+          totalAmount: unpostedAmount,
+          driverId: driver.id,
+          createdAt: serverTimestamp()
+        });
+
+        const currentDrvBal = drvDoc.exists() ? (drvDoc.data()?.currentBalance || 0) : 0;
+        const currentExpBal = expDoc.exists() ? (expDoc.data()?.currentBalance || 0) : 0;
+
+        transaction.update(drvRef, { currentBalance: currentDrvBal + unpostedAmount });
+        transaction.update(expRef, { currentBalance: currentExpBal + unpostedAmount });
+      });
+
+      return { posted: true, amount: unpostedAmount, totalDays };
+    } catch (err) {
+      console.error('Error posting driver attendance salary on deactivation:', err);
+      return { posted: false, amount: 0, totalDays: 0 };
     }
   }
 };

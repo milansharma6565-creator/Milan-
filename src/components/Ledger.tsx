@@ -1008,7 +1008,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       <div className="h-[60vh] flex flex-col items-center justify-center p-6 text-center bg-[#072F32] text-teal-300 font-mono">
         <div className="w-16 h-16 border-4 border-yellow-300 border-t-transparent rounded-full animate-spin mb-6" />
         <h2 className="text-xl font-bold tracking-widest text-yellow-300">TALLY.ERP 9 SYSTEM STATUS</h2>
-        <p className="text-teal-400 max-w-xs mt-2 text-xs">Accessing cloud registers & loading bahi-khata double entries...</p>
+        <p className="text-teal-400 max-w-xs mt-2 text-xs">Accessing cloud registers & loading double entries...</p>
       </div>
     );
   }
@@ -1380,7 +1380,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                   <div className="absolute inset-0 bg-black/60 z-[110] flex items-center justify-center p-4">
                     <div className="bg-[#04282c] border-2 border-yellow-300 p-6 text-center max-w-xs w-full shadow-2xl rounded text-teal-100 space-y-4">
                       <div className="text-yellow-400 text-sm font-bold tracking-widest uppercase">Accept Ledger?</div>
-                      <div className="text-xs">Do you want to write this ledger permanently to bahi-khata registers?</div>
+                      <div className="text-xs">Do you want to write this ledger permanently to accounting registers?</div>
                       <div className="flex justify-center gap-4 text-xs">
                         <button 
                           onClick={handleSaveRetroLedger}
@@ -1490,7 +1490,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
                   <div className="absolute inset-0 bg-black/60 z-[110] flex items-center justify-center p-4">
                     <div className="bg-[#04282c] border-2 border-yellow-300 p-6 text-center max-w-xs w-full shadow-2xl rounded text-teal-100 space-y-4">
                       <div className="text-yellow-400 text-sm font-bold tracking-widest uppercase">Modify Ledger?</div>
-                      <div className="text-xs font-semibold">Do you want to update this ledger in bahi-khata registers?</div>
+                      <div className="text-xs font-semibold">Do you want to update this ledger in accounting registers?</div>
                       <div className="flex justify-center gap-4 text-xs">
                         <button 
                           onClick={handleUpdateRetroLedger}
@@ -1728,7 +1728,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
               <div className="w-full bg-[#032326] border border-[#115b62] p-4 text-xs rounded shadow-lg text-teal-100 flex flex-col justify-between">
                 <div>
                   <div className="flex justify-between items-center border-b border-[#115b62] pb-2 mb-2">
-                    <span className="text-yellow-300 font-bold text-sm">Day Book (Bahi-Khata Ledger Registers)</span>
+                    <span className="text-yellow-300 font-bold text-sm">Day Book (Ledger Registers)</span>
                     <button 
                       onClick={() => setTallyScreen('gateway')}
                       className="text-[#a1dedb] bg-[#115b62] px-3 py-1 cursor-pointer border border-teal-500 rounded text-[11px]"
@@ -3113,7 +3113,7 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Opening Balance Date (किस तारीख को बैलेंस था)</label>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Opening Balance Date</label>
             <input 
               type="date"
               required
@@ -3472,7 +3472,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
                     filterPreset === 'today' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  आज (Today)
+                  Today
                 </button>
 
                 <button
@@ -3489,7 +3489,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
                     filterPreset === 'yesterday' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  कल (Yesterday)
+                  Yesterday
                 </button>
 
                 <button
@@ -3506,7 +3506,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
                     filterPreset === 'month' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  इस महीने (This Month)
+                  This Month
                 </button>
 
                 <button
@@ -3523,7 +3523,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
                     filterPreset === 'year' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  इस साल (This Year)
+                  This Year
                 </button>
 
                 <button
@@ -3537,7 +3537,7 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
                     filterPreset === 'all' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  जब से शुरू हुआ (All Time)
+                  All Time
                 </button>
               </div>
 
@@ -4166,7 +4166,7 @@ function AccountEditModal({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Opening Balance Date (किस तारीख को बैलेंस था)</label>
+            <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Opening Balance Date</label>
             <input 
               type="date"
               required
@@ -4437,9 +4437,9 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
       anomalies.push({
         id: 'trial_balance_mismatch',
         type: 'critical',
-        title: 'Trial Balance Mismatch / ट्रायल बैलेंस विसंगति',
+        title: 'Trial Balance Mismatch',
         message: `Total debits do not match total credits. There is a discrepancy of ${formatCurrency(Math.abs(diff))} (${diff > 0 ? 'Debit Excess' : 'Credit Excess'}).`,
-        suggestion: 'Ensure that opening balances of all ledger accounts are correct, or post an adjusting entry to Suspense Account (सस्पेंस खाता) to balance the trial ledger temporarily.',
+        suggestion: 'Ensure that opening balances of all ledger accounts are correct, or post an adjusting entry to Suspense Account to balance the trial ledger temporarily.',
         category: 'Trial Balance'
       });
     }
@@ -4457,7 +4457,7 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
           anomalies.push({
             id: `negative_cash_${acc.id}`,
             type: 'warning',
-            title: `Negative Cash/Bank Balance in "${acc.name}" / ऋणात्मक रोकड़ शेष`,
+            title: `Negative Cash/Bank Balance in "${acc.name}"`,
             message: `The account has a net Credit balance of ${formatCurrency(Math.abs(bal))}. Physical cash accounts or overdraft-free bank accounts cannot have negative balances under standard accounting rules.`,
             suggestion: 'Check if any cash receipt or sales voucher was missed, or if a payment entry was double-posted or posted with an incorrect amount.',
             category: 'Cash Book'
@@ -4481,7 +4481,7 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
         anomalies.push({
           id: `unbalanced_vch_${vch.id}`,
           type: 'critical',
-          title: `Unbalanced Double-Entry in Voucher #${vch.voucherNumber} / असंतुलित वाउचर`,
+          title: `Unbalanced Double-Entry in Voucher #${vch.voucherNumber}`,
           message: `Voucher #${vch.voucherNumber} is unbalanced. Total Debits (₹${drSum.toLocaleString('en-IN')}) do not equal Total Credits (₹${crSum.toLocaleString('en-IN')}). Discrepancy is ₹${Math.abs(drSum - crSum).toLocaleString('en-IN')}.`,
           suggestion: `Edit Voucher #${vch.voucherNumber} and verify that the debit and credit rows are balanced correctly.`,
           category: 'Double Entry'
@@ -4501,7 +4501,7 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
       anomalies.push({
         id: 'missing_narrations',
         type: 'info',
-        title: 'Missing Voucher Narrations / वाउचर नरेशन गायब',
+        title: 'Missing Voucher Narrations',
         message: `${emptyNarrationCount} transactions do not have any narration or description notes.`,
         suggestion: 'Add clear description/narration to vouchers during entry to ensure traceability during external GST or income tax audits.',
         category: 'Voucher Sequence'
@@ -4533,7 +4533,7 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
       anomalies.push({
         id: 'high_cash_payment',
         type: 'warning',
-        title: 'High-Value Cash Payment Violation (Section 40A(3)) / उच्च नकद भुगतान नियम',
+        title: 'High-Value Cash Payment Violation (Section 40A(3))',
         message: `Detected ${highCashCount} cash payment transactions exceeding ₹10,000. Under Section 40A(3) of the Income Tax Act, business payments exceeding ₹10,000 per day in cash are not allowed as deductible expenditure.`,
         suggestion: 'Convert future high-value payments to bank transfers, UPI, or other digital modes to ensure complete tax audit compliance.',
         category: 'Transaction Volume'
@@ -5022,7 +5022,7 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-emerald-400 text-xs font-black uppercase tracking-widest bg-emerald-500/10 px-3 py-1.5 rounded-full w-fit">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    CA Certified Compliance Diagnostics / सी.ए. ऑडिट रिपोर्ट
+                    CA Certified Compliance Diagnostics
                   </div>
                   <h3 className="text-3xl font-display font-black tracking-tight">CA Sandeep Soni & Associates</h3>
                   <p className="text-slate-300 text-sm max-w-xl">
@@ -5065,12 +5065,12 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
                   </div>
                   <div className="space-y-1">
                     <h4 className="text-lg font-black text-slate-900">
-                      Proprietor Green Flag Clearance / मालिक का हरा झंडा
+                      Proprietor Green Flag Clearance
                     </h4>
                     <p className="text-sm text-slate-600 max-w-xl">
                       {greenFlagGranted 
                         ? 'Green Flag is GRANTED by Proprietor (Milan Sharma). The ledger state is certified as reviewed and approved.' 
-                        : 'Review the identified accounting discrepancies (कमियाँ) listed below. Once satisfied, click to grant a Green Flag to approve these accounts.'
+                        : 'Review the identified accounting discrepancies listed below. Once satisfied, click to grant a Green Flag to approve these accounts.'
                       }
                     </p>
                   </div>
@@ -5082,32 +5082,32 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
                       onClick={handleRevokeGreenFlag} 
                       className="px-6 py-3 bg-red-100 text-red-700 hover:bg-red-200 rounded-xl font-bold text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center gap-1.5"
                     >
-                      Revoke Green Flag / झंडा वापस लें
+                      Revoke Green Flag
                     </button>
                   ) : (
                     <button 
                       onClick={handleGrantGreenFlag} 
                       className="px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm uppercase tracking-wider shadow-lg shadow-emerald-200 active:scale-95 transition-all flex items-center gap-2 animate-pulse"
                     >
-                      Grant Green Flag / हरा झंडा प्रदान करें 🟢
+                      Grant Green Flag 🟢
                     </button>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Discrepancies Matrix / कमियाँ */}
+            {/* Discrepancies Matrix */}
             <div className="space-y-6">
               <h4 className="text-xl font-display font-black text-slate-900 flex items-center gap-2">
                 <FileWarning className="text-slate-500" />
-                Ledger Shortcomings & Audit Findings / खाता बही की कमियाँ
+                Ledger Shortcomings & Audit Findings
               </h4>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Left Column: Critical Anomalies */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 text-xs font-black text-red-600 uppercase tracking-widest">
-                    <span>Critical Anomalies ({auditResult.criticalCount}) / गंभीर त्रुटियाँ</span>
+                    <span>Critical Anomalies ({auditResult.criticalCount})</span>
                   </div>
                   
                   {auditResult.anomalies.filter(a => a.type === 'critical').length === 0 ? (
@@ -5138,7 +5138,7 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
                 {/* Right Column: Warnings & Quality Notes */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 text-xs font-black text-amber-600 uppercase tracking-widest">
-                    <span>Compliance & Traceability ({auditResult.warningCount + auditResult.infoCount}) / चेतावनी व सुझाव</span>
+                    <span>Compliance & Traceability ({auditResult.warningCount + auditResult.infoCount})</span>
                   </div>
 
                   {auditResult.anomalies.filter(a => a.type !== 'critical').length === 0 ? (
@@ -5177,7 +5177,7 @@ function FinancialReports({ accounts, vouchers, groups, franchiseId }: { account
             {/* Audit Checklist Status */}
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 space-y-6">
               <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-4 flex items-center gap-2">
-                <Scale size={16} /> Standard Accounting Checks Performed / ऑडिट चेकलिस्ट
+                <Scale size={16} /> Standard Accounting Checks Performed
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {auditResult.indicators.map((ind, i) => (

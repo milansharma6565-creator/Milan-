@@ -963,7 +963,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       (error) => handleFirestoreError(error, OperationType.LIST, 'customers-dashboard')
     );
     const unsubDrivers = onSnapshot(driversQ, 
-      (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver))),
+      (snapshot) => setDrivers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver)).filter(d => (d.status || 'Active') === 'Active')),
       (error) => handleFirestoreError(error, OperationType.LIST, 'drivers-dashboard')
     );
     const unsubTractors = onSnapshot(tractorsQ, 
@@ -3859,7 +3859,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                           <span className="font-bold text-white">₹{Number(stats.todayDeliveredBank || 0).toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between items-center text-orange-450 font-medium">
-                          <span>Udhari (Credit):</span>
+                          <span>Credit / Due Sale:</span>
                           <span className="font-bold text-orange-400">₹{Number(stats.todayDeliveredPending || 0).toLocaleString()}</span>
                         </div>
                       </div>
@@ -4791,7 +4791,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     <History size={24} />
                   </div>
                   <div className="flex-1">
-                    <div className="font-bold text-slate-900">Debit udhar</div>
+                    <div className="font-bold text-slate-900">On Account / Credit</div>
                     <div className="text-[10px] text-slate-400 font-bold uppercase">Added to Customer Due Account</div>
                   </div>
                   {isSettling === 'Credit' && (
@@ -5200,7 +5200,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                               className="flex flex-col items-center justify-center gap-1 py-4 bg-white text-slate-700 rounded-2xl font-bold border-2 border-slate-100 hover:border-orange-500 hover:text-orange-600 transition-all shadow-sm"
                             >
                               <Plus size={20} />
-                              <span className="text-[10px] uppercase">Debit udhar</span>
+                              <span className="text-[10px] uppercase">On Account</span>
                             </button>
                           </div>
                         </div>

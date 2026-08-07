@@ -212,13 +212,32 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
 
   const toggleDriverStatus = async (id: string, newStatus: 'Active' | 'Inactive' | 'approved' | 'pending') => {
     try {
-      if (newStatus === 'approved') {
+      const driverRef = doc(db, 'drivers', id);
+      const driverSnap = await getDoc(driverRef);
+      if (!driverSnap.exists()) return;
+      const driverData = { id: driverSnap.id, ...driverSnap.data() } as Driver;
+
+      if (newStatus === 'Inactive') {
+        // Automatically post accrued attendance salary to Ledger
+        const result = await ledgerAutomation.postDriverAttendanceSalaryToLedger(
+          driverData,
+          franchiseId || driverData.franchiseId
+        );
+
+        await updateDoc(driverRef, {
+          status: 'Inactive',
+          updatedAt: serverTimestamp()
+        });
+
+        if (result && result.posted && result.amount > 0) {
+          alert(`✅ Driver ${driverData.name} marked as Inactive.\n₹${result.amount.toLocaleString()} attendance salary (${result.totalDays} days worked) was posted to Ledger, and driver was removed from Attendance Register & Assign Driver lists.`);
+        } else {
+          alert(`✅ Driver ${driverData.name} marked as Inactive and removed from Attendance Register & Assign Driver lists.`);
+        }
+      } else if (newStatus === 'approved') {
         await runTransaction(db, async (transaction) => {
-          const driverRef = doc(db, 'drivers', id);
           const driverDoc = await transaction.get(driverRef);
-          
           if (!driverDoc.exists()) return;
-          const driverData = driverDoc.data() as Driver;
           
           // Set driver to active
           transaction.update(driverRef, {
@@ -260,11 +279,15 @@ export function DriverManagement({ franchiseId, isSuperAdmin }: { franchiseId?: 
             });
           }
         });
+        alert(`✅ Driver ${driverData.name} approved & activated! Added to Attendance Register & Assign Driver lists.`);
       } else {
-        await updateDoc(doc(db, 'drivers', id), {
+        await updateDoc(driverRef, {
           status: newStatus,
           updatedAt: serverTimestamp()
         });
+        if (newStatus === 'Active') {
+          alert(`✅ Driver ${driverData.name} activated! Added back to Attendance Register & Assign Driver lists.`);
+        }
       }
       setStatusConfirm(null);
     } catch (error) {

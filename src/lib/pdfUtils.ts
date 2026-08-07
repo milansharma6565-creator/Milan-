@@ -142,7 +142,7 @@ export function sanitizePdfText(text: string): string {
     'दिनांक': 'Date',
     'भुगतान': 'Payment',
     'प्राप्ति': 'Receipt',
-    'उधार': 'Debit/Udhar',
+    'उधार': 'Credit/Due',
     'बैलेंस': 'Balance',
   };
 
