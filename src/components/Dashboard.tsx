@@ -373,7 +373,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         }
       });
     });
-    return balance;
+    return Math.round(balance);
   }, []);
 
   const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
@@ -1053,8 +1053,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const totalBank = accounts
       .filter(a => {
         const norm = a.name.trim().toLowerCase();
-        const grp = (a.group || '').trim().toLowerCase();
-        return norm.includes('bank') || norm.includes('baroda') || norm.includes('bob') || norm.includes('sbi') || norm.includes('hdfc') || norm.includes('axis') || norm.includes('icici') || norm.includes('od') || norm.includes('overdraft') || grp.includes('bank') || grp.includes('bank accounts') || grp.includes('od');
+        return (norm.includes('129') || norm.includes('934')) && !norm.includes('charge');
       })
       .reduce((sum, a) => sum + calcLiveAccBal(a, vouchersList), 0);
 
@@ -3713,12 +3712,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               ? format(subDays(new Date(), 1), 'yyyy-MM-dd') 
               : selectedTokenDate;
           
-          return accounts.filter(a => 
-            a.name.toLowerCase().includes('bank') || 
-            a.name.toLowerCase().includes('baroda') || 
-            a.name.toLowerCase().includes('sbi') || 
-            a.name.toLowerCase().includes('hdfc')
-          ).map((bankAcc, index) => {
+          return accounts.filter(a => {
+            const norm = a.name.toLowerCase();
+            return (norm.includes('129') || norm.includes('934')) && !norm.includes('charge');
+          }).map((bankAcc, index) => {
             const bankName = bankAcc.name;
             const bankBalance = calcLiveAccBal(bankAcc, vouchersList);
 
@@ -4987,12 +4984,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               </div>
 
               <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
-                {accounts.filter(a => 
-                  a.name.toLowerCase().includes('bank') || 
-                  a.name.toLowerCase().includes('baroda') || 
-                  a.name.toLowerCase().includes('sbi') || 
-                  a.name.toLowerCase().includes('hdfc')
-                ).map((bank) => (
+                {accounts.filter(a => {
+                  const norm = a.name.toLowerCase();
+                  return (norm.includes('129') || norm.includes('934')) && !norm.includes('charge');
+                }).map((bank) => (
                   <button
                     key={bank.id}
                     onClick={() => {
