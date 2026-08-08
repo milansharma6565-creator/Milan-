@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc, where, setDoc, arrayUnion } from 'firebase/firestore';
 import { Customer, Driver, Bill, Tractor, Account } from '../types';
@@ -350,7 +350,31 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [cashBalance, setCashBalance] = useState(0);
   const [bankBalance, setBankBalance] = useState(0);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [rawAccounts, setRawAccounts] = useState<Account[]>([]);
   const [vouchersList, setVouchersList] = useState<any[]>([]);
+
+  const calcLiveAccBal = useCallback((acc: Account, vchs: any[]) => {
+    if (!acc) return 0;
+    let balance = acc.openingBalance || 0;
+    const isDr = (acc.balanceType || 'Dr') === 'Dr';
+    
+    vchs.forEach(v => {
+      if (v.isHidden) return;
+      v.items?.forEach((item: any) => {
+        if (
+          item.accountId === acc.id || 
+          (item.accountName && acc.name && item.accountName.trim().toLowerCase() === acc.name.trim().toLowerCase())
+        ) {
+          if (item.type === 'Dr') {
+            balance += isDr ? Number(item.amount || 0) : -Number(item.amount || 0);
+          } else if (item.type === 'Cr') {
+            balance += isDr ? -Number(item.amount || 0) : Number(item.amount || 0);
+          }
+        }
+      });
+    });
+    return balance;
+  }, []);
 
   const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
   const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -889,7 +913,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     let driversQ = query(collection(db, 'drivers'));
     let tractorsQ = query(collection(db, 'tractors'));
     let accountsQ = query(collection(db, 'accounts'));
-    let vouchersQ = query(collection(db, 'vouchers'), orderBy('date', 'desc'), limit(500));
+    let vouchersQ = query(collection(db, 'vouchers'), orderBy('date', 'desc'));
 
     // Apply Franchise Filter if present
     const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
@@ -908,7 +932,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       driversQ = query(collection(db, 'drivers'), where('franchiseId', '==', fid));
       tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', fid));
       accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
-      vouchersQ = query(collection(db, 'vouchers'), where('franchiseId', '==', fid), orderBy('date', 'desc'), limit(500));
+      vouchersQ = query(collection(db, 'vouchers'), where('franchiseId', '==', fid), orderBy('date', 'desc'));
     } else if (!isSuperAdmin) {
       const none = 'PLACEHOLDER_NONE';
       billsQ = query(collection(db, 'bills'), where('franchiseId', '==', none));
@@ -987,50 +1011,17 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
 
         const deduplicated: Account[] = [];
         const seenNames = new Set<string>();
-        let bankAccountsCount = 0;
 
         sortedRaw.forEach(acc => {
           const normName = acc.name.trim().toLowerCase();
-          const isBank = normName.includes('bank') || normName.includes('bob');
-
-          if (isBank) {
-            if (!seenNames.has(normName) && bankAccountsCount < 3) {
-              deduplicated.push(acc);
-              seenNames.add(normName);
-              bankAccountsCount++;
-            } else if (bankAccountsCount < 3 && !deduplicated.some(x => x.id === acc.id)) {
-              deduplicated.push(acc);
-              bankAccountsCount++;
-            }
-          } else {
-            if (!seenNames.has(normName)) {
-              deduplicated.push(acc);
-              seenNames.add(normName);
-            }
+          if (!seenNames.has(normName)) {
+            deduplicated.push(acc);
+            seenNames.add(normName);
           }
         });
 
+        setRawAccounts(accs);
         setAccounts(deduplicated);
-        
-        // Derive Cash & Bank from ALL accounts of all matching ledger accounts (full raw list)
-        const totalCashBalance = accs
-          .filter(a => {
-            const norm = a.name.trim().toLowerCase();
-            const grp = (a.group || '').trim().toLowerCase();
-            return norm === 'cash' || norm === 'cash in hand' || norm.includes('petty cash') || norm.includes('cash safe') || norm.includes('cash box') || grp === 'cash-in-hand' || grp === 'cash in hand';
-          })
-          .reduce((sum, a) => sum + (a.currentBalance || 0), 0);
-
-        const totalBankBalance = accs
-          .filter(a => {
-            const norm = a.name.trim().toLowerCase();
-            const grp = (a.group || '').trim().toLowerCase();
-            return norm.includes('bank') || norm.includes('baroda') || norm.includes('bob') || norm.includes('sbi') || norm.includes('hdfc') || norm.includes('axis') || norm.includes('icici') || grp.includes('bank') || grp.includes('bank accounts');
-          })
-          .reduce((sum, a) => sum + (a.currentBalance || 0), 0);
-
-        setCashBalance(totalCashBalance);
-        setBankBalance(totalBankBalance);
       },
       (error) => handleFirestoreError(error, OperationType.LIST, 'accounts-dashboard')
     );
@@ -1047,6 +1038,29 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       unsubAccounts();
     };
   }, [franchiseId, isSuperAdmin]);
+
+  useEffect(() => {
+    if (!accounts.length) return;
+
+    const totalCash = accounts
+      .filter(a => {
+        const norm = a.name.trim().toLowerCase();
+        const grp = (a.group || '').trim().toLowerCase();
+        return norm === 'cash' || norm === 'cash in hand' || norm.includes('petty cash') || norm.includes('cash safe') || norm.includes('cash box') || grp === 'cash-in-hand' || grp === 'cash in hand';
+      })
+      .reduce((sum, a) => sum + calcLiveAccBal(a, vouchersList), 0);
+
+    const totalBank = accounts
+      .filter(a => {
+        const norm = a.name.trim().toLowerCase();
+        const grp = (a.group || '').trim().toLowerCase();
+        return norm.includes('bank') || norm.includes('baroda') || norm.includes('bob') || norm.includes('sbi') || norm.includes('hdfc') || norm.includes('axis') || norm.includes('icici') || norm.includes('od') || norm.includes('overdraft') || grp.includes('bank') || grp.includes('bank accounts') || grp.includes('od');
+      })
+      .reduce((sum, a) => sum + calcLiveAccBal(a, vouchersList), 0);
+
+    setCashBalance(totalCash);
+    setBankBalance(totalBank);
+  }, [accounts, vouchersList, calcLiveAccBal]);
 
   const filteredTokenBills = useMemo(() => {
     let baseBills = [...bills];
@@ -3706,7 +3720,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             a.name.toLowerCase().includes('hdfc')
           ).map((bankAcc, index) => {
             const bankName = bankAcc.name;
-            const bankBalance = bankAcc.currentBalance || 0;
+            const bankBalance = calcLiveAccBal(bankAcc, vouchersList);
 
             // Calculate Today's net flow for this specific bank account
             let todayBankFlow = 0;
@@ -4989,7 +5003,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                   >
                     <div>
                       <div className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{bank.name}</div>
-                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Bal: {formatCurrency(bank.currentBalance || 0)}</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Bal: {formatCurrency(calcLiveAccBal(bank, vouchersList))}</div>
                     </div>
                     <ChevronRight size={16} className="text-slate-300 group-hover:text-indigo-500 transition-colors" />
                   </button>

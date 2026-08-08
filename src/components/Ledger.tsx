@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { 
   collection, 
@@ -494,19 +494,19 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     const acc = accounts.find(a => a.id === accountId);
     if (!acc) return 0;
     
-    if (acc.currentBalance !== undefined && acc.currentBalance !== null) {
-      return acc.currentBalance;
-    }
-    
-    // Fallback to in-memory balance calculation if currentBalance is not set
-    let balance = acc.openingBalance;
+    let balance = acc.openingBalance || 0;
+    const isDr = (acc.balanceType || 'Dr') === 'Dr';
     vouchers.forEach(v => {
-      v.items.forEach(item => {
-        if (item.accountId === accountId) {
-          if (item.type === acc.balanceType) {
-            balance += item.amount;
-          } else {
-            balance -= item.amount;
+      if (v.isHidden) return;
+      v.items?.forEach(item => {
+        if (
+          item.accountId === accountId || 
+          (item.accountName && acc.name && item.accountName.trim().toLowerCase() === acc.name.trim().toLowerCase())
+        ) {
+          if (item.type === 'Dr') {
+            balance += isDr ? item.amount : -item.amount;
+          } else if (item.type === 'Cr') {
+            balance += isDr ? -item.amount : item.amount;
           }
         }
       });
@@ -3709,6 +3709,29 @@ function AccountSetup({
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [deletingAccount, setDeletingAccount] = useState<Account | null>(null);
   
+  const getAccountBalance = useCallback((accountId: string) => {
+    const acc = accounts.find(a => a.id === accountId);
+    if (!acc) return 0;
+    let balance = acc.openingBalance || 0;
+    const isDr = (acc.balanceType || 'Dr') === 'Dr';
+    (vouchers || []).forEach(v => {
+      if (v.isHidden) return;
+      v.items?.forEach(item => {
+        if (
+          item.accountId === accountId || 
+          (item.accountName && acc.name && item.accountName.trim().toLowerCase() === acc.name.trim().toLowerCase())
+        ) {
+          if (item.type === 'Dr') {
+            balance += isDr ? item.amount : -item.amount;
+          } else if (item.type === 'Cr') {
+            balance += isDr ? -item.amount : item.amount;
+          }
+        }
+      });
+    });
+    return balance;
+  }, [accounts, vouchers]);
+
   // Group States
   const [viewMode, setViewMode] = useState<'ledgers' | 'groups'>('ledgers');
   const [editingGroup, setEditingGroup] = useState<AccountGroup | null>(null);
@@ -3829,7 +3852,7 @@ function AccountSetup({
                          </div>
                          <div className="flex items-center gap-1.5 ml-auto">
                            <span className="text-slate-500 font-mono text-xs font-bold group-hover/item:hidden">
-                             {formatCurrency(a.currentBalance || 0)}
+                             {formatCurrency(getAccountBalance(a.id!))}
                            </span>
                            
                            {/* Interactive edit, change group & delete options */}
@@ -4261,6 +4284,27 @@ function AccountDeleteConfirmationModal({
     v.items?.some(item => item.accountId === account.id)
   ).length;
 
+  const accountBalance = useMemo(() => {
+    let balance = account.openingBalance || 0;
+    const isDr = (account.balanceType || 'Dr') === 'Dr';
+    (vouchers || []).forEach(v => {
+      if (v.isHidden) return;
+      v.items?.forEach(item => {
+        if (
+          item.accountId === account.id || 
+          (item.accountName && account.name && item.accountName.trim().toLowerCase() === account.name.trim().toLowerCase())
+        ) {
+          if (item.type === 'Dr') {
+            balance += isDr ? item.amount : -item.amount;
+          } else if (item.type === 'Cr') {
+            balance += isDr ? -item.amount : item.amount;
+          }
+        }
+      });
+    });
+    return balance;
+  }, [account, vouchers]);
+
   const handleDelete = async () => {
     setDeleting(true);
     try {
@@ -4297,7 +4341,7 @@ function AccountDeleteConfirmationModal({
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selected Ledger</p>
           <div className="flex justify-between items-center text-sm">
             <span className="font-bold text-slate-800">{account.name}</span>
-            <span className="text-slate-500 font-mono font-bold">{formatCurrency(account.currentBalance || 0)}</span>
+            <span className="text-slate-500 font-mono font-bold">{formatCurrency(accountBalance)}</span>
           </div>
           {count > 0 && (
             <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-800 leading-normal space-y-1 font-bold">
