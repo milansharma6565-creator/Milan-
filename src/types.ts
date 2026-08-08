@@ -261,6 +261,7 @@ export interface Account {
   driverId?: string;
   customerId?: string;
   group?: string;
+  createdAt?: any;
 }
 
 export type VoucherType = 'Receipt' | 'Payment' | 'Journal' | 'Contra' | 'Sales' | 'Purchase';

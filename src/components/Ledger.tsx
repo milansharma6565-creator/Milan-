@@ -339,7 +339,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     // 2. Fetch Accounts
     let accountsQuery = query(collection(db, 'accounts'));
     if (fid) {
-      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
+      accountsQuery = query(collection(db, 'accounts'), where('franchiseId', 'in', [fid, null]));
     } else if (!isSuperAdmin) {
       accountsQuery = query(collection(db, 'accounts'), where('franchiseId', '==', 'PLACEHOLDER_NONE'));
     }
@@ -347,35 +347,30 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       (snapshot) => {
         const raw = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account));
         
-        // Prioritize accounts with non-zero balances
+        // Prioritize accounts with non-zero balances, then newer accounts
         const sortedRaw = [...raw].sort((a, b) => {
           const balA = Math.abs(a.currentBalance || 0) + Math.abs(a.openingBalance || 0);
           const balB = Math.abs(b.currentBalance || 0) + Math.abs(b.openingBalance || 0);
-          return balB - balA;
+          if (balB !== balA) return balB - balA;
+
+          const getTime = (acc: Account) => {
+            if (!acc.createdAt) return 0;
+            if (typeof acc.createdAt === 'object' && 'seconds' in acc.createdAt) {
+              return (acc.createdAt as any).seconds * 1000;
+            }
+            return new Date(acc.createdAt as any).getTime() || 0;
+          };
+          return getTime(b) - getTime(a);
         });
 
         const deduplicated: Account[] = [];
         const seenNames = new Set<string>();
-        let bankAccountsCount = 0;
 
         sortedRaw.forEach(acc => {
           const normName = acc.name.trim().toLowerCase();
-          const isBank = normName.includes('bank') || normName.includes('bob');
-
-          if (isBank) {
-            if (!seenNames.has(normName) && bankAccountsCount < 3) {
-              deduplicated.push(acc);
-              seenNames.add(normName);
-              bankAccountsCount++;
-            } else if (bankAccountsCount < 3 && !deduplicated.some(x => x.id === acc.id)) {
-              deduplicated.push(acc);
-              bankAccountsCount++;
-            }
-          } else {
-            if (!seenNames.has(normName)) {
-              deduplicated.push(acc);
-              seenNames.add(normName);
-            }
+          if (!seenNames.has(normName)) {
+            deduplicated.push(acc);
+            seenNames.add(normName);
           }
         });
 
@@ -638,7 +633,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     }
     setTallySavingLedger(true);
     try {
-      await addDoc(collection(db, 'accounts'), {
+      const newDoc = await addDoc(collection(db, 'accounts'), {
         name: cleanName,
         groupId: newLedgerGroupId,
         openingBalance: newLedgerOpening,
@@ -649,6 +644,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         createdAt: serverTimestamp()
       });
 
+      sessionStorage.setItem('selectedLedgerId', newDoc.id);
       setNewLedgerName('');
       setNewLedgerOpening(0);
       setLedgerAcceptPrompt(false);
@@ -2131,8 +2127,12 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         {isAddingAccount && (
           <AccountEntryModal 
             onClose={() => {
-              setIsAddingAccount(false)} 
-            }
+              setIsAddingAccount(false);
+            }}
+            onCreated={(newAccId) => {
+              sessionStorage.setItem('selectedLedgerId', newAccId);
+              setActiveTab('ledgers');
+            }}
             groups={groups} 
             accounts={accounts}
             franchiseId={franchiseId}
@@ -3032,7 +3032,7 @@ function VoucherEntryModal({ onClose, accounts, franchiseId, editingVoucher }: {
 }
 
 /** Account Entry Modal */
-function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose: () => void, groups: AccountGroup[], accounts: Account[], franchiseId?: string }) {
+function AccountEntryModal({ onClose, onCreated, groups, accounts, franchiseId }: { onClose: () => void, onCreated?: (id: string) => void, groups: AccountGroup[], accounts: Account[], franchiseId?: string }) {
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState('');
   const [opening, setOpening] = useState(0);
@@ -3053,7 +3053,7 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
 
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'accounts'), {
+      const docRef = await addDoc(collection(db, 'accounts'), {
         name: cleanName,
         groupId,
         openingBalance: opening,
@@ -3063,6 +3063,9 @@ function AccountEntryModal({ onClose, groups, accounts, franchiseId }: { onClose
         franchiseId: franchiseId || null,
         createdAt: serverTimestamp()
       });
+      if (onCreated) {
+        onCreated(docRef.id);
+      }
       onClose();
     } catch (error) {
        handleFirestoreError(error, OperationType.WRITE, 'accounts');
@@ -3193,6 +3196,23 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
       .filter(acc => acc.name.toLowerCase().includes(searchTerm.toLowerCase()))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [accounts, searchTerm]);
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem('selectedLedgerId');
+    if (saved) {
+      sessionStorage.removeItem('selectedLedgerId');
+      if (accounts.some(a => a.id === saved)) {
+        setSelectedAccountId(saved);
+        return;
+      }
+    }
+
+    if (!selectedAccountId && filteredSortedAccounts.length > 0) {
+      setSelectedAccountId(filteredSortedAccounts[0].id!);
+    } else if (selectedAccountId && !accounts.some(a => a.id === selectedAccountId) && filteredSortedAccounts.length > 0) {
+      setSelectedAccountId(filteredSortedAccounts[0].id!);
+    }
+  }, [accounts, filteredSortedAccounts, selectedAccountId]);
 
   const statement = useMemo(() => {
     if (!selectedAccountId) return [];
@@ -3694,7 +3714,7 @@ function AccountSetup({
   const [editingGroup, setEditingGroup] = useState<AccountGroup | null>(null);
   const [isAddingGroup, setIsAddingGroup] = useState(false);
 
-  // Filter out duplicate or empty account groups dynamically
+  // Filter out duplicate group names and show all groups with accounts or primary categories
   const filteredGroups = useMemo(() => {
     const uniqueGroups: AccountGroup[] = [];
     const seenNames = new Set<string>();
@@ -3708,8 +3728,7 @@ function AccountSetup({
 
     sorted.forEach(g => {
       const normName = g.name.trim().toLowerCase();
-      const hasAccounts = accounts.some(a => a.groupId === g.id);
-      if (hasAccounts && !seenNames.has(normName)) {
+      if (!seenNames.has(normName)) {
         uniqueGroups.push(g);
         seenNames.add(normName);
       }
@@ -3786,7 +3805,11 @@ function AccountSetup({
         {viewMode === 'ledgers' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {filteredGroups.map(g => {
-              const groupAccounts = accounts.filter(a => a.groupId === g.id).sort((a,b) => a.name.localeCompare(b.name));
+              const groupAccounts = accounts.filter(a => 
+                a.groupId === g.id || 
+                (a.group && a.group.toLowerCase() === g.name.toLowerCase()) ||
+                groups.some(grp => grp.name.toLowerCase() === g.name.toLowerCase() && grp.id === a.groupId)
+              ).sort((a,b) => a.name.localeCompare(b.name));
               return (
                 <div key={g.id} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm space-y-4">
                    <div className="flex items-center justify-between border-b border-slate-50 pb-3">
