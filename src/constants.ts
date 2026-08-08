@@ -25,13 +25,21 @@ export const BILL_STATUSES = ['Delivered', 'Pending', 'Cancelled'] as const;
 
 export function formatCurrency(amount: number) {
   try {
+    const num = Number(amount) || 0;
+    const hasDecimals = num % 1 !== 0;
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
-      maximumFractionDigits: 0,
-    }).format(amount);
+      minimumFractionDigits: hasDecimals ? 2 : 0,
+      maximumFractionDigits: 2,
+    }).format(num);
   } catch (e) {
-    return `₹${amount.toLocaleString('en-IN')}`;
+    const num = Number(amount) || 0;
+    const hasDecimals = num % 1 !== 0;
+    return `₹${num.toLocaleString('en-IN', {
+      minimumFractionDigits: hasDecimals ? 2 : 0,
+      maximumFractionDigits: 2,
+    })}`;
   }
 }
 

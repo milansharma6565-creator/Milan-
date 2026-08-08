@@ -1257,10 +1257,11 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
               </label>
               <input
                 type="number"
-                min="1"
+                min="0.01"
+                step="any"
                 className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 px-4 font-bold transition-all text-sm"
                 value={form.quantity}
-                onChange={e => setForm({...form, quantity: parseInt(e.target.value) || 0})}
+                onChange={e => setForm({...form, quantity: parseFloat(e.target.value) || 0})}
               />
             </div>
           </div>
@@ -1272,9 +1273,10 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">₹</div>
                 <input
                   type="number"
+                  step="any"
                   className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 pl-8 pr-4 font-bold transition-all text-sm"
                   value={form.rate}
-                  onChange={e => setForm({...form, rate: parseInt(e.target.value) || 0})}
+                  onChange={e => setForm({...form, rate: parseFloat(e.target.value) || 0})}
                 />
               </div>
             </div>
@@ -1336,10 +1338,11 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">₹</div>
                 <input
                   type="number"
+                  step="any"
                   placeholder="Charges"
                   className="w-full bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-blue-50 rounded-xl py-3 pl-8 pr-4 font-bold transition-all text-sm"
                   value={form.extraCharges}
-                  onChange={e => setForm({...form, extraCharges: parseInt(e.target.value) || 0})}
+                  onChange={e => setForm({...form, extraCharges: parseFloat(e.target.value) || 0})}
                 />
               </div>
             </div>

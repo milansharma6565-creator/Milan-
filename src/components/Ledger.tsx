@@ -2941,6 +2941,7 @@ function VoucherEntryModal({ onClose, accounts, franchiseId, editingVoucher }: {
                       <input 
                         required
                         type="number"
+                        step="any"
                         placeholder="0.00"
                         className="w-full h-12 px-4 bg-slate-50 rounded-2xl text-sm font-bold border-none text-right"
                         value={item.amount || ''}
