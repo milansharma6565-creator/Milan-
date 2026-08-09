@@ -284,6 +284,7 @@ export interface Voucher {
   narration: string;
   createdAt: any;
   totalAmount: number;
+  billId?: string;
   isHidden?: boolean;
 }
 

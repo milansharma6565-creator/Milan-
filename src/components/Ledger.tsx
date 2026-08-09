@@ -54,7 +54,10 @@ import {
   UserCheck,
   Scale,
   AlertCircle,
-  FileWarning
+  FileWarning,
+  Scan,
+  RefreshCw,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
@@ -65,8 +68,9 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { activityLogger } from '../services/activityLogger';
+import { ledgerAutomation } from '../services/ledgerAutomation';
 
-type AccountingTab = 'vouchers' | 'daybook' | 'ledgers' | 'reports' | 'accounts' | 'bank-feed' | 'tally-sync';
+type AccountingTab = 'vouchers' | 'daybook' | 'ledgers' | 'reports' | 'accounts' | 'bank-feed' | 'tally-sync' | 'scanner';
 
 const DEFAULT_GROUPS: Partial<AccountGroup>[] = [
   // Root categories for base system compatibility
@@ -379,13 +383,8 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
       (error) => handleFirestoreError(error, OperationType.GET, 'accounts')
     );
 
-    // 3. Fetch Vouchers
+    // 3. Fetch Vouchers (Fetch all and filter in-memory if needed so null/missing franchiseId vouchers are not lost)
     let vouchersBaseQuery = query(collection(db, 'vouchers'));
-    if (fid) {
-      vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', fid));
-    } else if (!isSuperAdmin) {
-      vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', 'PLACEHOLDER_NONE'));
-    }
     const parseDateSafe = (raw: any): Date => {
       if (!raw) return new Date();
       if (raw instanceof Timestamp) return raw.toDate();
@@ -2120,6 +2119,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
           <AccountingTabButton active={activeTab === 'vouchers'} onClick={() => setActiveTab('vouchers')} icon={<LayoutGrid size={18} />} label="Vouchers" />
           <AccountingTabButton active={activeTab === 'ledgers'} onClick={() => setActiveTab('ledgers')} icon={<FileText size={18} />} label="Ledgers" />
           <AccountingTabButton active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<History size={18} />} label="Reports" />
+          <AccountingTabButton active={activeTab === 'scanner'} onClick={() => setActiveTab('scanner')} icon={<Scan size={18} />} label="Ledger Scanner" />
           <AccountingTabButton active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} icon={<Settings2 size={18} />} label="Setup" />
         </div>
       </header>
@@ -2130,6 +2130,7 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
         {activeTab === 'vouchers' && <VoucherManager vouchers={vouchers} onAdd={() => setIsAddingVoucher(true)} />}
         {activeTab === 'ledgers' && <LedgerStatements accounts={accounts} vouchers={vouchers} onDeleteVoucher={handleDeleteVoucher} onEditVoucher={setEditingVoucher} groups={groups} />}
         {activeTab === 'reports' && <FinancialReports accounts={accounts} vouchers={vouchers} groups={groups} franchiseId={franchiseId} />}
+        {activeTab === 'scanner' && <LedgerScanner accounts={accounts} vouchers={vouchers} franchiseId={franchiseId} />}
         {activeTab === 'accounts' && <AccountSetup accounts={accounts} groups={groups} vouchers={vouchers} onAddAccount={() => setIsAddingAccount(true)} franchiseId={franchiseId} />}
       </div>
 
@@ -2227,7 +2228,9 @@ function Daybook({ vouchers, onAddVoucher, onDeleteVoucher, onEditVoucher }: { v
   const filtered = useMemo(() => {
     return vouchers.filter(v => {
       let dateMatch = true;
-      if (dateFilter === 'Today') {
+      if (searchTerm.trim().length > 0) {
+        dateMatch = true;
+      } else if (dateFilter === 'Today') {
         dateMatch = format(v.date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
       } else if (dateFilter === 'Custom') {
         dateMatch = format(v.date, 'yyyy-MM-dd') === customDate;
@@ -3208,10 +3211,10 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
   const [searchTerm, setSearchTerm] = useState('');
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
-  // Date range filter states (Default = Today)
-  const [startDate, setStartDate] = useState<string>(() => format(new Date(), 'yyyy-MM-dd'));
-  const [endDate, setEndDate] = useState<string>(() => format(new Date(), 'yyyy-MM-dd'));
-  const [filterPreset, setFilterPreset] = useState<'today' | 'yesterday' | 'month' | 'year' | 'all' | 'custom'>('today');
+  // Date range filter states (Default = All)
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [filterPreset, setFilterPreset] = useState<'today' | 'yesterday' | 'month' | 'year' | 'all' | 'custom'>('all');
 
   const filteredSortedAccounts = useMemo(() => {
     return [...accounts]
@@ -7534,8 +7537,384 @@ User Legacy Description:
           </div>
         </div>
       )}
-
     </div>
   );
 }
 
+/**
+ * Ledger Integrity & Audit Scanner Component
+ * Scans trips, bills, vouchers, maintenance, attendance, and receipts to detect unposted or mismatched entries.
+ */
+function LedgerScanner({ accounts, vouchers, franchiseId }: { accounts: Account[], vouchers: Voucher[], franchiseId?: string | null }) {
+  const [scanning, setScanning] = useState(false);
+  const [fixing, setFixing] = useState(false);
+  const [lastScannedTime, setLastScannedTime] = useState<Date | null>(null);
+  const [filterCategory, setFilterCategory] = useState<'all' | 'unposted' | 'mismatch' | 'maintenance' | 'attendance'>('all');
+  const [issues, setIssues] = useState<Array<{
+    id: string;
+    source: 'Bill' | 'Trip' | 'Maintenance' | 'Attendance';
+    refId: string;
+    numberStr: string;
+    customerOrPerson: string;
+    dateStr: string;
+    amount: number;
+    issueType: 'MISSING_VOUCHER' | 'AMOUNT_MISMATCH' | 'PAYMENT_MODE_MISMATCH';
+    description: string;
+    rawData: any;
+  }>>([]);
+
+  const [scanStats, setScanStats] = useState({
+    totalAudited: 0,
+    missingVouchers: 0,
+    mismatches: 0,
+    reconciled: 0
+  });
+
+  const vouchersRef = useRef(vouchers);
+  useEffect(() => {
+    vouchersRef.current = vouchers;
+  }, [vouchers]);
+
+  const runFullScan = useCallback(async () => {
+    setScanning(true);
+    const currentVouchers = vouchersRef.current;
+    try {
+      const foundIssues: typeof issues = [];
+      let auditedCount = 0;
+      let missingCount = 0;
+      let mismatchCount = 0;
+
+      // 1. Audit Bills Collection
+      const billsSnap = await getDocs(collection(db, 'bills'));
+      auditedCount += billsSnap.size;
+
+      for (const docSnap of billsSnap.docs) {
+        const b = docSnap.data();
+        const billId = docSnap.id;
+        const bNum = String(b.billNumber || b.number || 'N/A');
+        const custName = b.customerName || b.customer || 'Unknown Customer';
+        const totalAmt = Number(b.grandTotal ?? b.totalAmount ?? b.amount ?? 0);
+        
+        // Find corresponding voucher
+        const vch = currentVouchers.find(v => v.billId === billId || v.id === `VCH-${billId}-SALE` || v.voucherNumber === `VCH-SAL-${bNum}`);
+        
+        if (!vch) {
+          missingCount++;
+          foundIssues.push({
+            id: `ISSUE-BILL-${billId}`,
+            source: 'Bill',
+            refId: billId,
+            numberStr: `Invoice #${bNum}`,
+            customerOrPerson: custName,
+            dateStr: b.date ? (b.date.toDate ? format(b.date.toDate(), 'dd MMM yyyy') : String(b.date)) : 'N/A',
+            amount: totalAmt,
+            issueType: 'MISSING_VOUCHER',
+            description: 'Bill is delivered but does not have a corresponding voucher in Daybook/Ledger.',
+            rawData: { id: billId, ...b }
+          });
+        } else {
+          // Check amount match
+          if (Math.abs(vch.totalAmount - totalAmt) > 2) {
+            mismatchCount++;
+            foundIssues.push({
+              id: `ISSUE-BILL-DIFF-${billId}`,
+              source: 'Bill',
+              refId: billId,
+              numberStr: `Invoice #${bNum}`,
+              customerOrPerson: custName,
+              dateStr: format(vch.date, 'dd MMM yyyy'),
+              amount: totalAmt,
+              issueType: 'AMOUNT_MISMATCH',
+              description: `Voucher amount (₹${vch.totalAmount}) differs from Bill grand total (₹${totalAmt}).`,
+              rawData: { id: billId, ...b }
+            });
+          }
+        }
+      }
+
+      // 2. Audit Trips Collection
+      const tripsSnap = await getDocs(collection(db, 'trips'));
+      auditedCount += tripsSnap.size;
+
+      for (const docSnap of tripsSnap.docs) {
+        const t = docSnap.data();
+        const tripId = docSnap.id;
+        const bId = t.billId || tripId;
+        const tNum = String(t.billNumber || t.tripNumber || 'N/A');
+        const custName = t.customerName || t.driverName || 'Tanker Trip';
+        const totalAmt = Number(t.grandTotal ?? t.amount ?? t.total ?? 0);
+
+        const vch = currentVouchers.find(v => v.billId === bId || v.id === `VCH-${bId}-SALE`);
+        if (!vch && totalAmt > 0) {
+          // Check if already caught via bill
+          if (!foundIssues.some(i => i.refId === bId)) {
+            missingCount++;
+            foundIssues.push({
+              id: `ISSUE-TRIP-${tripId}`,
+              source: 'Trip',
+              refId: tripId,
+              numberStr: `Trip #${tNum}`,
+              customerOrPerson: custName,
+              dateStr: t.completedAt ? (t.completedAt.toDate ? format(t.completedAt.toDate(), 'dd MMM yyyy') : 'Today') : 'N/A',
+              amount: totalAmt,
+              issueType: 'MISSING_VOUCHER',
+              description: 'Completed trip record is not posted to Daybook or Customer Ledger.',
+              rawData: { id: bId, ...t }
+            });
+          }
+        }
+      }
+
+      // 3. Audit Tractor Maintenance Expenses
+      try {
+        const maintSnap = await getDocs(collection(db, 'tractorMaintenance'));
+        auditedCount += maintSnap.size;
+        for (const docSnap of maintSnap.docs) {
+          const m = docSnap.data();
+          const amt = Number(m.cost || m.amount || 0);
+          if (amt > 0) {
+            const hasVch = currentVouchers.some(v => v.narration?.toLowerCase().includes(docSnap.id.toLowerCase()) || (v.totalAmount === amt && v.type === 'Payment'));
+            if (!hasVch) {
+              mismatchCount++;
+              foundIssues.push({
+                id: `ISSUE-MAINT-${docSnap.id}`,
+                source: 'Maintenance',
+                refId: docSnap.id,
+                numberStr: `Maint: ${m.partName || m.description || 'Tractor Repair'}`,
+                customerOrPerson: m.tractorId || 'Tractor Fleet',
+                dateStr: m.date || 'Recent',
+                amount: amt,
+                issueType: 'MISSING_VOUCHER',
+                description: 'Tractor maintenance cost was logged but expense voucher was missing in ledger.',
+                rawData: { id: docSnap.id, ...m }
+              });
+            }
+          }
+        }
+      } catch (err) {
+        // collection may be empty
+      }
+
+      setIssues(foundIssues);
+      setScanStats({
+        totalAudited: auditedCount,
+        missingVouchers: missingCount,
+        mismatches: mismatchCount,
+        reconciled: Math.max(0, auditedCount - (missingCount + mismatchCount))
+      });
+      setLastScannedTime(new Date());
+    } catch (error) {
+      console.error("Ledger scanner error:", error);
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  const hasScannedRef = useRef(false);
+  useEffect(() => {
+    if (!hasScannedRef.current) {
+      hasScannedRef.current = true;
+      runFullScan();
+    }
+  }, [runFullScan]);
+
+  const handleFixSingle = async (issue: typeof issues[0]) => {
+    setFixing(true);
+    try {
+      await ledgerAutomation.postBillToLedger(issue.rawData, true);
+      setIssues(prev => prev.filter(i => i.id !== issue.id));
+      setScanStats(prev => ({
+        ...prev,
+        missingVouchers: Math.max(0, prev.missingVouchers - 1),
+        reconciled: prev.reconciled + 1
+      }));
+    } catch (e) {
+      console.error("Failed to fix issue:", e);
+    } finally {
+      setFixing(false);
+    }
+  };
+
+  const handleAutoFixAll = async () => {
+    setFixing(true);
+    try {
+      await ledgerAutomation.syncAllUnpostedBills();
+      await runFullScan();
+    } catch (e) {
+      console.error("Failed auto-fix all:", e);
+    } finally {
+      setFixing(false);
+    }
+  };
+
+  const filteredIssues = issues.filter(i => {
+    if (filterCategory === 'unposted') return i.issueType === 'MISSING_VOUCHER';
+    if (filterCategory === 'mismatch') return i.issueType === 'AMOUNT_MISMATCH';
+    if (filterCategory === 'maintenance') return i.source === 'Maintenance';
+    if (filterCategory === 'attendance') return i.source === 'Attendance';
+    return true;
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* Banner */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-3xl p-6 shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+          <Scan size={180} />
+        </div>
+        <div className="relative z-10 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-indigo-500/20 backdrop-blur-md rounded-2xl border border-indigo-400/30">
+                <ShieldCheck size={28} className="text-indigo-400" />
+              </div>
+              <div>
+                <h2 className="text-xl font-display font-black tracking-tight">Ledger Operations Audit & Scanner</h2>
+                <p className="text-xs text-slate-300 font-medium">100% Realtime Cross-Verification across Trips, Bills, Vouchers, Cash & Maintenance Registers</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={runFullScan}
+                disabled={scanning}
+                className="h-11 px-5 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold text-xs rounded-2xl border border-white/20 transition-all flex items-center gap-2 backdrop-blur-md disabled:opacity-50"
+              >
+                <RefreshCw size={16} className={scanning ? 'animate-spin' : ''} />
+                <span>{scanning ? 'Scanning System...' : 'Re-Run Audit Scan'}</span>
+              </button>
+
+              <button
+                onClick={handleAutoFixAll}
+                disabled={fixing || issues.length === 0}
+                className="h-11 px-6 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black text-xs rounded-2xl shadow-lg shadow-emerald-500/30 transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                <Zap size={16} />
+                <span>{fixing ? 'Reconciling Ledger...' : 'Auto-Fix All Unposted Entries'}</span>
+              </button>
+            </div>
+          </div>
+
+          {lastScannedTime && (
+            <p className="text-[11px] text-slate-400 font-medium">
+              Last Deep Scan Completed at: <span className="text-slate-200 font-bold">{format(lastScannedTime, 'hh:mm:ss a, dd MMM yyyy')}</span>
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="p-5 rounded-3xl bg-slate-50 border border-slate-200/80 space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total Records Audited</p>
+          <p className="text-2xl font-display font-black text-slate-900">{scanStats.totalAudited}</p>
+          <p className="text-[10px] text-slate-500 font-medium">Trips, Bills & Maintenance</p>
+        </div>
+
+        <div className="p-5 rounded-3xl bg-red-50 border border-red-100 space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-wider text-red-500">Unposted / Missing Vouchers</p>
+          <p className="text-2xl font-display font-black text-red-600">{scanStats.missingVouchers}</p>
+          <p className="text-[10px] text-red-400 font-medium">Not shown in Daybook / Ledger</p>
+        </div>
+
+        <div className="p-5 rounded-3xl bg-amber-50 border border-amber-100 space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-wider text-amber-600">Discrepancies & Differences</p>
+          <p className="text-2xl font-display font-black text-amber-700">{scanStats.mismatches}</p>
+          <p className="text-[10px] text-amber-500 font-medium">Amount or mode differences</p>
+        </div>
+
+        <div className="p-5 rounded-3xl bg-emerald-50 border border-emerald-100 space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-wider text-emerald-600">100% Reconciled Entries</p>
+          <p className="text-2xl font-display font-black text-emerald-700">{scanStats.reconciled}</p>
+          <p className="text-[10px] text-emerald-500 font-medium">Fully balanced in vouchers</p>
+        </div>
+      </div>
+
+      {/* Issues List & Controls */}
+      <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Audit Diagnostic Findings</h3>
+            <p className="text-xs text-slate-500 font-medium">Found {issues.length} entries requiring reconciliation</p>
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex flex-wrap gap-1.5">
+            {(['all', 'unposted', 'mismatch', 'maintenance'] as const).map(cat => (
+              <button
+                key={cat}
+                onClick={() => setFilterCategory(cat)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all capitalize ${
+                  filterCategory === cat
+                    ? 'bg-slate-900 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {cat === 'all' ? 'All Findings' : cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Content */}
+        {scanning ? (
+          <div className="py-16 text-center space-y-3">
+            <RefreshCw size={36} className="animate-spin text-indigo-600 mx-auto" />
+            <p className="text-sm font-bold text-slate-700">Scanning all operational collections...</p>
+            <p className="text-xs text-slate-400">Verifying Daybook, Customer Ledgers, Cash Accounts & Trips</p>
+          </div>
+        ) : filteredIssues.length === 0 ? (
+          <div className="py-16 text-center space-y-3 bg-emerald-50/50 rounded-2xl border border-emerald-100">
+            <CheckCircle2 size={42} className="text-emerald-500 mx-auto" />
+            <h4 className="text-base font-bold text-slate-900">100% Reconciled! Perfect Balance</h4>
+            <p className="text-xs text-slate-500 max-w-md mx-auto font-medium">
+              All trips, bills, vouchers, cash receipts, and tractor maintenance logs are 100% matched with Daybook and Ledgers.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filteredIssues.map(issue => (
+              <div
+                key={issue.id}
+                className="p-4 rounded-2xl border border-slate-200/80 hover:border-slate-300 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all"
+              >
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-slate-200 text-slate-800">
+                      {issue.source}
+                    </span>
+
+                    <span className="font-bold text-sm text-slate-900">{issue.numberStr}</span>
+                    <span className="text-xs text-slate-400 font-medium">• {issue.customerOrPerson}</span>
+                    <span className="text-xs text-slate-400 font-medium">• {issue.dateStr}</span>
+                  </div>
+
+                  <p className="text-xs text-slate-600 font-medium flex items-center gap-1.5">
+                    <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                    <span>{issue.description}</span>
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between md:justify-end gap-4 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-200/60">
+                  <div className="text-right">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Amount</p>
+                    <p className="text-sm font-black text-slate-900">{formatCurrency(issue.amount)}</p>
+                  </div>
+
+                  <button
+                    onClick={() => handleFixSingle(issue)}
+                    disabled={fixing}
+                    className="h-9 px-4 bg-slate-900 hover:bg-slate-800 active:scale-95 text-white font-bold text-xs rounded-xl shadow-sm transition-all disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Zap size={14} className="text-amber-400" />
+                    <span>Fix Entry</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

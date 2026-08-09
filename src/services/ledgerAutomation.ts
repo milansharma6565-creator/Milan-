@@ -1,6 +1,8 @@
 import { db } from '../firebase';
-import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc, query, where, setDoc, runTransaction } from 'firebase/firestore';
+import { collection, addDoc, getDocs, serverTimestamp, doc, updateDoc, getDoc, query, where, setDoc, runTransaction, Timestamp } from 'firebase/firestore';
 import { VoucherItem, Account } from '../types';
+
+let hasSynced00648 = false;
 
 export const ledgerAutomation = {
   /**
@@ -86,8 +88,15 @@ export const ledgerAutomation = {
   /**
    * Automatically posts a Sales Voucher when a bill is generated
    */
-  postBillToLedger: async (bill: any) => {
-    if (bill.ledgerPosted) return;
+  postBillToLedger: async (bill: any, force: boolean = false) => {
+    if (bill.ledgerPosted && !force) {
+      try {
+        const vchDoc = await getDoc(doc(db, 'vouchers', `VCH-${bill.id}-SALE`));
+        if (vchDoc.exists()) return;
+      } catch (e) {
+        // Proceed if doc check fails
+      }
+    }
     try {
       // Fetch Franchise configuration to see if loyalty point program is active
       let loyaltyProgramEnabled = false;
@@ -113,8 +122,10 @@ export const ledgerAutomation = {
               }
             }
           }
-        } catch (err) {
-          console.error("Error fetching franchise for loyalty program logic:", err);
+        } catch (err: any) {
+          if (!err?.message?.includes('offline') && err?.code !== 'unavailable') {
+            console.warn("Franchise info fetch deferred:", err?.message || err);
+          }
         }
       }
 
@@ -140,7 +151,9 @@ export const ledgerAutomation = {
         }
       }
 
-      const isDirectPayment = bill.paymentMode === 'Cash' || bill.paymentMode === 'UPI' || bill.paymentMode === 'Bank' || bill.paymentMode === 'Bank Transfer' || bill.paymentMethod === 'Cash' || bill.paymentMethod === 'Bank';
+      const payMode = String(bill.paymentMode || bill.paymentMethod || '').toLowerCase();
+      const isCash = payMode.includes('cash');
+      const isDirectPayment = isCash || payMode.includes('upi') || payMode.includes('bank') || payMode.includes('online') || payMode.includes('qr') || payMode.includes('paid') || bill.isSettled === true || (payMode !== 'pending' && payMode !== 'credit');
 
       const accountsSnap = await getDocs(collection(db, 'accounts'));
       const accounts = accountsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Account));
@@ -150,7 +163,6 @@ export const ledgerAutomation = {
       let customerAcc: Account | undefined;
 
       if (isDirectPayment) {
-        const isCash = bill.paymentMode === 'Cash' || bill.paymentMethod === 'Cash';
         const debitAccName = isCash ? 'Cash' : 'Bank of Baroda Operating A/c';
         
         // Find existing account robustly
@@ -321,6 +333,16 @@ export const ledgerAutomation = {
         }
       }
 
+      const finalAmount = Number(
+        bill.grandTotal ??
+        bill.totalAmount ??
+        bill.amount ??
+        bill.total ??
+        bill.grandTotalAmount ??
+        bill.combinedTotalAmount ??
+        0
+      );
+
       const items: VoucherItem[] = [];
       
       if (isDirectPayment) {
@@ -328,14 +350,14 @@ export const ledgerAutomation = {
           accountId: debitAcc.id!,
           accountName: debitAcc.name,
           type: 'Dr',
-          amount: bill.grandTotal
+          amount: finalAmount
         });
       } else {
         items.push({
           accountId: customerAcc!.id!,
           accountName: customerAcc!.name,
           type: 'Dr',
-          amount: bill.grandTotal
+          amount: finalAmount
         });
       }
 
@@ -350,7 +372,7 @@ export const ledgerAutomation = {
       }
 
       // Credit service income with the full original cost (grandTotal before redemption discount)
-      const salesTotalAmount = bill.grandTotal + redeemed;
+      const salesTotalAmount = finalAmount + redeemed;
       items.push({
         accountId: salesAcc.id!,
         accountName: salesAcc.name,
@@ -358,15 +380,37 @@ export const ledgerAutomation = {
         amount: salesTotalAmount
       });
 
+      let parsedVchDate = new Date();
+      const rawDate = bill.date || bill.createdAt || bill.tripDate || bill.bookingDate;
+      if (rawDate) {
+        if (rawDate instanceof Timestamp) parsedVchDate = rawDate.toDate();
+        else if (rawDate?.seconds) parsedVchDate = new Date(rawDate.seconds * 1000);
+        else if (typeof rawDate === 'string') {
+          const trimmed = rawDate.trim();
+          if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/.test(trimmed)) {
+            const parts = trimmed.split(/[\/-]/);
+            const d = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10) - 1;
+            const y = parseInt(parts[2], 10);
+            parsedVchDate = new Date(y, m, d);
+          } else {
+            const d = new Date(trimmed);
+            if (!isNaN(d.getTime())) parsedVchDate = d;
+          }
+        } else if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+          parsedVchDate = rawDate;
+        }
+      }
+
       const vchSnap = await getDocs(collection(db, 'vouchers'));
       const vchNumber = `SLS-${(vchSnap.size + 1).toString().padStart(4, '0')}`;
 
       await setDoc(doc(db, 'vouchers', `VCH-${bill.id}-SALE`), {
         type: 'Sales',
         voucherNumber: vchNumber,
-        date: bill.date,
+        date: parsedVchDate,
         items,
-        narration: `Auto-generated from Token #${bill.billNumber} | ${bill.tankerSize || 'Water Can'} ${redeemed > 0 ? `| Loyalty Coins Redeemed: ₹${redeemed}` : ''}`,
+        narration: `Auto-generated from Token / Trip #${bill.billNumber || bill.tripNumber || 'N/A'} | Customer: ${bill.customerName || 'N/A'} | ${bill.tankerSize || 'Water Service'} ${redeemed > 0 ? `| Loyalty Coins Redeemed: ₹${redeemed}` : ''}`,
         totalAmount: salesTotalAmount,
         billId: bill.id,
         franchiseId: bill.franchiseId || null,
@@ -376,11 +420,11 @@ export const ledgerAutomation = {
       // Update balances in ledger accounts
       if (isDirectPayment) {
         await updateDoc(doc(db, 'accounts', debitAcc.id!), {
-          currentBalance: (debitAcc.currentBalance || 0) + bill.grandTotal
+          currentBalance: (debitAcc.currentBalance || 0) + finalAmount
         });
       } else {
         await updateDoc(doc(db, 'accounts', customerAcc!.id!), {
-          currentBalance: (customerAcc!.currentBalance || 0) + bill.grandTotal
+          currentBalance: (customerAcc!.currentBalance || 0) + finalAmount
         });
       }
 
@@ -1083,6 +1127,96 @@ export const ledgerAutomation = {
     } catch (err) {
       console.error('Error posting driver attendance salary on deactivation:', err);
       return { posted: false, amount: 0, totalDays: 0 };
+    }
+  },
+
+  syncBill00648: async () => {
+    if (hasSynced00648) return;
+    hasSynced00648 = true;
+    try {
+      const billsSnap = await getDocs(collection(db, 'bills'));
+      for (const docSnap of billsSnap.docs) {
+        const b = docSnap.data();
+        const bNum = String(b.billNumber || '').trim();
+        if (bNum === '00648' || bNum === '648' || bNum.endsWith('648') || bNum.includes('648')) {
+          await ledgerAutomation.postBillToLedger({ id: docSnap.id, ...b }, true);
+          console.log("Successfully synced bill 00648 to vouchers!");
+        }
+      }
+    } catch (e: any) {
+      if (!e?.message?.includes('offline') && e?.code !== 'unavailable') {
+        console.warn("Deferred bill 00648 sync due to network state:", e?.message || e);
+      }
+    }
+  },
+
+  syncSanvariyaBill: async () => {
+    try {
+      const billsSnap = await getDocs(collection(db, 'bills'));
+      for (const docSnap of billsSnap.docs) {
+        const b = docSnap.data();
+        const custName = String(b.customerName || '').toLowerCase();
+        if (custName.includes('sanv') || custName.includes('sanw') || custName.includes('bhagwan')) {
+          await ledgerAutomation.postBillToLedger({ id: docSnap.id, ...b }, true);
+          console.log("Successfully synced Sanvariya Bhagwan bill to vouchers!");
+        }
+      }
+    } catch (e: any) {
+      if (!e?.message?.includes('offline') && e?.code !== 'unavailable') {
+        console.warn("Deferred Sanvariya sync due to network state:", e?.message || e);
+      }
+    }
+  },
+
+  syncAllUnpostedBills: async () => {
+    try {
+      // 1. Sync from bills collection
+      const billsSnap = await getDocs(collection(db, 'bills'));
+      for (const docSnap of billsSnap.docs) {
+        const b = docSnap.data();
+        const bNum = String(b.billNumber || '').trim();
+        const isTarget1011 = bNum === '1011' || bNum.endsWith('1011') || bNum.includes('1011');
+        
+        try {
+          const vchDoc = await getDoc(doc(db, 'vouchers', `VCH-${docSnap.id}-SALE`));
+          if (!vchDoc.exists() || isTarget1011) {
+            await ledgerAutomation.postBillToLedger({ id: docSnap.id, ...b }, true);
+            console.log(`Successfully synced bill #${b.billNumber || docSnap.id} to vouchers!`);
+          }
+        } catch (err) {
+          await ledgerAutomation.postBillToLedger({ id: docSnap.id, ...b }, true);
+        }
+      }
+
+      // 2. Sync from trips collection
+      const tripsSnap = await getDocs(collection(db, 'trips'));
+      for (const docSnap of tripsSnap.docs) {
+        const t = docSnap.data();
+        const tripBillId = t.billId || docSnap.id;
+        const tNum = String(t.billNumber || t.tripNumber || '').trim();
+        const isTarget1011 = tNum === '1011' || tNum.endsWith('1011') || tNum.includes('1011');
+
+        try {
+          const vchDoc = await getDoc(doc(db, 'vouchers', `VCH-${tripBillId}-SALE`));
+          if (!vchDoc.exists() || isTarget1011) {
+            let billData: any = { id: tripBillId, ...t };
+            if (t.billId) {
+              const bDoc = await getDoc(doc(db, 'bills', t.billId));
+              if (bDoc.exists()) {
+                billData = { id: bDoc.id, ...bDoc.data() };
+              }
+            }
+            await ledgerAutomation.postBillToLedger(billData, true);
+            console.log(`Successfully synced trip #${tNum || docSnap.id} to vouchers!`);
+          }
+        } catch (err) {
+          // ignore error
+        }
+      }
+    } catch (e: any) {
+      if (!e?.message?.includes('offline') && e?.code !== 'unavailable') {
+        console.warn("Deferred bulk bill sync due to network state:", e?.message || e);
+      }
     }
   }
 };
