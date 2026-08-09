@@ -386,6 +386,28 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
     } else if (!isSuperAdmin) {
       vouchersBaseQuery = query(collection(db, 'vouchers'), where('franchiseId', '==', 'PLACEHOLDER_NONE'));
     }
+    const parseDateSafe = (raw: any): Date => {
+      if (!raw) return new Date();
+      if (raw instanceof Timestamp) return raw.toDate();
+      if (raw?.seconds) return new Date(raw.seconds * 1000);
+      if (raw instanceof Date) return isNaN(raw.getTime()) ? new Date() : raw;
+      if (typeof raw === 'number') return new Date(raw);
+      if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (/^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/.test(trimmed)) {
+          const parts = trimmed.split(/[\/-]/);
+          const d = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10) - 1;
+          const y = parseInt(parts[2], 10);
+          const parsed = new Date(y, m, d);
+          if (!isNaN(parsed.getTime())) return parsed;
+        }
+        const parsed = new Date(trimmed);
+        if (!isNaN(parsed.getTime())) return parsed;
+      }
+      return new Date();
+    };
+
     const vouchersUnsub = onSnapshot(query(vouchersBaseQuery, orderBy('date', 'desc')), 
       (snapshot) => {
         const docs = snapshot.docs.map(doc => {
@@ -393,8 +415,8 @@ export function Ledger({ franchiseId, isSuperAdmin }: { franchiseId?: string, is
           return { 
             id: doc.id, 
             ...data,
-            date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null)
+            date: parseDateSafe(data.date),
+            createdAt: parseDateSafe(data.createdAt)
           } as Voucher;
         });
 
@@ -3255,25 +3277,39 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
       }
     }
 
+    const isAccountItem = (i: VoucherItem) => {
+      if (!i) return false;
+      if (i.accountId === selectedAccountId) return true;
+      if (acc && i.accountName && i.accountName.trim().toLowerCase() === acc.name.trim().toLowerCase()) return true;
+      if (acc && acc.name.trim().toLowerCase() === 'cash' && i.accountName && i.accountName.trim().toLowerCase().includes('cash')) return true;
+      return false;
+    };
+
     // Sort all vouchers for this account
     const allVouchers = vouchers
-      .filter(v => v.items.some(i => i.accountId === selectedAccountId))
-      .sort((a, b) => a.date.getTime() - b.date.getTime());
+      .filter(v => v.items && v.items.some(isAccountItem))
+      .sort((a, b) => {
+        const tA = (a.date instanceof Date && !isNaN(a.date.getTime())) ? a.date.getTime() : 0;
+        const tB = (b.date instanceof Date && !isNaN(b.date.getTime())) ? b.date.getTime() : 0;
+        return tA - tB;
+      });
 
     let runningBalance = acc.balanceType === 'Dr' ? (acc.openingBalance || 0) : -(acc.openingBalance || 0);
 
     const rangeVouchers: Voucher[] = [];
 
     allVouchers.forEach(v => {
-      const vTime = v.date.getTime();
+      const vTime = (v.date instanceof Date && !isNaN(v.date.getTime())) ? v.date.getTime() : 0;
       const isActuallyHidden = v.isHidden === true;
 
       if (startBound && vTime < startBound.getTime()) {
         // Prior voucher: updates period opening balance
         if (!isActuallyHidden) {
-          const item = v.items.find(i => i.accountId === selectedAccountId)!;
-          if (item.type === 'Dr') runningBalance += item.amount;
-          else runningBalance -= item.amount;
+          const item = v.items.find(isAccountItem);
+          if (item) {
+            if (item.type === 'Dr') runningBalance += item.amount;
+            else runningBalance -= item.amount;
+          }
         }
       } else if (endBound && vTime > endBound.getTime()) {
         // Future voucher beyond selected date range
@@ -3300,8 +3336,9 @@ function LedgerStatements({ accounts, vouchers, onDeleteVoucher, onEditVoucher, 
     });
 
     rangeVouchers.forEach(v => {
-      const item = v.items.find(i => i.accountId === selectedAccountId)!;
-      const otherItems = v.items.filter(i => i.accountId !== selectedAccountId);
+      const item = v.items.find(isAccountItem);
+      if (!item) return;
+      const otherItems = v.items.filter(i => !isAccountItem(i));
       const isActuallyHidden = v.isHidden === true;
 
       if (!isActuallyHidden) {
