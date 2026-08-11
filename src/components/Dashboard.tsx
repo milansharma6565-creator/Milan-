@@ -376,6 +376,94 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     return Math.round(balance);
   }, []);
 
+  const isRealBankAccount = useCallback((acc: Account) => {
+    if (!acc || !acc.name) return false;
+    const norm = acc.name.trim().toLowerCase();
+    
+    if (
+      norm.includes('charge') || 
+      norm.includes('chg') || 
+      norm.includes('interest') || 
+      norm.includes('commission') || 
+      norm.includes('comm') || 
+      norm.includes('fee') || 
+      norm.includes('expense') ||
+      norm.includes('tax') ||
+      norm.includes('gst')
+    ) {
+      return false;
+    }
+    
+    return norm.includes('129') || norm.includes('934');
+  }, []);
+
+  const getDashboardBankAccounts = useCallback(() => {
+    const acc129 = accounts.find(a => {
+      const norm = a.name.trim().toLowerCase();
+      return norm.includes('129') && 
+        !norm.includes('charge') && 
+        !norm.includes('chg') && 
+        !norm.includes('interest') && 
+        !norm.includes('commission') && 
+        !norm.includes('fee');
+    });
+
+    const acc934 = accounts.find(a => {
+      const norm = a.name.trim().toLowerCase();
+      return norm.includes('934') && 
+        !norm.includes('charge') && 
+        !norm.includes('chg') && 
+        !norm.includes('interest') && 
+        !norm.includes('commission') && 
+        !norm.includes('fee');
+    });
+
+    const result: Account[] = [];
+
+    if (acc129) {
+      result.push(acc129);
+    } else {
+      const fallback129 = accounts.find(a => {
+        const norm = a.name.trim().toLowerCase();
+        return (norm.includes('baroda') || norm === 'bank account' || norm.includes('operating')) && 
+          !norm.includes('934') && 
+          !norm.includes('charge') && 
+          !norm.includes('interest') && 
+          !norm.includes('commission');
+      });
+      if (fallback129) {
+        result.push({
+          ...fallback129,
+          name: fallback129.name.toLowerCase().includes('129') ? fallback129.name : 'Bank Account 129'
+        });
+      } else {
+        result.push({
+          id: 'bank-acc-129-default',
+          name: 'Bank Account 129',
+          groupId: 'asset-group',
+          openingBalance: 0,
+          currentBalance: 0,
+          balanceType: 'Dr'
+        } as Account);
+      }
+    }
+
+    if (acc934) {
+      result.push(acc934);
+    } else {
+      result.push({
+        id: 'bank-acc-934-default',
+        name: 'Bank Account 934',
+        groupId: 'asset-group',
+        openingBalance: 0,
+        currentBalance: 0,
+        balanceType: 'Dr'
+      } as Account);
+    }
+
+    return result;
+  }, [accounts]);
+
   const [tokenFilter, setTokenFilter] = useState<'Today' | 'Yesterday' | 'Custom'>('Today');
   const [selectedTokenDate, setSelectedTokenDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
@@ -1051,15 +1139,12 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .reduce((sum, a) => sum + calcLiveAccBal(a, vouchersList), 0);
 
     const totalBank = accounts
-      .filter(a => {
-        const norm = a.name.trim().toLowerCase();
-        return (norm.includes('129') || norm.includes('934')) && !norm.includes('charge');
-      })
+      .filter(isRealBankAccount)
       .reduce((sum, a) => sum + calcLiveAccBal(a, vouchersList), 0);
 
     setCashBalance(totalCash);
     setBankBalance(totalBank);
-  }, [accounts, vouchersList, calcLiveAccBal]);
+  }, [accounts, vouchersList, calcLiveAccBal, isRealBankAccount]);
 
   const filteredTokenBills = useMemo(() => {
     let baseBills = [...bills];
@@ -2324,12 +2409,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [isSettling, setIsSettling] = useState<string | null>(null);
 
   const triggerSettleSettleButton = (mode: 'Cash' | 'UPI' | 'Credit' | 'Bank') => {
-    const bankAccs = accounts.filter(a => 
-      a.name.toLowerCase().includes('bank') || 
-      a.name.toLowerCase().includes('baroda') || 
-      a.name.toLowerCase().includes('sbi') || 
-      a.name.toLowerCase().includes('hdfc')
-    );
+    const bankAccs = accounts.filter(isRealBankAccount);
     if ((mode === 'UPI' || mode === 'Bank') && bankAccs.length > 0) {
       setPromptSettleMode(mode);
     } else {
@@ -3524,7 +3604,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         )}
       </AnimatePresence>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} 
           animate={{ opacity: 1, scale: 1 }}
@@ -3669,41 +3749,6 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           </div>
         </motion.div>
 
-        {franchiseId && (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9 }} 
-            animate={{ opacity: 1, scale: 1 }}
-            whileHover={{ y: -6, scale: 1.02 }}
-            transition={{ type: "spring", stiffness: 300, damping: 15, delay: 0.2 }}
-            className="relative bg-white p-6 rounded-[2.5rem] border-t border-x border-blue-50 border-b-[8px] border-b-blue-200/60 shadow-[0_20px_40px_rgba(59,130,246,0.06),inset_0_2px_4px_rgba(255,255,255,1)] hover:border-b-[4px] hover:translate-y-[4px] overflow-hidden group min-h-[200px]"
-            style={{
-              background: "linear-gradient(135deg, #ffffff 0%, #f7faff 100%)"
-            }}
-          >
-            {/* Elegant Logo Branding Background Watermark */}
-            <div className="absolute right-4 bottom-2 opacity-[0.05] pointer-events-none select-none z-0 flex flex-col items-center text-blue-950">
-              <Logo size={110} />
-              <span className="text-[9px] font-black uppercase tracking-[0.15em] font-sans mt-0.5">TANKERWALA</span>
-            </div>
-            <div className="relative z-10">
-              <div className="bg-blue-50 text-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
-                <Coins size={24} />
-              </div>
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-[11px] uppercase font-black tracking-widest text-slate-400">Franchise commission</div>
-                <div className="bg-blue-100 text-blue-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase">
-                  {commissionPercentage}% Tier
-                </div>
-              </div>
-              <div className="text-4xl font-display font-black text-slate-900 tracking-tight flex items-baseline">
-                <span className="text-2xl mr-1 text-blue-400">₹</span>
-                {Math.floor(stats.commissionTotal).toLocaleString()}
-              </div>
-              <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Estimated earnings from delivered trips</p>
-            </div>
-          </motion.div>
-        )}
-
         {/* Individual Bank Cards */}
         {(() => {
           const todayStr = tokenFilter === 'Today' 
@@ -3712,10 +3757,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               ? format(subDays(new Date(), 1), 'yyyy-MM-dd') 
               : selectedTokenDate;
           
-          return accounts.filter(a => {
-            const norm = a.name.toLowerCase();
-            return (norm.includes('129') || norm.includes('934')) && !norm.includes('charge');
-          }).map((bankAcc, index) => {
+          return getDashboardBankAccounts().map((bankAcc, index) => {
             const bankName = bankAcc.name;
             const bankBalance = calcLiveAccBal(bankAcc, vouchersList);
 
@@ -4984,10 +5026,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               </div>
 
               <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
-                {accounts.filter(a => {
-                  const norm = a.name.toLowerCase();
-                  return (norm.includes('129') || norm.includes('934')) && !norm.includes('charge');
-                }).map((bank) => (
+                {getDashboardBankAccounts().map((bank) => (
                   <button
                     key={bank.id}
                     onClick={() => {
