@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, getDocs, doc, updateDoc, getDoc, runTransaction, addDoc, serverTimestamp, orderBy, limit, deleteDoc, where, setDoc, arrayUnion } from 'firebase/firestore';
-import { Customer, Driver, Bill, Tractor, Account } from '../types';
+import { Customer, Driver, Bill, Tractor, Account, HydrantFilling, AccountGroup } from '../types';
 import { 
   ArrowUpRight, 
   ArrowDownLeft, 
@@ -50,14 +50,13 @@ import { formatCurrency, PAYMENT_MODES, generateBillNumber, getPublicAppUrl, cop
 import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isToday, subMonths, addMonths } from 'date-fns';
 import { generatePDF } from '../lib/pdfUtils';
 import { printThermalReceipt } from '../lib/printUtils';
-import { openWhatsAppDirect } from '../lib/whatsappUtils';
+import { openWhatsAppDirect, dispatchWhatsAppLifecycleEvent, getWhatsAppDispatchText } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
 import { QRCodeSVG } from 'qrcode.react';
 import { toJpeg } from 'html-to-image';
 import { ConfirmationModal } from './ConfirmationModal';
 import { X as LucideX } from 'lucide-react';
-import { SandboxSimulatorHub } from './SandboxSimulatorHub';
 import { ledgerAutomation } from '../services/ledgerAutomation';
 import { scheduledBillsService } from '../services/scheduledBillsService';
 
@@ -352,6 +351,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [rawAccounts, setRawAccounts] = useState<Account[]>([]);
   const [vouchersList, setVouchersList] = useState<any[]>([]);
+  const [hydrantFillings, setHydrantFillings] = useState<HydrantFilling[]>([]);
+  const [accountGroups, setAccountGroups] = useState<AccountGroup[]>([]);
 
   const calcLiveAccBal = useCallback((acc: Account, vchs: any[]) => {
     if (!acc) return 0;
@@ -479,40 +480,228 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const memoMonthStartObj = startOfMonth(memoNow);
     memoMonthStartObj.setHours(0, 0, 0, 0);
 
-    const todayBillsList = bills.filter(b => {
-      if (b.date === todayStr) return true;
-      if (b.createdAt) {
+    // Helpers
+    const isSameDate = (dateVal: any, createdVal: any, targetYmd: string) => {
+      if (!targetYmd) return false;
+      if (typeof dateVal === 'string' && dateVal.startsWith(targetYmd)) return true;
+      try {
+        const d = parseFirestoreDate(dateVal);
+        if (format(d, 'yyyy-MM-dd') === targetYmd) return true;
+      } catch (e) {}
+      if (createdVal) {
         try {
-          const cDate = b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt.seconds * 1000);
-          if (format(cDate, 'yyyy-MM-dd') === todayStr) return true;
+          const cd = parseFirestoreDate(createdVal);
+          if (format(cd, 'yyyy-MM-dd') === targetYmd) return true;
         } catch (e) {}
       }
+      return false;
+    };
+
+    const isSameMonth = (dateVal: any, createdVal: any, targetMonth: Date) => {
       try {
-        const bDate = parseFirestoreDate(b.date);
-        return format(bDate, 'yyyy-MM-dd') === todayStr;
-      } catch (e) {
-        return false;
+        const d = parseFirestoreDate(dateVal);
+        if (d.getMonth() === targetMonth.getMonth() && d.getFullYear() === targetMonth.getFullYear()) return true;
+      } catch (e) {}
+      if (createdVal) {
+        try {
+          const cd = parseFirestoreDate(createdVal);
+          if (cd.getMonth() === targetMonth.getMonth() && cd.getFullYear() === targetMonth.getFullYear()) return true;
+        } catch (e) {}
+      }
+      return false;
+    };
+
+    const isTanker = (b: any) => String(b.category || '').toUpperCase().includes('TANKER');
+    const isCan = (b: any) => String(b.category || '').toUpperCase().includes('CAN');
+    const isBottle = (b: any) => String(b.category || '').toUpperCase().includes('BOTTLE');
+
+    // 1. BILLS STREAM
+    const todayBillsList = bills.filter(b => isSameDate(b.date, b.createdAt, todayStr));
+    const monthBillsList = bills.filter(b => isSameMonth(b.date, b.createdAt, memoNow));
+
+    const todayDeliveredBills = todayBillsList.filter(b => b.status === 'Delivered');
+    const monthDeliveredBills = monthBillsList.filter(b => b.status === 'Delivered');
+    const allDeliveredBills = bills.filter(b => b.status === 'Delivered');
+
+    const todayBillSale = todayDeliveredBills.reduce((sum, b) => sum + Number(b.grandTotal || b.totalAmount || 0), 0);
+    const monthBillSale = monthDeliveredBills.reduce((sum, b) => sum + Number(b.grandTotal || b.totalAmount || 0), 0);
+    const totalBillSale = allDeliveredBills.reduce((sum, b) => sum + Number(b.grandTotal || b.totalAmount || 0), 0);
+
+    // Bill categories
+    const todayTankerSale = todayDeliveredBills.filter(isTanker).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const monthTankerSale = monthDeliveredBills.filter(isTanker).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const totalTankerSale = allDeliveredBills.filter(isTanker).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const todayTankerTrips = todayDeliveredBills.filter(isTanker).reduce((sum, b) => sum + Number(b.quantity || 1), 0);
+    const monthTankerTrips = monthDeliveredBills.filter(isTanker).reduce((sum, b) => sum + Number(b.quantity || 1), 0);
+
+    const todayCanSale = todayDeliveredBills.filter(isCan).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const monthCanSale = monthDeliveredBills.filter(isCan).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const totalCanSale = allDeliveredBills.filter(isCan).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const todayCanQuantity = todayDeliveredBills.filter(isCan).reduce((sum, b) => sum + Number(b.quantity || 1), 0);
+    const monthCanQuantity = monthDeliveredBills.filter(isCan).reduce((sum, b) => sum + Number(b.quantity || 1), 0);
+
+    const todayBottleSale = todayDeliveredBills.filter(isBottle).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const monthBottleSale = monthDeliveredBills.filter(isBottle).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const totalBottleSale = allDeliveredBills.filter(isBottle).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+    const todayBottleQuantity = todayDeliveredBills.filter(isBottle).reduce((sum, b) => sum + Number(b.quantity || 1), 0);
+    const monthBottleQuantity = monthDeliveredBills.filter(isBottle).reduce((sum, b) => sum + Number(b.quantity || 1), 0);
+
+    let todayBillCash = 0;
+    let todayBillBank = 0;
+    let todayBillPending = 0;
+
+    todayDeliveredBills.forEach(b => {
+      const grand = Number(b.grandTotal || b.totalAmount || 0);
+      if (b.paymentMode === 'Cash') {
+        todayBillCash += grand;
+      } else if (b.paymentMode === 'UPI' || b.paymentMode === 'Bank Transfer') {
+        todayBillBank += grand;
+      } else if (b.paymentMode === 'Pending') {
+        todayBillPending += grand;
+      } else if (b.paymentMode === 'Split' && b.splitPayments) {
+        todayBillCash += Number(b.splitPayments.cash || 0);
+        todayBillBank += Number(b.splitPayments.upi || 0) + Number(b.splitPayments.bank || 0);
+        todayBillPending += Number(b.splitPayments.pending || 0);
+      } else {
+        if (b.isSettled) {
+          todayBillCash += grand;
+        } else {
+          todayBillPending += grand;
+        }
       }
     });
 
-    const todayCollection = todayBillsList
-      .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + b.grandTotal, 0);
+    // 2. HYDRANT FILLINGS STREAM (Inward Sales)
+    const inwardHydrantList = hydrantFillings.filter(h => h.type === 'Inward');
+    const todayHydrantList = inwardHydrantList.filter(h => isSameDate(h.date, h.createdAt, todayStr));
+    const monthHydrantList = inwardHydrantList.filter(h => isSameMonth(h.date, h.createdAt, memoNow));
 
-    // Calculate today's manual/quick cash/bank changes from vouchers List (+ for Receipt, - for Payment)
+    const todayHydrantSale = todayHydrantList.reduce((sum, h) => sum + Number(h.totalAmount || 0), 0);
+    const monthHydrantSale = monthHydrantList.reduce((sum, h) => sum + Number(h.totalAmount || 0), 0);
+    const totalHydrantSale = inwardHydrantList.reduce((sum, h) => sum + Number(h.totalAmount || 0), 0);
+
+    const todayHydrantTokens = todayHydrantList.length;
+    const monthHydrantTokens = monthHydrantList.length;
+    const todayHydrantLiters = todayHydrantList.reduce((sum, h) => sum + Number(h.quantity || 0), 0);
+    const monthHydrantLiters = monthHydrantList.reduce((sum, h) => sum + Number(h.quantity || 0), 0);
+
+    let todayHydrantCash = 0;
+    let todayHydrantBank = 0;
+    let todayHydrantPending = 0;
+
+    todayHydrantList.forEach(h => {
+      const amt = Number(h.totalAmount || 0);
+      const mode = String(h.paymentMode || '').toLowerCase();
+      if (mode.includes('cash')) {
+        todayHydrantCash += amt;
+      } else if (mode.includes('bank') || mode.includes('upi') || mode.includes('online')) {
+        todayHydrantBank += amt;
+      } else {
+        todayHydrantPending += amt;
+      }
+    });
+
+    // 3. STANDALONE LEDGER SALES VOUCHERS STREAM
+    const standaloneSalesVouchers = vouchersList.filter(vch => {
+      if (vch.isHidden) return false;
+      if (vch.billId) return false;
+      const num = String(vch.voucherNumber || '').toUpperCase();
+      if (
+        num.startsWith('REC-') || 
+        num.startsWith('TRP-') || 
+        num.startsWith('SLS-') || 
+        num.startsWith('VCH-IN-') || 
+        num.startsWith('VCH-OUT-') || 
+        num.startsWith('VCH-TRP-') || 
+        num.startsWith('VCH-BILL-') ||
+        num.startsWith('VCH-HYD-')
+      ) {
+        return false;
+      }
+      if (vch.type === 'Sales') return true;
+      if (vch.items && Array.isArray(vch.items)) {
+        return vch.items.some((item: any) => {
+          if (item.type !== 'Cr') return false;
+          const name = String(item.accountName || '').toLowerCase();
+          return name.includes('sale') || name.includes('income') || name.includes('revenue');
+        });
+      }
+      return false;
+    });
+
+    const getVchAmount = (vch: any) => {
+      if (vch.totalAmount && Number(vch.totalAmount) > 0) return Number(vch.totalAmount);
+      if (vch.items && Array.isArray(vch.items)) {
+        return vch.items.filter((i: any) => i.type === 'Cr').reduce((s: number, i: any) => s + Number(i.amount || 0), 0);
+      }
+      return 0;
+    };
+
+    const todayLedgerSalesList = standaloneSalesVouchers.filter(v => isSameDate(v.date, v.createdAt, todayStr));
+    const monthLedgerSalesList = standaloneSalesVouchers.filter(v => isSameMonth(v.date, v.createdAt, memoNow));
+
+    const todayLedgerDirectSale = todayLedgerSalesList.reduce((sum, v) => sum + getVchAmount(v), 0);
+    const monthLedgerDirectSale = monthLedgerSalesList.reduce((sum, v) => sum + getVchAmount(v), 0);
+    const totalLedgerDirectSale = standaloneSalesVouchers.reduce((sum, v) => sum + getVchAmount(v), 0);
+
+    let todayLedgerCash = 0;
+    let todayLedgerBank = 0;
+    let todayLedgerPending = 0;
+
+    todayLedgerSalesList.forEach(vch => {
+      if (vch.items && Array.isArray(vch.items)) {
+        vch.items.forEach((item: any) => {
+          if (item.type === 'Dr') {
+            const name = String(item.accountName || '').toLowerCase();
+            const amt = Number(item.amount || 0);
+            if (name === 'cash' || name.includes('cash in hand') || name.includes('petty cash') || name.includes('cash box') || name.includes('safe')) {
+              todayLedgerCash += amt;
+            } else if (name.includes('bank') || name.includes('upi') || name.includes('baroda') || name.includes('sbi') || name.includes('hdfc') || name.includes('axis') || name.includes('icici')) {
+              todayLedgerBank += amt;
+            } else {
+              todayLedgerPending += amt;
+            }
+          }
+        });
+      }
+    });
+
+    // 4. UNIFIED AGGREGATED DELIVERED SALES
+    const todayDeliveredSale = todayBillSale + todayHydrantSale + todayLedgerDirectSale;
+    const monthDeliveredSale = monthBillSale + monthHydrantSale + monthLedgerDirectSale;
+
+    const todayDeliveredCash = todayBillCash + todayHydrantCash + todayLedgerCash;
+    const todayDeliveredBank = todayBillBank + todayHydrantBank + todayLedgerBank;
+    const todayDeliveredPending = todayBillPending + todayHydrantPending + todayLedgerPending;
+
+    // Cross-sync with Ledger Income & Sales accounts
+    const totalLedgerSalesAccBalance = accounts
+      .filter(acc => {
+        const name = String(acc.name || '').toLowerCase();
+        const grp = String(acc.group || '').toLowerCase();
+        return (
+          name === 'sales' || 
+          name === 'service income' || 
+          name === 'water sales' || 
+          name.includes('sales') || 
+          grp.includes('income') || 
+          grp.includes('direct income') ||
+          grp.includes('revenue')
+        );
+      })
+      .reduce((sum, acc) => {
+        const bal = acc.balanceType === 'Cr' ? Number(acc.currentBalance || 0) : -Number(acc.currentBalance || 0);
+        return sum + Math.max(0, bal);
+      }, 0);
+
+    const calculatedTotalSale = totalBillSale + totalHydrantSale + totalLedgerDirectSale;
+    const totalDeliveredSale = Math.max(calculatedTotalSale, totalLedgerSalesAccBalance);
+
+    // Manual/quick cash/bank adjustments from non-bill vouchers for collection boxes
     let todayCashAdjustment = 0;
     let todayBankAdjustment = 0;
     vouchersList.forEach(vch => {
-      let vchDateStr = '';
-      if (vch.date) {
-        try {
-          const dObj = vch.date.toDate ? vch.date.toDate() : new Date(vch.date);
-          vchDateStr = format(dObj, 'yyyy-MM-dd');
-        } catch (e) {}
-      }
-      
-      if (vchDateStr === todayStr) {
-        // Skip bill-settlement receipt vouchers which are already registered under todayBillsList's collection
+      if (isSameDate(vch.date, vch.createdAt, todayStr)) {
         const isSelfGeneratedBillVch = 
           vch.voucherNumber?.startsWith('REC-') || 
           vch.voucherNumber?.startsWith('TRP-') || 
@@ -525,34 +714,32 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             const isBankAcc = nameLower.includes('bank') || nameLower.includes('baroda') || nameLower.includes('bob') || nameLower.includes('sbi') || nameLower.includes('hdfc') || nameLower.includes('axis') || nameLower.includes('icici');
             
             if (isCashAcc) {
-              if (item.type === 'Dr') {
-                todayCashAdjustment += item.amount;
-              } else if (item.type === 'Cr') {
-                todayCashAdjustment -= item.amount;
-              }
+              if (item.type === 'Dr') todayCashAdjustment += Number(item.amount || 0);
+              else if (item.type === 'Cr') todayCashAdjustment -= Number(item.amount || 0);
             } else if (isBankAcc) {
-              if (item.type === 'Dr') {
-                todayBankAdjustment += item.amount;
-              } else if (item.type === 'Cr') {
-                todayBankAdjustment -= item.amount;
-              }
+              if (item.type === 'Dr') todayBankAdjustment += Number(item.amount || 0);
+              else if (item.type === 'Cr') todayBankAdjustment -= Number(item.amount || 0);
             }
           });
         }
       }
     });
 
+    const todayCollection = todayBillsList
+      .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
+      .reduce((sum, b) => sum + Number(b.grandTotal || 0), 0) + todayHydrantCash + todayHydrantBank;
+
     const todayCashCollection = todayBillsList
       .filter(b => b.paymentMode === 'Cash' && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + b.grandTotal, 0) + todayCashAdjustment;
+      .reduce((sum, b) => sum + Number(b.grandTotal || 0), 0) + todayHydrantCash + todayCashAdjustment;
 
     const todayBankCollection = todayBillsList
       .filter(b => (b.paymentMode === 'UPI' || b.paymentMode === 'Bank Transfer') && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + b.grandTotal, 0) + todayBankAdjustment;
+      .reduce((sum, b) => sum + Number(b.grandTotal || 0), 0) + todayHydrantBank + todayBankAdjustment;
 
     const todayPendingCollection = todayBillsList
       .filter(b => (b.paymentMode === 'Pending' || !b.isSettled) && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + b.grandTotal, 0);
+      .reduce((sum, b) => sum + Number(b.grandTotal || 0), 0) + todayHydrantPending;
       
     const totalPending = accounts
       .filter(acc => {
@@ -576,16 +763,21 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const deliveredCount = bills.filter(b => b.status === 'Delivered').length;
     const unsettledCount = bills.filter(b => !b.isSettled).length;
 
+    // Multi-stream unified 7-day chart
     const chartData = Array.from({ length: 7 }).map((_, i) => {
       const date = subDays(new Date(), 6 - i);
-      const dayBills = bills.filter(b => {
-        const bDate = parseFirestoreDate(b.date);
-        return format(bDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') && 
-               b.status !== 'Cancelled';
-      });
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const dayBills = bills.filter(b => isSameDate(b.date, b.createdAt, dateStr) && b.status !== 'Cancelled');
+      const dayHydrant = inwardHydrantList.filter(h => isSameDate(h.date, h.createdAt, dateStr));
+      const dayLedger = standaloneSalesVouchers.filter(v => isSameDate(v.date, v.createdAt, dateStr));
+
+      const billAmt = dayBills.reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
+      const hydAmt = dayHydrant.reduce((sum, h) => sum + Number(h.totalAmount || 0), 0);
+      const ledgAmt = dayLedger.reduce((sum, v) => sum + getVchAmount(v), 0);
+
       return {
         name: format(date, 'EEE'),
-        amount: dayBills.reduce((sum, b) => sum + b.grandTotal, 0)
+        amount: billAmt + hydAmt + ledgAmt
       };
     });
     
@@ -599,22 +791,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         }
       });
 
-      const todayDriverBills = driverBills.filter(b => {
-        if (b.date === todayStr) return true;
-        if (b.createdAt) {
-          try {
-            const cDate = b.createdAt.toDate ? b.createdAt.toDate() : new Date(b.createdAt.seconds * 1000);
-            if (format(cDate, 'yyyy-MM-dd') === todayStr) return true;
-          } catch (e) {}
-        }
-        try {
-          const bObj = b.date instanceof Date ? b.date : new Date(b.date);
-          return format(bObj, 'yyyy-MM-dd') === todayStr;
-        } catch (e) {
-          return false;
-        }
-      });
-
+      const todayDriverBills = driverBills.filter(b => isSameDate(b.date, b.createdAt, todayStr));
       const weekDriverBills = driverBills.filter(b => {
         try {
           const bObj = b.date instanceof Date ? b.date : new Date(b.date);
@@ -623,7 +800,6 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           return false;
         }
       });
-
       const monthDriverBills = driverBills.filter(b => {
         try {
           const bObj = b.date instanceof Date ? b.date : new Date(b.date);
@@ -679,17 +855,13 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     }
 
     const allBillsSorted = [...bills].sort((a, b) => {
-      // First sort by status: Pending should be on top
       if (a.status === 'Pending' && b.status !== 'Pending') return -1;
       if (a.status !== 'Pending' && b.status === 'Pending') return 1;
-      
-      // Then secondary sort by createdAt descending
       const timeA = a.createdAt?.seconds || 0;
       const timeB = b.createdAt?.seconds || 0;
       return timeB - timeA;
     });
 
-    // Calculate total water volume dispatched (in Liters) for bills that are completed ('Delivered')
     const getLiters = (b: any) => {
       let liters = 0;
       const cat = b.category || '';
@@ -700,122 +872,23 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         if (sizeStr.includes('small') || sizeStr.includes('2500')) liters = 2500 * qty;
         else if (sizeStr.includes('medium') || sizeStr.includes('3500')) liters = 3500 * qty;
         else if (sizeStr.includes('large') || sizeStr.includes('double') || sizeStr.includes('5000')) liters = 5000 * qty;
-        else liters = 4000 * qty; // Default standard tanker is 4000 Liters
+        else liters = 4000 * qty;
       } else if (cat.includes('CAN')) {
         liters = 20 * (b.quantity || 1);
       } else if (cat.includes('BOTTLE')) {
         const qty = b.quantity || 1;
-        if (sizeStr.includes('500ml')) liters = 0.5 * qty * 12; // Assuming 12 bottle box
-        else if (sizeStr.includes('2l')) liters = 2 * qty * 6; // Assuming 6 bottle box
-        else liters = 1 * qty * 12; // Default 1L box is 12L
+        if (sizeStr.includes('500ml')) liters = 0.5 * qty * 12;
+        else if (sizeStr.includes('2l')) liters = 2 * qty * 6;
+        else liters = 1 * qty * 12;
       }
       return liters;
     };
 
-    const todayWaterLiters = todayBillsList
-      .filter(b => b.status === 'Delivered')
-      .reduce((sum, b) => sum + getLiters(b), 0);
+    const todayWaterLiters = todayDeliveredBills.reduce((sum, b) => sum + getLiters(b), 0) + todayHydrantLiters;
+    const monthWaterLiters = monthDeliveredBills.reduce((sum, b) => sum + getLiters(b), 0) + monthHydrantLiters;
 
-    const monthStartObj = new Date();
-    monthStartObj.setDate(1);
-    monthStartObj.setHours(0, 0, 0, 0);
-
-    const monthBillsList = bills.filter(b => {
-      const bDate = parseFirestoreDate(b.date);
-      return bDate >= monthStartObj && b.status === 'Delivered';
-    });
-
-    const monthWaterLiters = monthBillsList.reduce((sum, b) => sum + getLiters(b), 0);
-
-    const now = new Date();
-    const todayTankerTrips = todayBillsList
-      .filter(b => b.status === 'Delivered' && (b.category || '').includes('TANKER'))
-      .reduce((sum, b) => sum + (b.quantity || 1), 0);
-
-    const weekStartObj = startOfWeek(now, { weekStartsOn: 1 });
-    weekStartObj.setHours(0, 0, 0, 0);
-    const weekBillsList = bills.filter(b => {
-      try {
-        const bDate = parseFirestoreDate(b.date);
-        return bDate >= weekStartObj && b.status === 'Delivered';
-      } catch (e) {
-        return false;
-      }
-    });
-    const weekTankerTrips = weekBillsList
-      .filter(b => (b.category || '').includes('TANKER'))
-      .reduce((sum, b) => sum + (b.quantity || 1), 0);
-
-    const monthTankerTrips = monthBillsList
-      .filter(b => b.status === 'Delivered' && (b.category || '').includes('TANKER'))
-      .reduce((sum, b) => sum + (b.quantity || 1), 0);
-
-    const yearStartObj = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-    const yearBillsList = bills.filter(b => {
-      try {
-        const bDate = parseFirestoreDate(b.date);
-        return bDate >= yearStartObj && b.status === 'Delivered';
-      } catch (e) {
-        return false;
-      }
-    });
-    const yearTankerTrips = yearBillsList
-      .filter(b => (b.category || '').includes('TANKER'))
-      .reduce((sum, b) => sum + (b.quantity || 1), 0);
-
-    const todayTotalSale = todayBillsList
-      .filter(b => b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + b.grandTotal, 0);
-
-    const monthBList = bills.filter(b => {
-      try {
-        const bDate = parseFirestoreDate(b.date);
-        const now = new Date();
-        return bDate.getMonth() === now.getMonth() && bDate.getFullYear() === now.getFullYear() && b.status !== 'Cancelled';
-      } catch (e) {
-        return false;
-      }
-    });
-    const monthTotalSale = monthBList.reduce((sum, b) => sum + b.grandTotal, 0);
-
-    const todayDeliveredSale = todayBillsList
-      .filter(b => b.status === 'Delivered')
-      .reduce((sum, b) => sum + b.grandTotal, 0);
-
-    const todayDeliveredBills = todayBillsList.filter(b => b.status === 'Delivered');
-    let todayDeliveredCash = 0;
-    let todayDeliveredBank = 0;
-    let todayDeliveredPending = 0;
-
-    todayDeliveredBills.forEach(b => {
-      if (b.paymentMode === 'Cash') {
-        todayDeliveredCash += b.grandTotal;
-      } else if (b.paymentMode === 'UPI' || b.paymentMode === 'Bank Transfer') {
-        todayDeliveredBank += b.grandTotal;
-      } else if (b.paymentMode === 'Pending') {
-        todayDeliveredPending += b.grandTotal;
-      } else if (b.paymentMode === 'Split' && b.splitPayments) {
-        todayDeliveredCash += b.splitPayments.cash || 0;
-        todayDeliveredBank += (b.splitPayments.upi || 0) + (b.splitPayments.bank || 0);
-        todayDeliveredPending += b.splitPayments.pending || 0;
-      } else {
-        todayDeliveredPending += b.grandTotal;
-      }
-    });
-
-    const monthDeliveredSale = bills.filter(b => {
-      try {
-        const bDate = parseFirestoreDate(b.date);
-        const now = new Date();
-        return bDate.getMonth() === now.getMonth() && bDate.getFullYear() === now.getFullYear() && b.status === 'Delivered';
-      } catch (e) {
-        return false;
-      }
-    }).reduce((sum, b) => sum + b.grandTotal, 0);
-
-    const totalDeliveredSale = bills
-      .filter(b => b.status === 'Delivered')
-      .reduce((sum, b) => sum + b.grandTotal, 0);
+    const todayTotalSale = todayDeliveredSale;
+    const monthTotalSale = monthDeliveredSale;
 
     return {
       todayCollection,
@@ -829,6 +902,38 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       todayDeliveredPending,
       monthDeliveredSale,
       totalDeliveredSale,
+      
+      // Category Sales & Volumes
+      todayTankerSale,
+      monthTankerSale,
+      totalTankerSale,
+      todayTankerTrips,
+      monthTankerTrips,
+
+      todayCanSale,
+      monthCanSale,
+      totalCanSale,
+      todayCanQuantity,
+      monthCanQuantity,
+
+      todayBottleSale,
+      monthBottleSale,
+      totalBottleSale,
+      todayBottleQuantity,
+      monthBottleQuantity,
+
+      todayHydrantSale,
+      monthHydrantSale,
+      totalHydrantSale,
+      todayHydrantTokens,
+      monthHydrantTokens,
+      todayHydrantLiters,
+      monthHydrantLiters,
+
+      todayLedgerDirectSale,
+      monthLedgerDirectSale,
+      totalLedgerDirectSale,
+
       todayTotalSale,
       monthTotalSale,
       cashBalance,
@@ -845,11 +950,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       commissionTotal,
       todayWaterLiters,
       monthWaterLiters,
-      todayTankerTrips,
-      monthTankerTrips,
       recentBills: allBillsSorted.slice(0, 10)
     };
-  }, [bills, customers, drivers, tractors, cashBalance, bankBalance, accounts, franchiseId, commissionPercentage, tokenFilter, selectedTokenDate]);
+  }, [bills, hydrantFillings, vouchersList, accounts, accountGroups, customers, drivers, tractors, cashBalance, bankBalance, franchiseId, commissionPercentage, tokenFilter, selectedTokenDate]);
 
   const [driverTripPeriod, setDriverTripPeriod] = useState<'Day' | 'Week' | 'Month'>('Day');
 
@@ -993,7 +1096,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const sixtyDaysAgo = subDays(new Date(), 60);
     
     // Base Queries
-    let billsQ = query(collection(db, 'bills'), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
+    let billsQ = query(collection(db, 'bills'), orderBy('createdAt', 'desc'), limit(2000));
     let requestsQ = query(collection(db, 'bookingRequests'), where('status', '==', 'Pending'));
     let dieselQ = query(collection(db, 'dieselRequests'), where('status', '==', 'Pending'));
     let feedbacksQ = query(collection(db, 'feedbacks'));
@@ -1002,6 +1105,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     let tractorsQ = query(collection(db, 'tractors'));
     let accountsQ = query(collection(db, 'accounts'));
     let vouchersQ = query(collection(db, 'vouchers'), orderBy('date', 'desc'));
+    let hydrantQ = query(collection(db, 'hydrantFillings'), orderBy('date', 'desc'), limit(2000));
+    let groupsQ = query(collection(db, 'accountGroups'));
 
     // Apply Franchise Filter if present
     const fid = franchiseId || (isSuperAdmin ? null : 'PLACEHOLDER_NONE');
@@ -1012,7 +1117,7 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       scheduledBillsService.checkAndActivateScheduledBills(fid || undefined);
     }, 20000);
     if (fid) {
-      billsQ = query(collection(db, 'bills'), where('franchiseId', '==', fid), where('createdAt', '>=', sixtyDaysAgo), orderBy('createdAt', 'desc'), limit(1000));
+      billsQ = query(collection(db, 'bills'), where('franchiseId', '==', fid), orderBy('createdAt', 'desc'), limit(2000));
       requestsQ = query(collection(db, 'bookingRequests'), where('franchiseId', '==', fid), where('status', '==', 'Pending'));
       dieselQ = query(collection(db, 'dieselRequests'), where('franchiseId', '==', fid), where('status', '==', 'Pending'));
       feedbacksQ = query(collection(db, 'feedbacks'), where('franchiseId', '==', fid));
@@ -1021,6 +1126,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', fid));
       accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', fid));
       vouchersQ = query(collection(db, 'vouchers'), where('franchiseId', '==', fid), orderBy('date', 'desc'));
+      hydrantQ = query(collection(db, 'hydrantFillings'), where('franchiseId', '==', fid), orderBy('date', 'desc'), limit(2000));
+      groupsQ = query(collection(db, 'accountGroups'), where('franchiseId', '==', fid));
     } else if (!isSuperAdmin) {
       const none = 'PLACEHOLDER_NONE';
       billsQ = query(collection(db, 'bills'), where('franchiseId', '==', none));
@@ -1032,6 +1139,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       tractorsQ = query(collection(db, 'tractors'), where('franchiseId', '==', none));
       accountsQ = query(collection(db, 'accounts'), where('franchiseId', '==', none));
       vouchersQ = query(collection(db, 'vouchers'), where('franchiseId', '==', none));
+      hydrantQ = query(collection(db, 'hydrantFillings'), where('franchiseId', '==', none));
+      groupsQ = query(collection(db, 'accountGroups'), where('franchiseId', '==', none));
     }
 
     const unsubBills = onSnapshot(billsQ, 
@@ -1086,6 +1195,14 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       (snapshot) => setVouchersList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
       (error) => console.log('Vouchers err:', error?.message || error)
     );
+    const unsubHydrant = onSnapshot(hydrantQ,
+      (snapshot) => setHydrantFillings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HydrantFilling))),
+      (error) => console.log('Hydrant err:', error?.message || error)
+    );
+    const unsubGroups = onSnapshot(groupsQ,
+      (snapshot) => setAccountGroups(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AccountGroup))),
+      (error) => console.log('Groups err:', error?.message || error)
+    );
     const unsubAccounts = onSnapshot(accountsQ, 
       (snapshot) => {
         const accs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Account));
@@ -1123,7 +1240,10 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       unsubDrivers();
       unsubTractors();
       unsubVouchers();
+      unsubHydrant();
+      unsubGroups();
       unsubAccounts();
+      clearInterval(schedInterval);
     };
   }, [franchiseId, isSuperAdmin]);
 
@@ -2400,7 +2520,18 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       });
 
       const updated = await getDoc(doc(db, 'bills', editingBill.id));
-      setEditingBill({ id: updated.id, ...updated.data() });
+      if (updated.exists()) {
+        const updatedBillData = { id: updated.id, ...updated.data() } as Bill;
+        setEditingBill(updatedBillData);
+
+        // Auto-dispatch WhatsApp lifecycle event
+        try {
+          const evtType = (status === 'Filling' ? 'filling' : status === 'Cancelled' ? 'cancelled' : 'booked') as 'filling' | 'cancelled' | 'booked';
+          dispatchWhatsAppLifecycleEvent(updatedBillData, evtType, currentFranchise);
+        } catch (waErr) {
+          console.warn("WhatsApp status dispatch error:", waErr);
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `bills/${editingBill.id}`);
     }
@@ -2755,6 +2886,19 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       // Show "Done" state for 1 second
       setIsSettling('DONE');
       triggerSmiley(mode === 'Credit' ? 'sad' : 'happy');
+
+      // Auto-dispatch WhatsApp digital receipt & delivery notification
+      try {
+        const settledBillObj = {
+          ...editingBill,
+          status: 'Delivered',
+          paymentMode: isCredit ? 'Pending' : mode,
+          isSettled: !isCredit
+        } as Bill;
+        dispatchWhatsAppLifecycleEvent(settledBillObj, 'delivered', currentFranchise);
+      } catch (waErr) {
+        console.warn("WhatsApp settled delivery dispatch error:", waErr);
+      }
       
       setTimeout(() => {
         setIsSettling(null);
@@ -3467,6 +3611,164 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
   };
 
   const printRef = React.useRef<HTMLDivElement>(null);
+  const dispatchPrintRef = React.useRef<HTMLDivElement>(null);
+  const [dispatchPrintBill, setDispatchPrintBill] = useState<Bill | null>(null);
+  const [isDispatching, setIsDispatching] = useState<string | null>(null);
+  const [dispatchQuickAssignBill, setDispatchQuickAssignBill] = useState<Bill | null>(null);
+  const [quickAssignDriverId, setQuickAssignDriverId] = useState<string>('');
+  const [quickAssignTractorId, setQuickAssignTractorId] = useState<string>('');
+  const [dispatchFeedback, setDispatchFeedback] = useState<{
+    show: boolean;
+    billNumber: string;
+    customerName: string;
+    driverName: string;
+    mode: string;
+    waUrl?: string;
+  } | null>(null);
+
+  const handleDispatchOrder = async (bill: Bill, overrideDriverId?: string, overrideTractorId?: string) => {
+    if (!bill || !bill.id) return;
+
+    const targetDriverId = overrideDriverId || bill.driverId;
+    const targetTractorId = overrideTractorId || bill.tractorId;
+
+    // If driver or tractor not assigned, open quick assignment modal
+    if (!targetDriverId || !targetTractorId) {
+      setQuickAssignDriverId(targetDriverId || (drivers[0]?.id || ''));
+      setQuickAssignTractorId(targetTractorId || (tractors[0]?.id || ''));
+      setDispatchQuickAssignBill(bill);
+      return;
+    }
+
+    const assignedDriver = drivers.find(d => d.id === targetDriverId);
+    const assignedTractor = tractors.find(t => t.id === targetTractorId);
+    const finalDriverName = assignedDriver?.name || bill.driverName || 'Official Delivery Driver';
+    const finalDriverPhone = assignedDriver?.mobile || bill.driverMobile || '';
+    const finalTractorName = assignedTractor?.name || assignedTractor?.vehicleNumber || bill.vehicleNumber || 'Assigned Tractor';
+
+    setIsDispatching(bill.id);
+    try {
+      // 1. Prepare updated bill object with driver and vehicle
+      const updatedBillObj: Bill = {
+        ...bill,
+        driverId: targetDriverId,
+        driverName: finalDriverName,
+        driverMobile: finalDriverPhone,
+        tractorId: targetTractorId,
+        vehicleNumber: finalTractorName,
+        status: 'On the way',
+      };
+
+      // Set target bill for thermal JPEG generation
+      setDispatchPrintBill(updatedBillObj);
+      await new Promise(r => setTimeout(r, 150));
+
+      // 2. Capture thermal receipt image as JPEG Data URL
+      let imageDataUrl: string | undefined = undefined;
+      const targetPrintEl = dispatchPrintRef.current || printRef.current;
+      if (targetPrintEl) {
+        try {
+          imageDataUrl = await toJpeg(targetPrintEl, {
+            quality: 0.95,
+            backgroundColor: '#ffffff',
+            pixelRatio: 2
+          });
+        } catch (imgErr) {
+          console.warn("Failed to generate thermal JPG for dispatch:", imgErr);
+        }
+      }
+
+      // 3. Update Firestore Bill Doc & Trips
+      const fid = bill.franchiseId || franchiseId || currentFranchise?.id || 'legacy-rajhans';
+      const billRef = doc(db, 'bills', bill.id);
+      await updateDoc(billRef, {
+        driverId: targetDriverId,
+        driverName: finalDriverName,
+        driverMobile: finalDriverPhone,
+        tractorId: targetTractorId,
+        vehicleNumber: finalTractorName,
+        status: 'On the way',
+        dispatchedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      // Sync Trip Doc
+      const qTrips = query(collection(db, 'trips'), where('billId', '==', bill.id));
+      const tripSnap = await getDocs(qTrips);
+      if (!tripSnap.empty) {
+        for (const tDoc of tripSnap.docs) {
+          await updateDoc(doc(db, 'trips', tDoc.id), {
+            driverId: targetDriverId,
+            driverName: finalDriverName,
+            tractorId: targetTractorId,
+            status: 'On the way',
+            updatedAt: serverTimestamp()
+          });
+        }
+      } else {
+        // Create trip doc if not exists
+        await addDoc(collection(db, 'trips'), {
+          billId: bill.id,
+          franchiseId: fid,
+          billNumber: bill.billNumber,
+          driverId: targetDriverId,
+          driverName: finalDriverName,
+          customerName: bill.customerName,
+          customerMobile: bill.customerMobile,
+          siteLocation: bill.customerAddress,
+          category: bill.category,
+          remarks: bill.remarks || '',
+          quantity: bill.quantity || 1,
+          tankerSize: bill.category === 'TANKER' ? bill.tankerSize : null,
+          bottleSize: bill.category === 'BOTTLE' ? bill.bottleSize : null,
+          tractorId: targetTractorId,
+          status: 'On the way',
+          createdAt: serverTimestamp()
+        });
+      }
+
+      // 4. Dispatch WhatsApp Notification with Thermal JPG image & Hindi dispatch text
+      let waResult: any = null;
+      try {
+        waResult = await dispatchWhatsAppLifecycleEvent(
+          updatedBillObj,
+          'dispatched',
+          franchiseDetail || currentFranchise,
+          imageDataUrl
+        );
+      } catch (waErr) {
+        console.warn("Auto WhatsApp dispatch failed:", waErr);
+      }
+
+      // 5. Update local state
+      if (editingBill && editingBill.id === bill.id) {
+        setEditingBill(updatedBillObj);
+      }
+      setDispatchQuickAssignBill(null);
+
+      // Build direct WhatsApp link as fallback
+      const waManualText = getWhatsAppDispatchText(updatedBillObj, franchiseDetail || currentFranchise);
+      const cleanPhone = (bill.customerMobile || '').replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('91') && cleanPhone.length > 10 ? cleanPhone : `91${cleanPhone.slice(-10)}`;
+      const manualWaUrl = `https://api.whatsapp.com/send?phone=${formattedPhone}&text=${encodeURIComponent(waManualText)}`;
+
+      setDispatchFeedback({
+        show: true,
+        billNumber: bill.billNumber,
+        customerName: bill.customerName,
+        driverName: finalDriverName,
+        mode: waResult?.success ? 'automated' : 'manual_ready',
+        waUrl: manualWaUrl
+      });
+
+    } catch (err: any) {
+      console.error("Dispatch order failed:", err);
+      alert(`Dispatch Error: ${err?.message || String(err)}`);
+    } finally {
+      setIsDispatching(null);
+    }
+  };
+
   const handlePrint = async () => {
     if (printRef.current) {
       try {
@@ -3650,11 +3952,21 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               <div className="bg-emerald-50 text-emerald-600 w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm">
                 <Banknote size={24} />
               </div>
-              <div className="text-right flex flex-col items-end bg-emerald-50 border border-emerald-100 rounded-2xl p-2 px-3 shadow-sm">
-                <span className="text-[9px] uppercase font-black text-emerald-600 tracking-wider">Today's Cash</span>
-                <span className="text-base font-black text-emerald-700 flex items-center gap-0.5 mt-0.5">
-                  <span className="text-xs font-bold">₹</span>
-                  {Number(stats.todayCashCollection || 0).toLocaleString()}
+              <div className={`text-right flex flex-col items-end border rounded-2xl p-1.5 px-3 shadow-sm ${
+                (stats.todayCashCollection || 0) < 0 
+                  ? 'bg-red-50 border-red-100' 
+                  : 'bg-emerald-50 border-emerald-100'
+              }`}>
+                <span className={`text-[9px] uppercase font-black tracking-wider ${
+                  (stats.todayCashCollection || 0) < 0 ? 'text-red-600' : 'text-emerald-600'
+                }`}>
+                  {(stats.todayCashCollection || 0) < 0 ? "Today's Outflow" : "Today's Cash Flow"}
+                </span>
+                <span className={`text-sm font-black flex items-center gap-0.5 mt-0.5 ${
+                  (stats.todayCashCollection || 0) < 0 ? 'text-red-700' : 'text-emerald-700'
+                }`}>
+                  <span className="text-xs font-bold">{(stats.todayCashCollection || 0) < 0 ? '-' : '+'}₹</span>
+                  {Number(Math.abs(stats.todayCashCollection || 0)).toLocaleString()}
                 </span>
               </div>
             </div>
@@ -3877,17 +4189,22 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                 <TrendingUp size={80} />
               </div>
               <div className="relative z-10">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center">
-                    <TrendingUp size={20} className="text-blue-400" />
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center">
+                      <TrendingUp size={20} className="text-blue-400" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-white">Delivered Sales</div>
+                      <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Multi-Stream & Ledger Sync</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-sm font-bold text-white">Delivered Sales</div>
-                    <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Real-time Performance</div>
-                  </div>
+                  <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live Sync
+                  </span>
                 </div>
                 <div className="space-y-2 mt-4">
-                  {/* Today's Sales Selector with Dropdown */}
+                  {/* Today's Sales Selector with Detailed Multi-Stream Breakdown */}
                   <div 
                     className="border border-white/5 rounded-2xl p-3 bg-white/5 hover:bg-white/10 cursor-pointer transition-colors select-none" 
                     onClick={() => setShowTodaySalesBreakdown(!showTodaySalesBreakdown)}
@@ -3902,66 +4219,133 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                       </span>
                     </div>
                     {showTodaySalesBreakdown && (
-                      <div className="mt-3 pt-2 border-t border-white/10 space-y-1.5 text-xs text-slate-400">
-                        <div className="flex justify-between items-center">
-                          <span>Cash Sale:</span>
-                          <span className="font-bold text-white">₹{Number(stats.todayDeliveredCash || 0).toLocaleString()}</span>
+                      <div className="mt-3 pt-2.5 border-t border-white/10 space-y-2.5 text-xs">
+                        {/* Payment Modes */}
+                        <div className="space-y-1 text-slate-400">
+                          <div className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-0.5">By Payment Mode</div>
+                          <div className="flex justify-between items-center pl-1">
+                            <span>💵 Cash Sale:</span>
+                            <span className="font-bold text-white">₹{Number(stats.todayDeliveredCash || 0).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between items-center pl-1">
+                            <span>📱 Bank/UPI Sale:</span>
+                            <span className="font-bold text-white">₹{Number(stats.todayDeliveredBank || 0).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between items-center pl-1 text-orange-400 font-medium">
+                            <span>📝 Credit / Due (Udhaar):</span>
+                            <span className="font-bold text-orange-400">₹{Number(stats.todayDeliveredPending || 0).toLocaleString()}</span>
+                          </div>
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span>Bank/UPI Sale:</span>
-                          <span className="font-bold text-white">₹{Number(stats.todayDeliveredBank || 0).toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-orange-450 font-medium">
-                          <span>Credit / Due Sale:</span>
-                          <span className="font-bold text-orange-400">₹{Number(stats.todayDeliveredPending || 0).toLocaleString()}</span>
+
+                        {/* Stream / Product Breakdown */}
+                        <div className="pt-2 border-t border-white/10 space-y-1 text-slate-400">
+                          <div className="text-[9px] font-black uppercase tracking-wider text-blue-400 mb-0.5">By Stream / Product</div>
+                          <div className="flex justify-between items-center pl-1">
+                            <span>🚜 Tankers ({stats.todayTankerTrips} trips):</span>
+                            <span className="font-bold text-sky-300">₹{Number(stats.todayTankerSale || 0).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between items-center pl-1">
+                            <span>🚰 20L Cans ({stats.todayCanQuantity} pcs):</span>
+                            <span className="font-bold text-cyan-300">₹{Number(stats.todayCanSale || 0).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between items-center pl-1">
+                            <span>💧 Bottles ({stats.todayBottleQuantity} pcs):</span>
+                            <span className="font-bold text-indigo-300">₹{Number(stats.todayBottleSale || 0).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between items-center pl-1">
+                            <span>⛲ Hydrant Filling ({stats.todayHydrantTokens} tk):</span>
+                            <span className="font-bold text-emerald-300">₹{Number(stats.todayHydrantSale || 0).toLocaleString()}</span>
+                          </div>
+                          {stats.todayLedgerDirectSale > 0 && (
+                            <div className="flex justify-between items-center pl-1">
+                              <span>📖 Direct Ledger Sales:</span>
+                              <span className="font-bold text-purple-300">₹{Number(stats.todayLedgerDirectSale || 0).toLocaleString()}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
                   </div>
 
                   <div className="flex items-baseline justify-between pt-1">
-                    <span className="text-xs text-slate-400">Month's Sales:</span>
+                    <span className="text-xs text-slate-400">Month's Sales (MTD):</span>
                     <span className="text-base font-black text-blue-400">
                       ₹{Number(stats.monthDeliveredSale || 0).toLocaleString()}
                     </span>
                   </div>
                   <div className="flex items-baseline justify-between border-t border-white/10 pt-2">
-                    <span className="text-xs text-slate-400">Total Sales:</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-400">Total Sales:</span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider bg-white/10 px-1.5 py-0.5 rounded">All-Time</span>
+                    </div>
                     <span className="text-base font-black text-white">
                       ₹{Number(stats.totalDeliveredSale || 0).toLocaleString()}
                     </span>
                   </div>
+
+                  <button
+                    onClick={() => setIsSalesModalOpen(true)}
+                    className="w-full mt-2 py-2 bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 rounded-xl text-[10px] font-black uppercase tracking-widest border border-blue-500/30 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <LineIcon size={12} /> View Detailed Analytics
+                  </button>
                 </div>
               </div>
             </div>
 
-             {/* Daily Tanker Dispatches Card */}
+             {/* Daily Dispatches & Product Streams Card */}
              <div className="bg-white/5 border border-white/10 p-5 rounded-3xl backdrop-blur-sm flex flex-col justify-between relative overflow-hidden group">
                <div className="absolute -right-4 -bottom-4 opacity-5 text-sky-500 group-hover:scale-110 transition-transform">
                  <Truck size={80} />
                </div>
                <div className="relative z-10">
-                 <div className="flex items-center gap-3 mb-3">
-                   <div className="w-10 h-10 bg-sky-500/20 text-sky-450 rounded-xl flex items-center justify-center">
-                     <Truck size={20} className="text-sky-400" />
-                   </div>
-                   <div>
-                     <div className="text-xs text-slate-400 uppercase font-bold tracking-widest">Tanker Trips</div>
-                     <div className="text-sm font-bold">Dispatch Stats</div>
+                 <div className="flex items-center justify-between mb-3">
+                   <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 bg-sky-500/20 text-sky-400 rounded-xl flex items-center justify-center">
+                       <Truck size={20} className="text-sky-400" />
+                     </div>
+                     <div>
+                       <div className="text-sm font-bold">Dispatches & Streams</div>
+                       <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Active Matrix</div>
+                     </div>
                    </div>
                  </div>
-                 <div className="space-y-2 mt-4">
-                   <div className="flex items-baseline justify-between">
-                     <span className="text-xs text-slate-400">Today:</span>
-                     <span className="text-lg font-black text-sky-400">
-                       {stats.todayTankerTrips} {stats.todayTankerTrips === 1 ? 'Trip' : 'Trips'}
-                     </span>
+
+                 <div className="space-y-2 mt-3 text-xs">
+                   {/* Tankers */}
+                   <div className="bg-white/5 rounded-xl p-2.5 flex items-center justify-between">
+                     <div className="flex items-center gap-2">
+                       <span className="text-sm">🚜</span>
+                       <div>
+                         <span className="font-bold text-white block">Tankers</span>
+                         <span className="text-[10px] text-slate-400">Month: {stats.monthTankerTrips} Trips (₹{stats.monthTankerSale.toLocaleString()})</span>
+                       </div>
+                     </div>
+                     <span className="font-black text-sky-400 text-sm">{stats.todayTankerTrips} Trips</span>
                    </div>
-                   <div className="flex items-baseline justify-between border-t border-white/10 pt-2">
-                     <span className="text-xs text-slate-400">This Month (MTD):</span>
-                     <span className="text-lg font-black text-white">
-                       {stats.monthTankerTrips} {stats.monthTankerTrips === 1 ? 'Trip' : 'Trips'}
-                     </span>
+
+                   {/* 20L Cans */}
+                   <div className="bg-white/5 rounded-xl p-2.5 flex items-center justify-between">
+                     <div className="flex items-center gap-2">
+                       <span className="text-sm">🚰</span>
+                       <div>
+                         <span className="font-bold text-white block">20L Cans</span>
+                         <span className="text-[10px] text-slate-400">Month: {stats.monthCanQuantity} Cans (₹{stats.monthCanSale.toLocaleString()})</span>
+                       </div>
+                     </div>
+                     <span className="font-black text-cyan-400 text-sm">{stats.todayCanQuantity} Cans</span>
+                   </div>
+
+                   {/* Hydrant Filling */}
+                   <div className="bg-white/5 rounded-xl p-2.5 flex items-center justify-between">
+                     <div className="flex items-center gap-2">
+                       <span className="text-sm">⛲</span>
+                       <div>
+                         <span className="font-bold text-white block">Hydrant Point</span>
+                         <span className="text-[10px] text-slate-400">Month: {stats.monthHydrantTokens} Tokens (₹{stats.monthHydrantSale.toLocaleString()})</span>
+                       </div>
+                     </div>
+                     <span className="font-black text-emerald-400 text-sm">{stats.todayHydrantTokens} Tokens</span>
                    </div>
                  </div>
                </div>
@@ -4642,12 +5026,14 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5">
                 <div className="text-right">
                   <div className="font-bold text-sm">{formatCurrency(bill.grandTotal)}</div>
                   <div className={`text-[10px] font-bold uppercase flex items-center gap-1 justify-end ${
                     bill.status === 'Delivered' ? 'text-green-500' : 
                     bill.status === 'Cancelled' ? 'text-red-500' : 
+                    bill.status === 'On the way' ? 'text-indigo-600 font-extrabold' :
+                    bill.status === 'Filling' ? 'text-blue-500' :
                     bill.status === 'Printed' ? 'text-slate-400 italic' : 'text-orange-500'
                   }`}>
                     {bill.status === 'Delivered' && (
@@ -4655,15 +5041,37 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                         {bill.paymentMode === 'Pending' ? 'credit' : bill.paymentMode}
                       </span>
                     )}
-                    {bill.status === 'Printed' ? 'Ready' : bill.status}
+                    {bill.status === 'Printed' ? 'Ready' : bill.status === 'On the way' ? '🚚 On Way' : bill.status}
                   </div>
                 </div>
+
+                {/* Quick Dispatch Action */}
+                {bill.status !== 'Delivered' && bill.status !== 'Cancelled' && (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDispatchOrder(bill);
+                    }}
+                    disabled={isDispatching === bill.id}
+                    title="Dispatch / रवाना करें (Send Driver & Thermal Receipt Copy)"
+                    className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-xs font-bold transition-all shadow-sm flex-shrink-0 cursor-pointer ${
+                      bill.status === 'On the way'
+                        ? 'bg-indigo-600 text-white shadow-indigo-200'
+                        : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-200/60'
+                    }`}
+                  >
+                    <Truck size={14} className={isDispatching === bill.id ? 'animate-bounce text-indigo-400' : ''} />
+                    <span className="hidden sm:inline">{bill.status === 'On the way' ? 'रवाना ✅' : 'रवाना'}</span>
+                  </button>
+                )}
+
                 <button 
                   onClick={(e) => {
                     e.stopPropagation();
                     sendWhatsApp(bill, 'customer');
                   }}
-                  className="w-8 h-8 bg-green-50 text-green-600 rounded-full flex items-center justify-center hover:bg-green-600 hover:text-white transition-all shadow-sm flex-shrink-0"
+                  title="WhatsApp Notification"
+                  className="w-8 h-8 bg-green-50 text-green-600 rounded-full flex items-center justify-center hover:bg-green-600 hover:text-white transition-all shadow-sm flex-shrink-0 cursor-pointer"
                 >
                   <MessageSquare size={16} />
                 </button>
@@ -5254,41 +5662,49 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          <div className="grid grid-cols-4 gap-2">
+                          <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
                           <button 
                             onClick={() => handleStatusUpdate('Delivered')}
-                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Delivered' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-100 text-slate-500'}`}
+                            className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border-2 transition-all cursor-pointer ${editingBill.status === 'Delivered' ? 'border-green-500 bg-green-50 text-green-700 font-bold' : 'border-slate-100 text-slate-500 hover:border-green-200'}`}
                           >
-                            <CheckCircle2 size={24} />
-                            <span className="text-[10px] font-bold">Delivered</span>
+                            <CheckCircle2 size={20} />
+                            <span className="text-[9px] font-bold">Delivered</span>
+                          </button>
+                          <button 
+                            onClick={() => handleDispatchOrder(editingBill)}
+                            disabled={isDispatching === editingBill.id}
+                            className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border-2 transition-all cursor-pointer ${editingBill.status === 'On the way' ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-extrabold shadow-sm' : 'border-slate-100 text-slate-500 hover:border-indigo-200'}`}
+                          >
+                            <Truck size={20} className={isDispatching === editingBill.id ? 'animate-bounce text-indigo-600' : ''} />
+                            <span className="text-[9px] font-bold">{isDispatching === editingBill.id ? 'भेज रहे...' : 'रवाना'}</span>
                           </button>
                           <button 
                             onClick={() => handleStatusUpdate('Filling')}
-                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Filling' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500'}`}
+                            className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border-2 transition-all cursor-pointer ${editingBill.status === 'Filling' ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold' : 'border-slate-100 text-slate-500 hover:border-blue-200'}`}
                           >
-                            <Truck size={24} />
-                            <span className="text-[10px] font-bold">Filling</span>
+                            <Droplet size={20} />
+                            <span className="text-[9px] font-bold">Filling</span>
                           </button>
                           <button 
                             onClick={() => handleStatusUpdate('Pending')}
-                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Pending' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-100 text-slate-500'}`}
+                            className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border-2 transition-all cursor-pointer ${editingBill.status === 'Pending' ? 'border-orange-500 bg-orange-50 text-orange-700 font-bold' : 'border-slate-100 text-slate-500 hover:border-orange-200'}`}
                           >
-                            <Clock size={24} />
-                            <span className="text-[10px] font-bold">Pending</span>
+                            <Clock size={20} />
+                            <span className="text-[9px] font-bold">Pending</span>
                           </button>
                           <button 
                             onClick={() => handleStatusUpdate('Cancelled')}
-                            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition-all ${editingBill.status === 'Cancelled' ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-100 text-slate-500'}`}
+                            className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border-2 transition-all cursor-pointer ${editingBill.status === 'Cancelled' ? 'border-red-500 bg-red-50 text-red-700 font-bold' : 'border-slate-100 text-slate-500 hover:border-red-200'}`}
                           >
-                            <AlertCircle size={24} />
-                            <span className="text-[10px] font-bold">Cancel</span>
+                            <AlertCircle size={20} />
+                            <span className="text-[9px] font-bold">Cancel</span>
                           </button>
                           </div>
 
                           {(!editingBill.driverId || !editingBill.tractorId) && (
-                            <div className="p-3 bg-red-50 rounded-2xl border border-red-100 text-center animate-pulse">
-                              <p className="text-[11px] font-black uppercase tracking-wider text-red-600">
-                                ⚠️ First select driver and tractor then click Delivered
+                            <div className="p-2.5 bg-amber-50 rounded-2xl border border-amber-200 text-center">
+                              <p className="text-[10px] font-bold tracking-wide text-amber-800">
+                                💡 रवाना या Delivered करने से पहले ड्राइवर व वाहन असाइन कर लें
                               </p>
                             </div>
                           )}
@@ -5420,27 +5836,40 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                     </div>
 
                     <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-3">
+                      {/* Prominent Dispatch Button */}
+                      <button 
+                        onClick={() => handleDispatchOrder(editingBill)}
+                        disabled={isDispatching === editingBill.id}
+                        className="col-span-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-center gap-2 p-3.5 rounded-2xl font-bold shadow-md shadow-blue-100 hover:from-blue-700 hover:to-indigo-700 hover:scale-[1.01] active:scale-95 transition-all text-xs cursor-pointer"
+                      >
+                        <Truck size={18} className={isDispatching === editingBill.id ? 'animate-bounce' : ''} />
+                        <span>{isDispatching === editingBill.id ? 'थर्मल रसीद बनाकर WhatsApp भेज रहे हैं...' : '🚚 रवाना करें (Dispatch) & WhatsApp Thermal Receipt'}</span>
+                      </button>
+
                       <button 
                         onClick={() => { setEditingBill(null); setChatBill(editingBill); }}
-                        className="col-span-2 bg-blue-50 text-blue-600 border border-blue-200 flex flex-row items-center justify-center gap-2 p-4 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all text-sm mb-2"
+                        className="col-span-2 bg-blue-50 text-blue-600 border border-blue-200 flex flex-row items-center justify-center gap-2 p-3 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all text-xs"
                       >
-                        <MessageSquare size={18} />
-                        <span>Customer Feedback</span>
+                        <MessageSquare size={16} />
+                        <span>Customer Feedback Chat</span>
                       </button>
+
                       <button 
                         onClick={() => shareBillImage(editingBill, 'customer')}
-                        className="bg-[#25D366] text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all"
+                        className="bg-[#25D366] text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold shadow-lg shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
                       >
                         <MessageSquare size={16} />
                         <span className="text-[9px] uppercase">Customer Copy</span>
                       </button>
+
                       <button 
                         onClick={() => shareBillImage(editingBill, 'driver')}
-                        className="bg-slate-800 text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all"
+                        className="bg-slate-800 text-white flex flex-col items-center justify-center gap-1 p-3 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
                       >
                         <Share2 size={16} />
                         <span className="text-[9px] uppercase">Driver Copy</span>
                       </button>
+
                       <button 
                         onClick={async () => {
                           try {
@@ -5448,10 +5877,20 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
                           } catch (err) {
                             console.warn("Direct Printing failed, falling back to window.print:", err);
                           }
-                          // Auto-send direct preloaded WhatsApp to customer
+                          // Capture thermal JPG and trigger automated WhatsApp notification
+                          let imageDataUrl: string | undefined = undefined;
+                          if (printRef.current) {
+                            try {
+                              imageDataUrl = await toJpeg(printRef.current, { quality: 0.95, backgroundColor: '#ffffff', pixelRatio: 2 });
+                            } catch (e) {}
+                          }
+                          try {
+                            await dispatchWhatsAppLifecycleEvent(editingBill, 'bill_generated', franchiseDetail || currentFranchise, imageDataUrl);
+                          } catch (e) {}
+                          // Also open direct WhatsApp link
                           openWhatsAppDirect(editingBill, franchiseDetail || currentFranchise);
                         }}
-                        className="col-span-2 material-btn bg-blue-600 text-white flex items-center justify-center gap-2 py-4 shadow-md font-extrabold hover:bg-blue-700 transition-all border border-blue-500"
+                        className="col-span-2 material-btn bg-blue-600 text-white flex items-center justify-center gap-2 py-4 shadow-md font-extrabold hover:bg-blue-700 transition-all border border-blue-500 cursor-pointer"
                       >
                         <Printer size={20} /> Print & Auto-Send WhatsApp 🚛
                       </button>
@@ -5464,12 +5903,189 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         )}
       </AnimatePresence>
 
-      {/* Hidden Thermal Print Node */}
+      {/* Hidden Thermal Print Nodes */}
       <div style={{ position: 'absolute', top: 0, left: '-9999px', pointerEvents: 'none', backgroundColor: '#ffffff' }}>
         <div ref={printRef}>
           {editingBill && <ThermalInvoice bill={editingBill} />}
         </div>
+        <div ref={dispatchPrintRef}>
+          {(dispatchPrintBill || editingBill) && <ThermalInvoice bill={dispatchPrintBill || editingBill} />}
+        </div>
       </div>
+
+      {/* Quick Assign Driver & Tractor Modal for Dispatch */}
+      <AnimatePresence>
+        {dispatchQuickAssignBill && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDispatchQuickAssignBill(null)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 z-10 space-y-5"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                    <Truck size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">रवाना करें (Dispatch Order)</h3>
+                    <p className="text-xs text-slate-500 font-medium">बिल #{dispatchQuickAssignBill.billNumber} • {dispatchQuickAssignBill.customerName}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDispatchQuickAssignBill(null)}
+                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-all cursor-pointer"
+                >
+                  <LucideX size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                    ड्राइवर चुनें (Select Driver) *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+                    {drivers.map(d => (
+                      <button
+                        type="button"
+                        key={d.id}
+                        onClick={() => setQuickAssignDriverId(d.id || '')}
+                        className={`p-2.5 rounded-xl text-left border-2 text-xs font-bold transition-all flex flex-col cursor-pointer ${
+                          quickAssignDriverId === d.id
+                            ? 'border-indigo-600 bg-indigo-50/80 text-indigo-900 shadow-sm'
+                            : 'border-slate-100 bg-slate-50/50 text-slate-700 hover:border-slate-200'
+                        }`}
+                      >
+                        <span className="truncate">{d.name}</span>
+                        <span className="text-[10px] text-slate-500 font-normal">{d.mobile || 'No Mobile'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                    ट्रैक्टर / वाहन चुनें (Select Vehicle) *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+                    {tractors.map(t => (
+                      <button
+                        type="button"
+                        key={t.id}
+                        onClick={() => setQuickAssignTractorId(t.id || '')}
+                        className={`p-2.5 rounded-xl text-left border-2 text-xs font-bold transition-all flex flex-col cursor-pointer ${
+                          quickAssignTractorId === t.id
+                            ? 'border-indigo-600 bg-indigo-50/80 text-indigo-900 shadow-sm'
+                            : 'border-slate-100 bg-slate-50/50 text-slate-700 hover:border-slate-200'
+                        }`}
+                      >
+                        <span className="truncate">{t.name}</span>
+                        <span className="text-[10px] text-slate-500 font-normal">{t.vehicleNumber || t.id}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-blue-50/60 rounded-2xl border border-blue-100/80 text-xs text-blue-900 flex items-start gap-2">
+                  <span className="text-base">ℹ️</span>
+                  <div>
+                    <strong>WhatsApp ऑटोमेशन:</strong> जैसे ही आप "कन्फर्म एवं रवाना करें" दबाएंगे, कस्टमर के पास <strong>ड्राइवर का नाम, मोबाइल नंबर व थर्मल बिल की JPG रसीद</strong> WhatsApp पर स्वतः चली जाएगी।
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDispatchQuickAssignBill(null)}
+                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all cursor-pointer"
+                >
+                  रद्द करें
+                </button>
+                <button
+                  type="button"
+                  disabled={!quickAssignDriverId || !quickAssignTractorId || isDispatching !== null}
+                  onClick={() => {
+                    if (dispatchQuickAssignBill) {
+                      handleDispatchOrder(dispatchQuickAssignBill, quickAssignDriverId, quickAssignTractorId);
+                    }
+                  }}
+                  className="flex-2 py-3 bg-indigo-600 text-white rounded-xl font-bold text-xs hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200 disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Truck size={16} />
+                  <span>{isDispatching ? 'रवाना हो रहा है...' : 'कन्फर्म एवं रवाना करें 🚚'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Dispatch Success Feedback Toast */}
+      <AnimatePresence>
+        {dispatchFeedback && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="pointer-events-auto bg-slate-900 text-white rounded-3xl p-5 shadow-2xl border border-slate-800 max-w-sm w-full space-y-3"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center flex-shrink-0">
+                    <CheckCircle2 size={22} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-white">टैंकर रवाना (Dispatched)!</h4>
+                    <p className="text-[11px] text-slate-400">बिल #{dispatchFeedback.billNumber} • {dispatchFeedback.customerName}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDispatchFeedback(null)}
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <LucideX size={16} />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-300">
+                ड्राइवर <strong>{dispatchFeedback.driverName}</strong> को असाइन कर दिया गया है। कस्टमर को विवरण व थर्मल बिल कॉपी WhatsApp पर भेजी जा रही है।
+              </p>
+
+              <div className="flex items-center gap-2 pt-1">
+                {dispatchFeedback.waUrl && (
+                  <a
+                    href={dispatchFeedback.waUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setDispatchFeedback(null)}
+                    className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5 transition-colors shadow"
+                  >
+                    <MessageSquare size={14} />
+                    <span>WhatsApp खोलें</span>
+                  </a>
+                )}
+                <button
+                  onClick={() => setDispatchFeedback(null)}
+                  className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  ठीक है
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <ConfirmationModal 
         isOpen={!!deleteConfirm}
@@ -5677,6 +6293,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
         {isSalesModalOpen && (
           <SalesAnalyticsModal 
             bills={bills} 
+            hydrantFillings={hydrantFillings}
+            vouchersList={vouchersList}
             onClose={() => setIsSalesModalOpen(false)} 
             salesChartRange={salesChartRange}
             setSalesChartRange={setSalesChartRange}
@@ -5826,34 +6444,80 @@ function MonthlyCanCalendar({ customer, bills, onClose }: { customer: Customer, 
 
 function SalesAnalyticsModal({ 
   bills, 
+  hydrantFillings = [],
+  vouchersList = [],
   onClose, 
   salesChartRange, 
   setSalesChartRange 
 }: { 
   bills: Bill[], 
+  hydrantFillings?: HydrantFilling[],
+  vouchersList?: any[],
   onClose: () => void, 
   salesChartRange: 'weekly' | 'monthly' | 'half-yearly' | 'yearly', 
   setSalesChartRange: (val: 'weekly' | 'monthly' | 'half-yearly' | 'yearly') => void 
 }) {
   const chartData = useMemo(() => {
     const today = new Date();
+
+    const getPeriodMetrics = (matchDayStr?: string, matchMonthStr?: string) => {
+      // 1. Bills
+      const periodBills = bills.filter(b => {
+        if (b.status === 'Cancelled') return false;
+        const bDate = parseFirestoreDate(b.date);
+        if (matchDayStr) return format(bDate, 'yyyy-MM-dd') === matchDayStr;
+        if (matchMonthStr) return format(bDate, 'yyyy-MM') === matchMonthStr;
+        return true;
+      });
+
+      const billSales = periodBills.reduce((sum, b) => sum + (Number(b.grandTotal) || 0), 0);
+      const billPending = periodBills.reduce((sum, b) => {
+        if (b.isSettled) return sum;
+        if (b.paymentMode === 'Pending') return sum + (Number(b.grandTotal) || 0);
+        if (b.paymentMode === 'Split' && b.splitPayments) return sum + (Number(b.splitPayments.pending) || 0);
+        return sum;
+      }, 0);
+
+      // 2. Hydrant Fillings (Inward sales)
+      const periodHydrant = hydrantFillings.filter(h => {
+        if (h.type !== 'Inward') return false;
+        const hDate = parseFirestoreDate(h.date || h.createdAt);
+        if (matchDayStr) return format(hDate, 'yyyy-MM-dd') === matchDayStr;
+        if (matchMonthStr) return format(hDate, 'yyyy-MM') === matchMonthStr;
+        return true;
+      });
+
+      const hydrantSales = periodHydrant.reduce((sum, h) => sum + (Number(h.totalAmount) || 0), 0);
+      const hydrantPending = periodHydrant.reduce((sum, h) => {
+        if (h.paymentMode === 'Udhaar' || h.status === 'Pending') {
+          return sum + (Number(h.totalAmount) || 0);
+        }
+        return sum;
+      }, 0);
+
+      // 3. Standalone Direct Ledger Sales Vouchers
+      const periodLedger = vouchersList.filter(v => {
+        if (v.type !== 'Sales' && v.type !== 'Receipt') return false;
+        if (v.billId || v.isBillSettlement || v.isSystemGenerated) return false;
+        const vDate = parseFirestoreDate(v.date || v.createdAt);
+        if (matchDayStr) return format(vDate, 'yyyy-MM-dd') === matchDayStr;
+        if (matchMonthStr) return format(vDate, 'yyyy-MM') === matchMonthStr;
+        return true;
+      });
+
+      const ledgerSales = periodLedger.reduce((sum, v) => sum + (Number(v.amount) || 0), 0);
+
+      return {
+        sales: billSales + hydrantSales + ledgerSales,
+        pending: billPending + hydrantPending
+      };
+    };
     
     if (salesChartRange === 'weekly') {
       return Array.from({ length: 7 }).map((_, i) => {
         const d = subDays(today, 6 - i);
         const dateStr = format(d, 'yyyy-MM-dd');
-        const dayBills = bills.filter(b => {
-          if (b.status === 'Cancelled') return false;
-          const bDate = parseFirestoreDate(b.date);
-          return format(bDate, 'yyyy-MM-dd') === dateStr;
-        });
-        const sales = dayBills.reduce((sum, b) => sum + b.grandTotal, 0);
-        const pending = dayBills.reduce((sum, b) => {
-          if (b.isSettled) return sum;
-          if (b.paymentMode === 'Pending') return sum + b.grandTotal;
-          if (b.paymentMode === 'Split' && b.splitPayments) return sum + (b.splitPayments.pending || 0);
-          return sum + b.grandTotal;
-        }, 0);
+        const { sales, pending } = getPeriodMetrics(dateStr, undefined);
         return {
           name: format(d, 'EEE (dd)'),
           sales,
@@ -5864,18 +6528,7 @@ function SalesAnalyticsModal({
       return Array.from({ length: 30 }).map((_, i) => {
         const d = subDays(today, 29 - i);
         const dateStr = format(d, 'yyyy-MM-dd');
-        const dayBills = bills.filter(b => {
-          if (b.status === 'Cancelled') return false;
-          const bDate = parseFirestoreDate(b.date);
-          return format(bDate, 'yyyy-MM-dd') === dateStr;
-        });
-        const sales = dayBills.reduce((sum, b) => sum + b.grandTotal, 0);
-        const pending = dayBills.reduce((sum, b) => {
-          if (b.isSettled) return sum;
-          if (b.paymentMode === 'Pending') return sum + b.grandTotal;
-          if (b.paymentMode === 'Split' && b.splitPayments) return sum + (b.splitPayments.pending || 0);
-          return sum + b.grandTotal;
-        }, 0);
+        const { sales, pending } = getPeriodMetrics(dateStr, undefined);
         return {
           name: format(d, 'dd MMM'),
           sales,
@@ -5886,18 +6539,7 @@ function SalesAnalyticsModal({
       return Array.from({ length: 6 }).map((_, i) => {
         const d = subMonths(today, 5 - i);
         const monthStr = format(d, 'yyyy-MM');
-        const monthBills = bills.filter(b => {
-          if (b.status === 'Cancelled') return false;
-          const bDate = parseFirestoreDate(b.date);
-          return format(bDate, 'yyyy-MM') === monthStr;
-        });
-        const sales = monthBills.reduce((sum, b) => sum + b.grandTotal, 0);
-        const pending = monthBills.reduce((sum, b) => {
-          if (b.isSettled) return sum;
-          if (b.paymentMode === 'Pending') return sum + b.grandTotal;
-          if (b.paymentMode === 'Split' && b.splitPayments) return sum + (b.splitPayments.pending || 0);
-          return sum + b.grandTotal;
-        }, 0);
+        const { sales, pending } = getPeriodMetrics(undefined, monthStr);
         return {
           name: format(d, 'MMM yy'),
           sales,
@@ -5908,18 +6550,7 @@ function SalesAnalyticsModal({
       return Array.from({ length: 12 }).map((_, i) => {
         const d = subMonths(today, 11 - i);
         const monthStr = format(d, 'yyyy-MM');
-        const monthBills = bills.filter(b => {
-          if (b.status === 'Cancelled') return false;
-          const bDate = parseFirestoreDate(b.date);
-          return format(bDate, 'yyyy-MM') === monthStr;
-        });
-        const sales = monthBills.reduce((sum, b) => sum + b.grandTotal, 0);
-        const pending = monthBills.reduce((sum, b) => {
-          if (b.isSettled) return sum;
-          if (b.paymentMode === 'Pending') return sum + b.grandTotal;
-          if (b.paymentMode === 'Split' && b.splitPayments) return sum + (b.splitPayments.pending || 0);
-          return sum + b.grandTotal;
-        }, 0);
+        const { sales, pending } = getPeriodMetrics(undefined, monthStr);
         return {
           name: format(d, 'MMM yy'),
           sales,
@@ -5927,7 +6558,7 @@ function SalesAnalyticsModal({
         };
       });
     }
-  }, [bills, salesChartRange]);
+  }, [bills, hydrantFillings, vouchersList, salesChartRange]);
 
   const summary = useMemo(() => {
     const totalSales = chartData.reduce((acc, curr) => acc + curr.sales, 0);

@@ -31,7 +31,6 @@ import {
   Cpu,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import FranchiseAIAssistant from "./components/FranchiseAIAssistant";
 import { DriverLiveTracking } from "./components/DriverLiveTracking";
 import { CustomerOrderView } from "./components/CustomerOrderView";
 import PhoneSync from "./components/PhoneSync";
@@ -1347,7 +1346,6 @@ export default function App() {
           </>
         )}
       </nav>
-      <FranchiseAIAssistant />
     </div>
   );
 }

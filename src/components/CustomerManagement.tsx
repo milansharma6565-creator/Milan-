@@ -14,6 +14,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { startOfMonth, endOfMonth, format } from 'date-fns';
 import { ledgerAutomation } from '../services/ledgerAutomation';
+import { WhatsAppAutomationCenter } from './WhatsAppAutomationCenter';
 
 const parseFirestoreDate = (val: any): Date => {
   if (!val) return new Date();
@@ -56,6 +57,7 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
   
   const [validationError, setValidationError] = useState<{ name?: string; mobile?: string }>({});
   const [showOnlyPendingDues, setShowOnlyPendingDues] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
 
   // Real-time duplicate checking for New Customer
   useEffect(() => {
@@ -478,7 +480,15 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
             <h1 className="text-3xl font-display font-bold text-slate-900 tracking-tight">Customers</h1>
             <p className="text-slate-500 text-sm">{customers?.length || 0} registered clients</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={() => setShowWhatsAppModal(true)}
+              className="h-12 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl flex items-center gap-2 text-xs font-black shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              title="WhatsApp Bulk Broadcast & Festival Wishes"
+            >
+              <MessageSquare size={18} />
+              <span className="hidden sm:inline">WhatsApp Broadcast</span>
+            </button>
             <button 
               onClick={() => exportPDF(true)}
               className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center hover:bg-red-100 transition-colors border border-red-100"
@@ -1066,6 +1076,25 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
             isSuperAdmin={isSuperAdmin}
             onClose={() => setShareLedgerCustomer(null)}
           />
+        )}
+
+        {/* WhatsApp Automation & Broadcast Center Modal */}
+        {showWhatsAppModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-5xl"
+            >
+              <WhatsAppAutomationCenter
+                franchise={{ id: franchiseId }}
+                customers={customers}
+                onClose={() => setShowWhatsAppModal(false)}
+                isModal
+              />
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

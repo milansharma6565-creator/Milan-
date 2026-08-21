@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, query, where } from 'firebase/firestore';
 import { 
   Settings as SettingsIcon, 
   Truck, 
@@ -17,12 +17,15 @@ import {
   Heart,
   Droplet,
   Smartphone,
-  Database
+  Database,
+  MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DriverManagement } from './DriverManagement';
 import { TractorDiesel } from './TractorDiesel';
 import { BackupRestore } from './BackupRestore';
+import { WhatsAppAutomationCenter } from './WhatsAppAutomationCenter';
+import { Customer } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import { getPublicAppUrl, copyToClipboard } from '../constants';
 import { activityLogger } from '../services/activityLogger';
@@ -49,8 +52,9 @@ interface BannerTemplate {
 }
 
 export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: SettingsProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'print' | 'drivers' | 'fleet' | 'pricing' | 'apps' | 'database'>('print');
+  const [activeSubTab, setActiveSubTab] = useState<'whatsapp' | 'print' | 'drivers' | 'fleet' | 'pricing' | 'apps' | 'database'>('whatsapp');
   const [franchiseDetail, setFranchiseDetail] = useState<any>(null);
+  const [customersList, setCustomersList] = useState<Customer[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -136,6 +140,20 @@ export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: Settin
     });
     return () => unsub();
   }, [franchiseId, currentFranchise]);
+
+  // Load customers for WhatsApp broadcast & automation
+  useEffect(() => {
+    const fid = franchiseId || currentFranchise?.id;
+    let qCust = query(collection(db, 'customers'));
+    if (fid && !isSuperAdmin) {
+      qCust = query(collection(db, 'customers'), where('franchiseId', '==', fid));
+    }
+    const unsubCust = onSnapshot(qCust, (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Customer));
+      setCustomersList(list);
+    });
+    return () => unsubCust();
+  }, [franchiseId, currentFranchise, isSuperAdmin]);
 
   const handleServiceToggle = async (key: 'tanker' | 'can' | 'bottle') => {
     const fid = franchiseId || currentFranchise?.id;
@@ -560,7 +578,18 @@ export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: Settin
         </div>
 
         {/* Dynamic sub tab keys switcher */}
-        <div className="bg-white border border-slate-100 p-1.5 rounded-2xl flex items-center shadow-sm">
+        <div className="bg-white border border-slate-100 p-1.5 rounded-2xl flex items-center shadow-sm flex-wrap gap-1">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('whatsapp')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+              activeSubTab === 'whatsapp' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+            }`}
+          >
+            <MessageSquare size={14} className={activeSubTab === 'whatsapp' ? '' : 'animate-bounce'} />
+            WhatsApp Automation & QR
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveSubTab('print')}
@@ -631,6 +660,13 @@ export function Settings({ franchiseId, isSuperAdmin, currentFranchise }: Settin
           exit={{ opacity: 0, y: -15 }}
           transition={{ duration: 0.15 }}
         >
+          {activeSubTab === 'whatsapp' && (
+            <WhatsAppAutomationCenter
+              franchise={franchiseDetail || currentFranchise}
+              customers={customersList}
+            />
+          )}
+
           {activeSubTab === 'print' && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
               

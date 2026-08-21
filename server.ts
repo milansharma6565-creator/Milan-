@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
+import { whatsappEngine } from "./server/whatsappEngine";
 
 // =========================================================================
 // CRASH SHIELD & PROCESS SECURITY GUARD
@@ -157,6 +158,169 @@ app.get("/api/health", (req, res) => {
     if (isOn !== undefined) motorStores[fId].isOn = !!isOn;
     motorStores[fId].lastUpdated = new Date().toISOString();
     res.json({ success: true, state: motorStores[fId] });
+  });
+
+  // =========================================================================
+  // WHATSAPP OPEN-WA / BAILEYS WEB AUTOMATION ENDPOINTS
+  // =========================================================================
+
+  // Get live WhatsApp connection status, QR code, and current settings
+  app.get("/api/whatsapp/status", (req, res) => {
+    try {
+      const status = whatsappEngine.getStatus();
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to fetch WhatsApp status" });
+    }
+  });
+
+  // Trigger or refresh WhatsApp Web QR Connection
+  app.post("/api/whatsapp/connect", async (req, res) => {
+    try {
+      const { forceRefresh } = req.body || {};
+      const status = await whatsappEngine.initialize(!!forceRefresh);
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to initialize WhatsApp connection" });
+    }
+  });
+
+  // Disconnect / Logout WhatsApp Session
+  app.post("/api/whatsapp/disconnect", async (req, res) => {
+    try {
+      const status = await whatsappEngine.disconnect();
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to disconnect WhatsApp" });
+    }
+  });
+
+  // Send Direct Message
+  app.post("/api/whatsapp/send-message", async (req, res) => {
+    try {
+      const { to, message } = req.body;
+      if (!to || !message) {
+        return res.status(400).json({ error: "Parameters 'to' and 'message' are required." });
+      }
+      const result = await whatsappEngine.sendMessage(to, message);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to send WhatsApp message" });
+    }
+  });
+
+  // Direct Send Media (Image / Document / Thermal Receipt JPG)
+  app.post("/api/whatsapp/send-media", async (req, res) => {
+    try {
+      const { to, mediaDataUrl, caption, mimetype, fileName } = req.body;
+      if (!to || !mediaDataUrl) {
+        return res.status(400).json({ error: "Parameters 'to' and 'mediaDataUrl' are required." });
+      }
+      const result = await whatsappEngine.sendMedia(to, mediaDataUrl, caption, mimetype || "image/jpeg", fileName || "Receipt.jpg");
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to send WhatsApp media" });
+    }
+  });
+
+  // Trigger Automated Order Lifecycle Notification (Booked, Filling, Dispatched, Delivered, Cancelled)
+  app.post("/api/whatsapp/notify-order", async (req, res) => {
+    try {
+      const { bill, eventType, franchise, imageDataUrl } = req.body;
+      if (!bill) {
+        return res.status(400).json({ error: "Bill object is required." });
+      }
+      const result = await whatsappEngine.sendOrderLifecycleNotification(
+        bill,
+        eventType || "bill_generated",
+        franchise,
+        undefined,
+        imageDataUrl
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to process order WhatsApp notification" });
+    }
+  });
+
+  // Bulk WhatsApp Broadcast / Festival Wishes
+  app.post("/api/whatsapp/broadcast", async (req, res) => {
+    try {
+      const { recipients, messageTemplate, franchise } = req.body;
+      if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+        return res.status(400).json({ error: "Valid recipients array is required." });
+      }
+      if (!messageTemplate) {
+        return res.status(400).json({ error: "Message template text is required." });
+      }
+
+      const result = await whatsappEngine.queueBroadcast(recipients, messageTemplate, franchise);
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to start WhatsApp broadcast" });
+    }
+  });
+
+  // Check Bulk Broadcast Queue Status
+  app.get("/api/whatsapp/broadcast-status", (req, res) => {
+    try {
+      const status = whatsappEngine.getBroadcastQueueStatus();
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Clear Broadcast Queue
+  app.post("/api/whatsapp/clear-broadcast", (req, res) => {
+    try {
+      const result = whatsappEngine.clearBroadcastQueue();
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Get all WhatsApp templates (default & customized)
+  app.get("/api/whatsapp/templates", (req, res) => {
+    try {
+      const templates = whatsappEngine.getTemplates();
+      res.json({ success: true, templates });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to fetch WhatsApp templates" });
+    }
+  });
+
+  // Update one or multiple WhatsApp templates
+  app.post("/api/whatsapp/templates", (req, res) => {
+    try {
+      const { templateId, template, title, enabled, templates } = req.body;
+      if (templates && typeof templates === 'object') {
+        const updated = whatsappEngine.setTemplates(templates);
+        return res.json({ success: true, templates: updated });
+      }
+      if (templateId) {
+        const updated = whatsappEngine.updateTemplate(templateId, {
+          template,
+          title,
+          enabled,
+        });
+        return res.json({ success: true, template: updated });
+      }
+      return res.status(400).json({ error: "templateId or templates map is required" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to update WhatsApp templates" });
+    }
+  });
+
+  // Update Auto-Notification Preferences
+  app.post("/api/whatsapp/settings", (req, res) => {
+    try {
+      const updated = whatsappEngine.updateAutoNotificationSettings(req.body);
+      res.json({ success: true, settings: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Letterhead/AI Generation Endpoint

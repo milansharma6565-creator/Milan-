@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES, getPublicAppUrl } from '../constants';
 import { ThermalInvoice } from './ThermalInvoice';
 import { printThermalReceipt } from '../lib/printUtils';
-import { getWhatsAppBillLink } from '../lib/whatsappUtils';
+import { getWhatsAppBillLink, dispatchWhatsAppLifecycleEvent } from '../lib/whatsappUtils';
 import { format } from 'date-fns';
 import { toJpeg } from 'html-to-image';
 import { ledgerAutomation } from '../services/ledgerAutomation';
@@ -898,6 +898,17 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
 
         if (bookedBillWithId.status === 'Delivered') {
           ledgerAutomation.postBillToLedger(bookedBillWithId);
+        }
+
+        // Trigger Automated WhatsApp Notification to Customer
+        try {
+          dispatchWhatsAppLifecycleEvent(
+            bookedBillWithId,
+            bookedBillWithId.status === 'Delivered' ? 'delivered' : 'booked',
+            currentFranchise
+          );
+        } catch (waErr) {
+          console.warn("WhatsApp notification error:", waErr);
         }
 
         if (form.driverId) {

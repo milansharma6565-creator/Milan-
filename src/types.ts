@@ -117,6 +117,8 @@ export interface Bill {
   driverName?: string;
   driverMobile?: string;
   tractorId?: string;
+  tractorName?: string;
+  vehicleNumber?: string;
   deliveryLocation?: {
     lat: number;
     lng: number;
@@ -131,6 +133,7 @@ export interface Bill {
   remarks?: string;
   createdAt: any;
   completedAt?: any;
+  dispatchedAt?: any;
   includedPendingDues?: boolean;
   previousPendingDuesAmount?: number;
   previousPendingDuesDetails?: string;
