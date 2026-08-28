@@ -31,9 +31,7 @@ import {
   Cpu,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { DriverLiveTracking } from "./components/DriverLiveTracking";
 import { CustomerOrderView } from "./components/CustomerOrderView";
-import PhoneSync from "./components/PhoneSync";
 import { Logo } from "./components/Logo";
 import { PremiumTractor } from "./components/PremiumTractor";
 import { GoodMorningGreeting } from "./components/GoodMorningGreeting";
@@ -534,9 +532,9 @@ export default function App() {
     );
   }
 
-  // If driverId is present, show tracking page regardless of auth
+  // If driverId is present, show admin live tracking map
   if (driverId) {
-    return <DriverLiveTracking driverId={driverId} />;
+    return <DriverTrackingAdmin />;
   }
 
   // If orderId is present, show customer view regardless of auth
@@ -760,8 +758,6 @@ export default function App() {
         return <TractorDiesel {...props} />;
       case "filling":
         return <HydrantFilling {...props} />;
-      case "sync":
-        return <PhoneSync />;
       case "settings":
         return <Settings {...props} />;
       case "backup":

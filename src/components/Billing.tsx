@@ -4,9 +4,9 @@ import { collection, query, where, onSnapshot, getDocs, addDoc, updateDoc, serve
 import { Customer, Driver, Bill } from '../types';
 import { Search, MapPin, Phone, IndianRupee, Printer, X, CheckCircle2, UserPlus, Share2, FileText, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES, getPublicAppUrl } from '../constants';
+import { TANKER_SIZES, PAYMENT_MODES, BILL_STATUSES, formatCurrency, generateBillNumber, getNextBillNumber, PRODUCT_CATEGORIES, BOTTLE_SIZES, getPublicAppUrl } from '../constants';
 import { ThermalInvoice } from './ThermalInvoice';
-import { printThermalReceipt } from '../lib/printUtils';
+import { printThermalReceipt, shareOrDownloadBillImage } from '../lib/printUtils';
 import { getWhatsAppBillLink, dispatchWhatsAppLifecycleEvent } from '../lib/whatsappUtils';
 import { format } from 'date-fns';
 import { toJpeg } from 'html-to-image';
@@ -530,79 +530,13 @@ export function Billing({ onBillCreated, franchiseId, isSuperAdmin, commissionPe
   const shareBillImage = async (bill: any) => {
     if (!bill || !thermalRef.current) return;
     
-    const franchiseNameText = currentFranchise?.printName || currentFranchise?.name || "Rajhans Steel Water";
-    const cleanMobile = bill.customerMobile ? bill.customerMobile.replace(/\D/g, '') : '';
-    const phone = cleanMobile.startsWith('91') ? cleanMobile : `91${cleanMobile}`;
-    
-    const orderUrl = `${window.location.origin}/?o=${bill.id}`;
-    const message = `🙏 *Greetings from ${franchiseNameText}* 💧\n\nThank you for choosing us for pure and quality drinking water! Here is your thermal bill #${bill.billNumber} for amount *₹${bill.grandTotal}*.\n\n*🌐 LIVE STATUS & REBOOK LINK:*\n👉 ${orderUrl}\n\nHave a wonderful and healthy day! 🙏🌸`;
-
     try {
-      // Capture the thermal receipt as JPEG
-      const dataUrl = await toJpeg(thermalRef.current, { 
-        quality: 0.95,
-        backgroundColor: '#ffffff',
-        pixelRatio: 2 // Higher quality
-      });
-      
-      const blob = await (await fetch(dataUrl)).blob();
       const fileName = `Token_${bill.billNumber}.jpg`;
-      let file: any;
-      try {
-        if (typeof window.File === 'function') {
-          try {
-            file = new File([blob], fileName, { type: 'image/jpeg' });
-          } catch (fileConstructErr) {
-            console.warn('File constructor failed, falling back to blob');
-            file = blob;
-          }
-        } else {
-          file = blob;
-        }
-      } catch (e) {
-        file = blob;
-      }
-
-      let canShareFile = false;
-      try {
-        if (navigator.canShare) {
-          canShareFile = navigator.canShare({ files: [file] });
-        }
-      } catch (canShareErr) {
-        console.warn('canShare check failed', canShareErr instanceof Error ? canShareErr.message : String(canShareErr));
-        canShareFile = false;
-      }
-
-      // Try Web Share API (Best for Mobile WhatsApp)
-      if (navigator.share && canShareFile) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: `Bill #${bill.billNumber}`,
-            text: message
-          });
-          return;
-        } catch (shareErr: any) {
-          if (shareErr.name === 'AbortError') {
-            console.log('Share canceled by user');
-            return; // Exit silently
-          }
-          console.warn('Web Share failed, trying fallback:', shareErr instanceof Error ? shareErr.message : String(shareErr));
-        }
-      }
-
-      // Fallback: Download and Send Message
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = fileName;
-      link.click();
-
-      const waUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-      window.open(waUrl, '_blank');
-      alert(`Bill Image Downloaded! 📸 & WhatsApp opened!\n\nPlease paste (Ctrl+V) it in the WhatsApp chat if needed.`);
+      await shareOrDownloadBillImage(thermalRef.current, fileName, `Bill #${bill.billNumber}`);
     } catch (err: any) {
-      console.error('Error sharing image:', err?.message || String(err));
-      const waUrl = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+      console.error('Error sharing receipt image:', err?.message || String(err));
+    } finally {
+      const waUrl = getWhatsAppBillLink(bill, currentFranchise);
       window.open(waUrl, '_blank');
     }
   };

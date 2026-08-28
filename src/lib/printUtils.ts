@@ -139,3 +139,54 @@ export const printThermalReceipt = async (element: HTMLElement) => {
   });
 };
 
+/**
+ * Renders an HTML receipt element into a high-res image and triggers Web Share API or download fallback.
+ */
+export const shareOrDownloadBillImage = async (
+  element: HTMLElement,
+  fileName: string = 'Thermal_Receipt.jpg',
+  title: string = 'Tanker Receipt'
+): Promise<{ success: boolean; dataUrl?: string; error?: string }> => {
+  try {
+    const html2canvas = (await import('html2canvas')).default;
+    const canvas = await html2canvas(element, {
+      scale: 2.5,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    });
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+    // Try Web Share API if supported and has file capabilities
+    const blob = await (await fetch(dataUrl)).blob();
+    const file = new File([blob], fileName, { type: 'image/jpeg' });
+
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          title,
+          files: [file],
+        });
+        return { success: true, dataUrl };
+      } catch (shareErr: any) {
+        if (shareErr.name === 'AbortError') {
+          return { success: true, dataUrl };
+        }
+      }
+    }
+
+    // Direct download fallback
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    return { success: true, dataUrl };
+  } catch (err: any) {
+    console.error('Failed to generate / share receipt image:', err);
+    return { success: false, error: err.message || 'Image generation failed' };
+  }
+};
+

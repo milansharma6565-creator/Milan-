@@ -49,7 +49,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { formatCurrency, PAYMENT_MODES, generateBillNumber, getPublicAppUrl, copyToClipboard } from '../constants';
 import { startOfDay, endOfDay, subDays, format, differenceInDays, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, isSameMonth, isToday, subMonths, addMonths } from 'date-fns';
 import { generatePDF } from '../lib/pdfUtils';
-import { printThermalReceipt } from '../lib/printUtils';
+import { printThermalReceipt, shareOrDownloadBillImage } from '../lib/printUtils';
 import { openWhatsAppDirect, dispatchWhatsAppLifecycleEvent, getWhatsAppDispatchText } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { InstallPWA } from './InstallPWA';
@@ -698,7 +698,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     const totalDeliveredSale = Math.max(calculatedTotalSale, totalLedgerSalesAccBalance);
 
     // Manual/quick cash/bank adjustments from non-bill vouchers for collection boxes
-    let todayCashAdjustment = 0;
+    let todayCashDr = 0; // Today Cash Inflow from Vouchers (Receipts / Dr)
+    let todayCashCr = 0; // Today Cash Outflow from Vouchers (Payments / Cr)
     let todayBankAdjustment = 0;
     vouchersList.forEach(vch => {
       if (isSameDate(vch.date, vch.createdAt, todayStr)) {
@@ -714,8 +715,8 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
             const isBankAcc = nameLower.includes('bank') || nameLower.includes('baroda') || nameLower.includes('bob') || nameLower.includes('sbi') || nameLower.includes('hdfc') || nameLower.includes('axis') || nameLower.includes('icici');
             
             if (isCashAcc) {
-              if (item.type === 'Dr') todayCashAdjustment += Number(item.amount || 0);
-              else if (item.type === 'Cr') todayCashAdjustment -= Number(item.amount || 0);
+              if (item.type === 'Dr') todayCashDr += Number(item.amount || 0);
+              else if (item.type === 'Cr') todayCashCr += Number(item.amount || 0);
             } else if (isBankAcc) {
               if (item.type === 'Dr') todayBankAdjustment += Number(item.amount || 0);
               else if (item.type === 'Cr') todayBankAdjustment -= Number(item.amount || 0);
@@ -729,17 +730,39 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
       .filter(b => b.paymentMode !== 'Pending' && b.status !== 'Cancelled')
       .reduce((sum, b) => sum + Number(b.grandTotal || 0), 0) + todayHydrantCash + todayHydrantBank;
 
-    const todayCashCollection = todayBillsList
-      .filter(b => b.paymentMode === 'Cash' && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + Number(b.grandTotal || 0), 0) + todayHydrantCash + todayCashAdjustment;
+    // Today's Cash Inflow (Cash Deliveries + Split Cash + Hydrant Cash + Today Cash Receipts)
+    const todayCashInflow = todayBillsList
+      .filter(b => b.status !== 'Cancelled')
+      .reduce((sum, b) => {
+        if (b.paymentMode === 'Cash') return sum + Number(b.grandTotal || 0);
+        if (b.paymentMode === 'Split' && b.splitPayments) return sum + Number(b.splitPayments.cash || 0);
+        return sum;
+      }, 0) + todayHydrantCash + todayCashDr;
+
+    // Today's Cash Outflow (Cash Payments / Expenses paid today)
+    const todayCashOutflow = todayCashCr;
+
+    // Today's Cash Logic:
+    // Today's generated cash is (Inflow - Outflow). If outflow exceeds today's inflow,
+    // the excess is paid from previous cash reserve, so Today's Cash stays >= 0.
+    const todayCashCollection = Math.max(0, todayCashInflow - todayCashOutflow);
+    const paidFromPreviousCash = Math.max(0, todayCashOutflow - todayCashInflow);
 
     const todayBankCollection = todayBillsList
-      .filter(b => (b.paymentMode === 'UPI' || b.paymentMode === 'Bank Transfer') && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + Number(b.grandTotal || 0), 0) + todayHydrantBank + todayBankAdjustment;
+      .filter(b => b.status !== 'Cancelled')
+      .reduce((sum, b) => {
+        if (b.paymentMode === 'UPI' || b.paymentMode === 'Bank Transfer') return sum + Number(b.grandTotal || 0);
+        if (b.paymentMode === 'Split' && b.splitPayments) return sum + Number(b.splitPayments.upi || 0) + Number(b.splitPayments.bank || 0);
+        return sum;
+      }, 0) + todayHydrantBank + todayBankAdjustment;
 
     const todayPendingCollection = todayBillsList
-      .filter(b => (b.paymentMode === 'Pending' || !b.isSettled) && b.status !== 'Cancelled')
-      .reduce((sum, b) => sum + Number(b.grandTotal || 0), 0) + todayHydrantPending;
+      .filter(b => b.status !== 'Cancelled')
+      .reduce((sum, b) => {
+        if (b.paymentMode === 'Pending') return sum + Number(b.grandTotal || 0);
+        if (b.paymentMode === 'Split' && b.splitPayments) return sum + Number(b.splitPayments.pending || 0);
+        return sum;
+      }, 0) + todayHydrantPending;
       
     const totalPending = accounts
       .filter(acc => {
@@ -757,7 +780,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
           c.name.trim().toLowerCase() === acc.name.trim().toLowerCase()
         );
         const grp = (acc.group || '').trim().toLowerCase();
-        return (isCustomer || grp === 'sundry debtors') ? sum + bal : sum;
+        if (isCustomer || grp === 'sundry debtors') {
+          // Only add positive dues (outstanding market debt), avoiding subtracting customer advances / Cr balances
+          return sum + Math.max(0, bal);
+        }
+        return sum;
       }, 0);
 
     const deliveredCount = bills.filter(b => b.status === 'Delivered').length;
@@ -893,6 +920,9 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     return {
       todayCollection,
       todayCashCollection,
+      todayCashInflow,
+      todayCashOutflow,
+      paidFromPreviousCash,
       todayBankCollection,
       todayPendingCollection,
       totalPending,
@@ -3483,92 +3513,11 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
     if (!printRef.current) return;
     
     try {
-      // Capture the thermal receipt as JPEG
-      const dataUrl = await toJpeg(printRef.current, { 
-        quality: 0.95,
-        backgroundColor: '#ffffff',
-        pixelRatio: 2 // Higher quality
-      });
-      
-      const blob = await (await fetch(dataUrl)).blob();
       const fileName = `Token_${bill.billNumber}.jpg`;
-      let file: any;
-      // Handle file constructor safely with double guards for 'Illegal constructor'
-      try {
-        if (typeof window.File === 'function') {
-          try {
-            file = new File([blob], fileName, { type: 'image/jpeg' });
-          } catch (fileConstructErr) {
-            console.warn('File constructor failed, falling back to blob');
-            file = blob;
-          }
-        } else {
-          file = blob;
-        }
-      } catch (e) {
-        file = blob;
-      }
-
-      let canShareFile = false;
-      try {
-        if (navigator.canShare) {
-          canShareFile = navigator.canShare({ files: [file] });
-        }
-      } catch (canShareErr) {
-        console.warn('canShare check failed', canShareErr instanceof Error ? canShareErr.message : String(canShareErr));
-        canShareFile = false;
-      }
-
-      // Try Web Share API (Best for Mobile WhatsApp)
-      if (navigator.share && canShareFile) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: `Bill #${bill.billNumber}`,
-            text: `Trip Token from TankerWala Powered by Rajhans. Target: ${target.toUpperCase()}`
-          });
-          return;
-        } catch (shareErr: any) {
-          if (shareErr.name === 'AbortError') return;
-          console.warn('Web Share failed, trying fallback:', shareErr instanceof Error ? shareErr.message : String(shareErr));
-        }
-      }
-
-      // Try Copy to Clipboard with robust constructor check
-      try {
-        if (navigator.clipboard && typeof window.ClipboardItem === 'function') {
-          try {
-            // Use a local let to avoid potential scope issues with the constructor
-            const ClipboardItemConstructor = window.ClipboardItem;
-            const item = new ClipboardItemConstructor({ [blob.type]: blob });
-            await navigator.clipboard.write([item]);
-            alert('Token image copied! Opening WhatsApp... Just Paste (Ctrl+V) and send.');
-          } catch (itemErr) {
-            // Fallback for browsers that support clipboard.write but failed constructor
-            const link = document.createElement('a');
-            link.href = dataUrl;
-            link.download = fileName;
-            link.click();
-          }
-        } else {
-          // Navigator.clipboard.write is not supported or ClipboardItem is not a constructor
-          const link = document.createElement('a');
-          link.href = dataUrl;
-          link.download = fileName;
-          link.click();
-        }
-      } catch (err: any) {
-        console.warn('Clipboard share failed', err instanceof Error ? err.message : String(err));
-        const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = fileName;
-        link.click();
-      }
-
-      // Open WhatsApp text as fallback
-      sendWhatsApp(bill, target);
+      await shareOrDownloadBillImage(printRef.current, fileName, `Trip Token #${bill.billNumber}`);
     } catch (err: any) {
-      console.error('Error sharing image:', err?.message || String(err));
+      console.error('Error sharing receipt image:', err?.message || String(err));
+    } finally {
       sendWhatsApp(bill, target);
     }
   };
@@ -3952,22 +3901,19 @@ export function Dashboard({ franchiseId, isSuperAdmin, commissionPercentage, set
               <div className="bg-emerald-50 text-emerald-600 w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm">
                 <Banknote size={24} />
               </div>
-              <div className={`text-right flex flex-col items-end border rounded-2xl p-1.5 px-3 shadow-sm ${
-                (stats.todayCashCollection || 0) < 0 
-                  ? 'bg-red-50 border-red-100' 
-                  : 'bg-emerald-50 border-emerald-100'
-              }`}>
-                <span className={`text-[9px] uppercase font-black tracking-wider ${
-                  (stats.todayCashCollection || 0) < 0 ? 'text-red-600' : 'text-emerald-600'
-                }`}>
-                  {(stats.todayCashCollection || 0) < 0 ? "Today's Outflow" : "Today's Cash Flow"}
+              <div className="text-right flex flex-col items-end border border-emerald-100 bg-emerald-50/80 rounded-2xl p-1.5 px-3 shadow-sm">
+                <span className="text-[9px] uppercase font-black tracking-wider text-emerald-600">
+                  Today's Cash
                 </span>
-                <span className={`text-sm font-black flex items-center gap-0.5 mt-0.5 ${
-                  (stats.todayCashCollection || 0) < 0 ? 'text-red-700' : 'text-emerald-700'
-                }`}>
-                  <span className="text-xs font-bold">{(stats.todayCashCollection || 0) < 0 ? '-' : '+'}₹</span>
-                  {Number(Math.abs(stats.todayCashCollection || 0)).toLocaleString()}
+                <span className="text-sm font-black flex items-center gap-0.5 mt-0.5 text-emerald-700">
+                  <span className="text-xs font-bold">+₹</span>
+                  {Number(stats.todayCashCollection || 0).toLocaleString()}
                 </span>
+                {(stats.paidFromPreviousCash || 0) > 0 && (
+                  <span className="text-[8px] font-bold text-slate-500 mt-0.5">
+                    (₹{Number(stats.paidFromPreviousCash || 0).toLocaleString()} from prev. cash)
+                  </span>
+                )}
               </div>
             </div>
 

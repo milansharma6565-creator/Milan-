@@ -19,11 +19,24 @@ process.on("unhandledRejection", (reason, promise) => {
 export const app = express();
 const PORT = 3000;
 
-// Security Headers
+// Security Headers & Full Cross-Origin Resource Sharing (CORS) for Vercel/External Frontends
 app.use((req, res, next) => {
+  const origin = req.headers.origin as string;
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-XSS-Protection", "1; mode=block");
   res.setHeader("X-Powered-By", "TankerWala Secure Node Engine");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
   next();
 });
 

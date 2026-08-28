@@ -18,10 +18,14 @@ import {
   Zap,
   Sliders,
   FileText,
-  X
+  X,
+  Server,
+  Globe,
+  Activity,
+  Save
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { whatsappService, WhatsAppStatusResponse } from '../services/whatsappService';
+import { whatsappService, WhatsAppStatusResponse, getApiBaseUrl } from '../services/whatsappService';
 import { WhatsAppTemplatesManager } from './WhatsAppTemplatesManager';
 import { Customer } from '../types';
 
@@ -43,6 +47,12 @@ export function WhatsAppAutomationCenter({
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Backend Server Config State (for Vercel / Cloud persistence)
+  const [backendUrl, setBackendUrl] = useState<string>(() => whatsappService.getCustomBackendUrl());
+  const [showServerSettings, setShowServerSettings] = useState<boolean>(false);
+  const [serverTesting, setServerTesting] = useState<boolean>(false);
+  const [serverTestResult, setServerTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
 
   // Test Message State
   const [testPhone, setTestPhone] = useState('');
@@ -160,6 +170,33 @@ export function WhatsAppAutomationCenter({
     } finally {
       setActionLoading(false);
     }
+  };
+
+  // Test custom backend server connection
+  const handleTestBackendServer = async () => {
+    setServerTesting(true);
+    setServerTestResult(null);
+    try {
+      const res = await whatsappService.testBackendConnection(backendUrl);
+      setServerTestResult(res);
+      if (res.success) {
+        showToast(`Backend online! (${res.latencyMs}ms latency)`);
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      setServerTestResult({ success: false, message: err.message || 'Connection failed' });
+      showToast('Backend connection failed', 'error');
+    } finally {
+      setServerTesting(false);
+    }
+  };
+
+  // Save custom backend server URL
+  const handleSaveBackendServer = () => {
+    whatsappService.setCustomBackendUrl(backendUrl);
+    showToast(backendUrl.trim() ? 'Backend Server URL updated and saved!' : 'Reset to default domain API.');
+    fetchStatus();
   };
 
   // Handle Send Test Message
@@ -639,6 +676,80 @@ export function WhatsAppAutomationCenter({
                     <span>Festival Bulk Broadcast</span>
                   </div>
                 </div>
+              </div>
+
+              {/* Vercel & Persistent Backend Server Host Configuration */}
+              <div className="bg-slate-900 text-slate-200 rounded-3xl p-5 border border-slate-800 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Server size={16} className="text-emerald-400" />
+                    <h4 className="font-black text-white text-xs">Persistent Backend Engine URL</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowServerSettings(!showServerSettings)}
+                    className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer"
+                  >
+                    {showServerSettings ? 'Hide Config' : 'Configure Server (Vercel / Cloud)'}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-relaxed font-normal">
+                  Active Backend: <span className="text-emerald-400 font-mono font-bold">{getApiBaseUrl() || 'Auto (Same Host / Local Server)'}</span>
+                </p>
+
+                {showServerSettings && (
+                  <div className="pt-2 border-t border-slate-800 space-y-3">
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block mb-1">
+                        Node.js Server URL (e.g. https://your-backend.onrender.com)
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                          <input
+                            type="url"
+                            placeholder="Leave empty for Auto / Same Domain"
+                            value={backendUrl}
+                            onChange={(e) => setBackendUrl(e.target.value)}
+                            className="w-full pl-8 pr-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs font-mono text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleSaveBackendServer}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1 transition-all cursor-pointer"
+                        >
+                          <Save size={13} />
+                          Save
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleTestBackendServer}
+                        disabled={serverTesting}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <Activity size={13} className={serverTesting ? 'animate-spin text-emerald-400' : 'text-emerald-400'} />
+                        {serverTesting ? 'Testing Ping...' : 'Test Server Ping'}
+                      </button>
+
+                      {serverTestResult && (
+                        <span className={`text-[11px] font-bold ${serverTestResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {serverTestResult.success ? `✓ Online (${serverTestResult.latencyMs}ms)` : '✕ Unreachable'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="p-3 bg-slate-800/80 rounded-xl border border-slate-700/60 text-[10px] text-slate-300 space-y-1 leading-relaxed">
+                      <p className="font-bold text-white">💡 Vercel Deployment Note:</p>
+                      <p>Vercel is serverless (shuts down sockets). Deploy your backend on Render/Railway (free) and paste your server URL here or set <code className="text-emerald-400 bg-slate-900 px-1 py-0.5 rounded">VITE_API_URL</code> on Vercel.</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

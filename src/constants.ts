@@ -47,6 +47,23 @@ export function generateBillNumber(sequence: number = 1) {
   return sequence.toString().padStart(5, '0');
 }
 
+/**
+ * Calculates the next unique 5-digit formatted bill number given existing bills.
+ * Avoids duplicate and inconsistent sequence scanning across components.
+ */
+export function getNextBillNumber(existingBills: { billNumber?: string }[] = []): string {
+  let highestNum = 0;
+  for (const b of existingBills) {
+    if (!b || !b.billNumber) continue;
+    const cleanStr = String(b.billNumber).replace(/\D/g, '');
+    const parsed = parseInt(cleanStr, 10);
+    if (!isNaN(parsed) && parsed > highestNum) {
+      highestNum = parsed;
+    }
+  }
+  return generateBillNumber(highestNum + 1);
+}
+
 export function getPublicAppUrl() {
   const currentUrl = window.location.href;
   try {
