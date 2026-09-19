@@ -374,7 +374,8 @@ export function WhatsAppAutomationCenter({
 
   const filteredCustomers = customers.filter((c) =>
     c.name.toLowerCase().includes(searchCustomer.toLowerCase()) ||
-    c.mobile.includes(searchCustomer)
+    c.mobile.includes(searchCustomer) ||
+    (c.secondaryMobiles?.some(m => m.includes(searchCustomer)) || false)
   );
 
   const isConnected = statusData?.status === 'connected' || Boolean(statusData?.user?.phone);

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, where, orderBy, runTransaction, getDocs, deleteDoc, getDoc } from 'firebase/firestore';
 import { Customer, Bill, LedgerEntry, Account } from '../types';
-import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare, Minus, Lock } from 'lucide-react';
+import { Plus, Search, Building2, Phone, MapPin, IndianRupee, Download, UserPlus, Users, Clock, ArrowLeft, Calendar, CheckCircle2, XCircle, Printer, Edit2, Trash2, MessageSquare, Minus, Lock, GitMerge } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../constants';
 import { generatePDF, addSwanWatermarkToPDF } from '../lib/pdfUtils';
@@ -10,6 +10,7 @@ import { printThermalReceipt } from '../lib/printUtils';
 import { openWhatsAppDirect } from '../lib/whatsappUtils';
 import { ThermalInvoice } from './ThermalInvoice';
 import { ConfirmationModal } from './ConfirmationModal';
+import { CustomerMergeModal } from './CustomerMergeModal';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { startOfMonth, endOfMonth, format } from 'date-fns';
@@ -58,6 +59,9 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
   const [validationError, setValidationError] = useState<{ name?: string; mobile?: string }>({});
   const [showOnlyPendingDues, setShowOnlyPendingDues] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [mergeInitialCustomer, setMergeInitialCustomer] = useState<Customer | null>(null);
+  const [mergeToast, setMergeToast] = useState<{ visible: boolean; message: string } | null>(null);
 
   // Real-time duplicate checking for New Customer
   useEffect(() => {
@@ -482,6 +486,17 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
           </div>
           <div className="flex gap-2 items-center">
             <button
+              onClick={() => {
+                setMergeInitialCustomer(null);
+                setIsMergeModalOpen(true);
+              }}
+              className="h-12 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center gap-2 text-xs font-black shadow-lg shadow-indigo-600/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              title="Merge Duplicate Customer Accounts & Ledgers (ग्राहकों को मर्ज करें)"
+            >
+              <GitMerge size={18} />
+              <span className="hidden sm:inline">Merge Customers</span>
+            </button>
+            <button
               onClick={() => setShowWhatsAppModal(true)}
               className="h-12 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl flex items-center gap-2 text-xs font-black shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 active:scale-95 cursor-pointer"
               title="WhatsApp Bulk Broadcast & Festival Wishes"
@@ -653,6 +668,17 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
+                            setMergeInitialCustomer(customer);
+                            setIsMergeModalOpen(true);
+                          }}
+                          className="p-1 px-2.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-all"
+                          title="Merge into another customer (मर्ज करें)"
+                        >
+                          <GitMerge size={14} />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
                             if (customer.id) setDeleteConfirm({ id: customer.id, name: customer.name });
                           }}
                           className="p-1 px-2.5 bg-slate-100 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
@@ -669,6 +695,21 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
                       <Phone size={14} />
                       <span>+91 {customer.mobile}</span>
                     </a>
+                    {customer.secondaryMobiles && customer.secondaryMobiles.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5" onClick={(e) => e.stopPropagation()}>
+                        {customer.secondaryMobiles.map((num) => (
+                          <a
+                            key={num}
+                            href={`tel:${num}`}
+                            className="inline-flex items-center gap-1 text-[10px] font-mono font-bold bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 px-2 py-0.5 rounded-md transition-colors border border-slate-200/60"
+                            title="Linked Secondary Number (मर्ज किया गया नंबर)"
+                          >
+                            <Phone size={9} className="text-slate-400" />
+                            <span>+91 {num}</span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="text-right">
                     <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Total Pending</div>
@@ -1095,6 +1136,58 @@ export function CustomerManagement({ franchiseId, isSuperAdmin }: { franchiseId?
               />
             </motion.div>
           </div>
+        )}
+
+        {/* Customer Merge Modal */}
+        {isMergeModalOpen && (
+          <CustomerMergeModal
+            customers={customers}
+            accounts={accounts}
+            initialPrimaryCustomer={null}
+            initialSecondaryCustomer={mergeInitialCustomer}
+            franchiseId={franchiseId}
+            onClose={() => {
+              setIsMergeModalOpen(false);
+              setMergeInitialCustomer(null);
+            }}
+            onSuccess={(result, primaryName, secondaryName) => {
+              setIsMergeModalOpen(false);
+              setMergeInitialCustomer(null);
+              setMergeToast({
+                visible: true,
+                message: `Merged "${secondaryName}" into "${primaryName}"! Cumulative balance is ₹${result.combinedPendingAmount.toLocaleString('en-IN')}. Transferred ${result.billsTransferred} bills and updated ${result.vouchersUpdated} ledger vouchers.`
+              });
+              setTimeout(() => {
+                setMergeToast(null);
+              }, 7000);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Merge Success Floating Toast Notification */}
+      <AnimatePresence>
+        {mergeToast?.visible && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 right-6 left-6 sm:left-auto sm:max-w-md z-[300] bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 flex items-start gap-3"
+          >
+            <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 mt-0.5">
+              <CheckCircle2 size={18} />
+            </div>
+            <div className="flex-1">
+              <h5 className="font-bold text-sm text-emerald-400">Customer Accounts Merged</h5>
+              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">{mergeToast.message}</p>
+            </div>
+            <button
+              onClick={() => setMergeToast(null)}
+              className="text-slate-400 hover:text-white p-1"
+            >
+              <XCircle size={16} />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
