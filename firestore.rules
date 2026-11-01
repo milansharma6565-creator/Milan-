@@ -1,392 +1,169 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ---------------------------------------------------------
+    // -------------------------------------------------------------
     // GLOBAL HELPERS
-    // ---------------------------------------------------------
+    // -------------------------------------------------------------
     function getEmail() {
       return request.auth.token.get('email', '').lower();
     }
-    function isSignedIn() { 
+    function isSignedIn() {
       return request.auth != null;
     }
     function isAuthorizedUser() {
-      return isSignedIn() && 
-             (getEmail() == 'rajhanssikar@gmail.com' || 
-              getEmail() == 'milan.sharma6565@gmail.com' ||
-              request.auth.uid == 'R3YQrAUh1tTGp0ghlwT7hgQ4Nm52'); 
+      return isSignedIn() &&
+        (getEmail() == 'rajhanssikar@gmail.com' ||
+         getEmail() == 'milan.sharma6565@gmail.com' ||
+         request.auth.uid == 'R3YQrAUh1TGp0ghlwT7hgQ4Nm52');
     }
-    function isAdmin() { 
-      return isAuthorizedUser(); 
+    function isAdmin() {
+      return isAuthorizedUser();
     }
     function isSuperAdmin() {
-      return request.auth != null && 
-             (getEmail() == 'milan.sharma6565@gmail.com' ||
-              request.auth.uid == 'R3YQrAUh1tTGp0ghlwT7hgQ4Nm52');
+      return request.auth != null &&
+        (getEmail() == 'milan.sharma6565@gmail.com' ||
+         request.auth.uid == 'R3YQrAUh1TGp0ghlwT7hgQ4Nm52');
     }
     function isFranchiseOwner(fId) {
-      return isSignedIn() && 
-             (isSuperAdmin() || 
-              (fId != null && fId != '' && fId != 'legacy-rajhans' && fId != 'legacy-pile' && exists(/databases/$(database)/documents/franchises/$(fId)) && 
-               get(/databases/$(database)/documents/franchises/$(fId)).data.email.lower() == getEmail() &&
-               get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active') ||
-              ((fId == null || fId == '' || fId == 'legacy-rajhans' || fId == 'legacy-pile' || fId == 'rajhans') && getEmail() == 'rajhanssikar@gmail.com') ||
-              (fId == 'legacy-pile' && getEmail() == 'rajhanspilefoundation@gmail.com'));
-    }
-    function isFranchiseActive(fId) {
-      return fId == null || fId == '' || fId == 'legacy-rajhans' || fId == 'legacy-pile' ||
-             (exists(/databases/$(database)/documents/franchises/$(fId)) && 
-              get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active');
+      return isSignedIn() &&
+        (isSuperAdmin() ||
+         (fId != null && fId != '' && fId != 'legacy-rajhans' && fId != 'legacy-pile' && exists(/databases/$(database)/documents/franchises/$(fId)) &&
+          get(/databases/$(database)/documents/franchises/$(fId)).data.email.lower() == getEmail() &&
+          get(/databases/$(database)/documents/franchises/$(fId)).data.status == 'Active') ||
+         ((fId == null || fId == '' || fId == 'legacy-rajhans' || fId == 'legacy-pile' || fId == 'rajhans') && getEmail() == 'rajhanssikar@gmail.com') ||
+         (fId == 'legacy-pile' && getEmail() == 'rajhanspilefoundation@gmail.com'));
     }
     function isFranchiseAuthorized(fId) {
-      return isSuperAdmin() || isFranchiseOwner(fId);
-    }
-    function isValidId(id) { 
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
-    }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-
-    function isTimestampValid(field) {
-      return !incoming().diff(existing()).affectedKeys().hasAny([field]) || 
-             incoming()[field] == request.time;
+      return isFranchiseOwner(fId) || isAdmin();
     }
 
-    // ---------------------------------------------------------
-    // DEFAULT DENY
-    // ---------------------------------------------------------
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    match /franchises/{fId} {
-      allow get: if true; 
-      allow list: if isSuperAdmin() || (isSignedIn() && (resource.data.status == 'Active' || resource.data.email.lower() == getEmail()));
-      allow create: if isSuperAdmin() || (isSignedIn() && incoming().email.lower() == getEmail());
-      allow delete: if isSuperAdmin();
-      allow update: if isSuperAdmin() || (isSignedIn() && existing().email.lower() == getEmail() && existing().status == 'Active');
-    }
-
-    // ---------------------------------------------------------
+    // -------------------------------------------------------------
     // VALIDATION HELPERS
-    // ---------------------------------------------------------
+    // -------------------------------------------------------------
     function isValidCustomer(data) {
-      return data.keys().hasAll(['name', 'mobile']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             data.mobile is string && data.mobile.size() >= 10 && data.mobile.size() <= 15 &&
-             (data.get('pendingAmount', 0) is number) &&
-             (data.get('lastRate', 0) is number) &&
-             (data.get('createdAt', request.time) == request.time);
+      return data.name is string && data.name.size() > 0;
     }
-
     function isValidBill(data) {
-      return data.billNumber is string &&
-             data.customerId is string &&
-             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN', 'MONTHLY_CAN', 'DONATION'] &&
-             data.grandTotal is number &&
-             data.status in ['Pending', 'Accepted', 'Assigned', 'Filling', 'On the way', 'Reached', 'Delivered', 'Cancelled', 'Printed'] &&
-             (data.get('remarks', '').size() <= 2000) &&
-             (data.get('createdAt', request.time) == request.time);
+      return data.billNo != null;
     }
-
-    function isValidTrip(data) {
-      return data.billId is string &&
-             data.driverId is string &&
-             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN', 'MONTHLY_CAN', 'DONATION'] &&
-             data.status in ['Active', 'Filling', 'On the way', 'Reached', 'Delivered'] &&
-             (data.get('createdAt', request.time) == request.time);
-    }
-
-    function isValidDriver(data) {
-      return data.keys().hasAll(['name', 'mobile']) &&
-             data.name is string &&
-             data.mobile is string;
-    }
-
-    function isValidAttendance(data) {
-      return data.keys().hasAll(['driverId', 'status', 'date']) &&
-             data.driverId is string && isValidId(data.driverId) &&
-             data.status in ['Full Day', 'Half Day', 'Absent'] &&
-             (data.get('createdAt', request.time) == request.time);
-    }
-
-    function isValidTractor(data) {
-      return data.keys().hasAll(['name', 'vehicleNumber']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             data.vehicleNumber is string && data.vehicleNumber.size() > 0;
-    }
-
-    function isValidLog(data) {
-      return data.keys().hasAll(['tractorId', 'amount', 'date']) &&
-             data.tractorId is string && isValidId(data.tractorId) &&
-             data.amount is number && data.amount >= 0 &&
-             (data.get('createdAt', request.time) == request.time);
-    }
-
     function isValidLedger(data) {
-      return data.keys().hasAll(['amount', 'type', 'category', 'date']) &&
-             data.amount is number && data.amount >= 0 &&
-             data.type in ['Income', 'Expense'] &&
-             (data.get('paymentMode', 'Cash') in ['Cash', 'UPI', 'Bank Transfer']) &&
-             data.date is string &&
-             (data.get('createdAt', request.time) == request.time);
+      return data.amount is number;
     }
-
-    function isValidDriverLocation(data) {
-      return data.keys().hasAll(['driverId', 'driverName', 'latitude', 'longitude', 'isActive']) &&
-             data.driverId is string && isValidId(data.driverId) &&
-             data.driverName is string &&
-             data.latitude is number && data.longitude is number &&
-             data.isActive is bool &&
-             (data.get('lastUpdated', request.time) == request.time);
-    }
-
-    function isValidBookingRequest(data) {
-      return data.keys().hasAll(['billId', 'customerId', 'status', 'customerName', 'category', 'requestedAt']) &&
-             data.billId is string &&
-             data.customerId is string && isValidId(data.customerId) &&
-             data.category in ['TANKER', 'STANDBY_TANKER', 'MONTHLY_TANKER', 'BOTTLE', 'CAN', 'MONTHLY_CAN', 'DONATION'] &&
-             data.status in ['Pending', 'Accepted', 'Rejected'] &&
-             (data.get('remarks', '').size() <= 500) &&
-             (data.get('requestedAt', request.time) == request.time);
-    }
-
     function isValidAccountGroup(data) {
-      return data.keys().hasAll(['name', 'type']) &&
-             data.name is string &&
-             data.type in ['Asset', 'Liability', 'Income', 'Expense', 'Equity'];
+      return data.groupName is string && data.groupName.size() > 0;
     }
-
     function isValidAccount(data) {
-      return data.keys().hasAll(['name', 'groupId', 'openingBalance', 'balanceType']) &&
-             data.name is string &&
-             data.groupId is string &&
-             data.openingBalance is number &&
-             data.balanceType in ['Dr', 'Cr'];
+      return data.accountName is string && data.accountName.size() > 0;
     }
-
     function isValidVoucher(data) {
-      return data.keys().hasAll(['voucherNumber', 'date', 'type', 'items', 'totalAmount']) &&
-             data.voucherNumber is string &&
-             data.type in ['Receipt', 'Payment', 'Journal', 'Contra', 'Sales', 'Purchase'] &&
-             data.items is list && data.items.size() >= 2 &&
-             data.totalAmount is number && data.totalAmount >= 0 &&
-             (data.get('createdAt', request.time) == request.time);
+      return data.voucherNo != null;
     }
-
-    function isValidHydrantFilling(data) {
-      return data.keys().hasAll(['tokenNumber', 'date', 'type', 'partyName', 'rate', 'quantity', 'totalAmount', 'paymentMode', 'status']) &&
-             data.tokenNumber is string &&
-             data.type in ['Inward', 'Outward'] &&
-             data.partyName is string && data.partyName.size() > 0 &&
-             data.rate is number && data.rate >= 0 &&
-             data.quantity is number && data.quantity > 0 &&
-             data.totalAmount is number && data.totalAmount >= 0 &&
-             data.paymentMode in ['Cash', 'Bank', 'Udhaar'] &&
-             data.status in ['Completed', 'Pending'] &&
-             (data.get('createdAt', request.time) == request.time);
+    function isValidCounter(data) {
+      return data.currentValue is number || data.count is number || data.lastNo is number;
     }
-
-    function isValidDieselRequest(data) {
-      return data.keys().hasAll(['amount', 'liters', 'status']) &&
-             data.amount is number &&
-             data.liters is number &&
-             data.status in ['Pending', 'Approved', 'Rejected'] &&
-             (data.get('createdAt', request.time) == request.time);
+    function isValidTenderBid(data) {
+      return data.tenderId != null;
     }
-
-    function isValidBankStatementRule(data) {
-      return data.keys().hasAll(['pattern', 'accountId', 'accountName', 'type']) &&
-             data.pattern is string && data.pattern.size() > 0 && data.pattern.size() <= 200 &&
-             data.accountId is string && isValidId(data.accountId) &&
-             data.accountName is string && data.accountName.size() > 0 && data.accountName.size() <= 100 &&
-             data.type in ['Cr', 'Dr'] &&
-             (data.get('createdAt', request.time) == request.time);
+    function isValidCompiledTender(data) {
+      return data.title is string || data.tenderNo is string || data.tenderId != null;
     }
-
     function isValidPrintJob(data) {
-      return data.keys().hasAll(['billNumber', 'customerName', 'status']) &&
-             data.billNumber is string &&
-             data.customerName is string &&
-             data.status in ['pending', 'completed', 'cancelled'] &&
-             (data.get('createdAt', request.time) == request.time);
+      return data.status is string;
+    }
+    function isValidSmartMotor(data) {
+      return data.motorId is string || data.name is string || data.status is string;
     }
 
-    // ---------------------------------------------------------
+    // -------------------------------------------------------------
     // COLLECTIONS
-    // ---------------------------------------------------------
+    // -------------------------------------------------------------
 
-    match /bookingRequests/{requestId} {
-      allow list: if true;
-      allow get: if true;
-      allow create: if true; 
-      allow update: if isSignedIn();
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /chats/{billId} {
-      allow read, write: if true; // allow real-time customer and admin chat synced via billId
-    }
-
-
-    match /driverLocations/{driverId} {
-      allow get: if true;
-      allow list: if true;
-      allow create, update: if isValidId(driverId) && isValidDriverLocation(incoming()) &&
-                            exists(/databases/$(database)/documents/drivers/$(driverId));
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /customers/{customerId} {
-      allow get: if true;
-      allow list: if true; // Allowed for customer portal
-      allow create: if true; // Allowed for self-registration
-      allow update: if true; // Allowed for PIN setup
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /bills/{billId} {
-      allow get: if isValidId(billId); // Allow public view for rebooking
-      allow list: if true; // Allowed for customer portal
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidBill(incoming());
-      allow update: if true;
-      allow delete: if isFranchiseAuthorized(existing().get('franchiseId', null)) || getEmail() == 'rajhanssikar@gmail.com';
-    }
-
-    match /trips/{tripId} {
-      allow read: if true;
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidTrip(incoming());
-      allow update: if true; // Both admin and driver might update status (delivered)
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null)) || getEmail() == 'rajhanssikar@gmail.com';
-    }
-
-    match /drivers/{driverId} {
-      allow list, get: if true;
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null));
-      allow update: if true; // Allow drivers to set/update PIN
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /tractors/{tractorId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(tractorId) && isValidTractor(incoming());
-      allow update: if isFranchiseAuthorized(existing().get('franchiseId', null)) && isValidId(tractorId) && isValidTractor(incoming());
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /dieselLogs/{logId} {
-      allow get: if isSignedIn() && isValidId(logId);
-      allow list: if isSignedIn();
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(logId) && isValidLog(incoming());
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /maintenanceLogs/{logId} {
-      allow get: if isSignedIn() && isValidId(logId);
-      allow list: if isSignedIn();
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(logId) && isValidLog(incoming());
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /ledger/{entryId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update: if false; 
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /accountGroups/{groupId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /accounts/{accountId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /vouchers/{voucherId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isFranchiseAuthorized(existing().get('franchiseId', null)) || getEmail() == 'rajhanssikar@gmail.com';
-    }
-
-    match /attendance/{atId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /feedbacks/{id} {
-      allow create: if true;
-      allow read, update, delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null)) || isFranchiseAuthorized(incoming().get('franchiseId', null));
-    }
-
-    match /hydrantFillings/{fillingId} {
-      allow get: if isSignedIn() && isValidId(fillingId);
-      allow list: if isSignedIn();
-      allow create: if isFranchiseAuthorized(incoming().get('franchiseId', null)) && isValidId(fillingId) && isValidHydrantFilling(incoming());
-      allow update: if isFranchiseAuthorized(existing().get('franchiseId', null)) && isValidId(fillingId) && isValidHydrantFilling(incoming());
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /dieselRequests/{requestId} {
-      allow list: if true;
-      allow get: if true;
-      allow create: if true; 
-      allow update: if isSignedIn();
-      allow delete: if isSuperAdmin() || isFranchiseAuthorized(existing().get('franchiseId', null));
-    }
-
-    match /phone_sync_logs/{logId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /documents/{docId} {
-      allow read, create: if isSignedIn();
-      allow update, delete: if isAdmin();
-    }
-
-    match /settings/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /counters/{counterId} {
-      allow read, write: if true;
-    }
-
-    match /tenderBids/{bidId} {
-      allow read, write: if true;
-    }
-
-    match /compiledTenders/{tenderId} {
-      allow read, write: if true;
-    }
-
-    match /activities/{activityId} {
-      allow read, create: if true;
-      allow update, delete: if isSuperAdmin();
-    }
-
-    match /bankStatementRules/{ruleId} {
+    // Customers
+    match /customers/{docId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidBankStatementRule(incoming()) && (incoming().get('franchiseId', null) == null || isFranchiseAuthorized(incoming().get('franchiseId', null)));
-      allow delete: if isSignedIn() && (existing().get('franchiseId', null) == null || isFranchiseAuthorized(existing().get('franchiseId', null)));
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidCustomer(request.resource.data);
+      allow delete: if isAdmin();
     }
 
-    match /print_jobs/{jobId} {
-      allow read, write: if true;
+    // Bills
+    match /bills/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidBill(request.resource.data);
+      allow delete: if isAdmin();
     }
 
-    match /smartMotors/{motorId} {
-      allow read, write: if true;
-      match /logs/{logId} {
-        allow read, write: if true;
-      }
+    // Ledger
+    match /ledger/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidLedger(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Account Groups
+    match /accountGroups/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidAccountGroup(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Accounts
+    match /accounts/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidAccount(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Vouchers
+    match /vouchers/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidVoucher(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Counters
+    match /counters/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidCounter(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Tender Bids
+    match /tenderBids/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidTenderBid(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Compiled Tenders
+    match /compiledTenders/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidCompiledTender(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Print Jobs
+    match /print_jobs/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidPrintJob(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Smart Motors
+    match /smartMotors/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isFranchiseAuthorized(request.resource.data.franchiseId) && isValidSmartMotor(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Franchises
+    match /franchises/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // Catch-all fallback rule for other collections
+    match /{document=**} {
+      allow read, write: if isAdmin();
     }
   }
 }
