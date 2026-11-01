@@ -1,11 +1,7 @@
 {
   "name": "rajhans-steel-water",
   "private": true,
-  "version": "1.0.1",{
-  "name": "rajhans-steel-water",
-  "private": true,
-  "version": "1.0.1",
-  "type": "module",
+  "version": "1.0.1",{ype": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap",
